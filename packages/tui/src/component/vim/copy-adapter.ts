@@ -21,6 +21,7 @@ export type CopyModeAdapter = {
   exitVisual: () => void
   visualMode: () => undefined | CopyVisualMode
   move: (action: "up" | "down" | "left" | "right") => void
+  halfPage: (direction: "up" | "down") => void
   jump: (action: "top" | "bottom" | "high" | "middle" | "low") => void
   wordNext: (big: boolean) => boolean
   wordPrev: (big: boolean) => boolean

@@ -170,6 +170,7 @@ export function createVimHandler(input: {
   copyToggleCollapsed?: () => boolean
   copyActivate?: () => boolean
   copyIsVisual?: () => boolean
+  copyHalfPage?: (direction: "up" | "down") => void
   copyJump?: (action: VimJump) => void
   copyWordNext?: (big: boolean) => boolean
   copyWordPrev?: (big: boolean) => boolean
@@ -1957,7 +1958,9 @@ export function createVimHandler(input: {
     const scroll = vimScroll(event)
     if (scroll) {
       clearCopyPending()
-      input.scroll(scroll)
+      if (scroll === "half-down" && input.copyHalfPage) input.copyHalfPage("down")
+      else if (scroll === "half-up" && input.copyHalfPage) input.copyHalfPage("up")
+      else input.scroll(scroll)
       event.preventDefault()
       return true
     }

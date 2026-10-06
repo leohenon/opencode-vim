@@ -283,6 +283,9 @@ export function usePromptVim(opts: {
     copy(action) {
       opts.copy()?.move(action)
     },
+    copyHalfPage(direction) {
+      opts.copy()?.halfPage(direction)
+    },
     copyVisual(mode) {
       opts.copy()?.visual(mode)
     },

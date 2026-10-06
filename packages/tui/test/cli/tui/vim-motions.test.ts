@@ -216,6 +216,7 @@ function createHandler(
   const navigateCalls: Array<"up" | "down"> = []
   const commandPaletteCalls: true[] = []
   const copyMoves: Array<"up" | "down" | "left" | "right"> = []
+  const copyHalfPages: Array<"up" | "down"> = []
   const copyJumps: Array<VimJump | "high" | "middle" | "low"> = []
   const copyVisualCalls: Array<"char" | "line" | "block"> = []
   const copyScrollCalls: Array<"center" | "top" | "bottom"> = []
@@ -471,6 +472,9 @@ function createHandler(
     copyIsVisual() {
       return copyVisual() !== undefined
     },
+    copyHalfPage(direction) {
+      copyHalfPages.push(direction)
+    },
     copyJump(action) {
       copyJumps.push(action)
     },
@@ -601,6 +605,7 @@ function createHandler(
     navigateCalls,
     commandPaletteCalls,
     copyMoves,
+    copyHalfPages,
     copyJumps,
     copyVisual,
     copyVisualCalls,
@@ -8695,6 +8700,115 @@ describe("copy mode", () => {
     return cm
   }
 
+  test("half-page movement scrolls and moves the copy cursor", () => {
+    const lines = Array.from({ length: 20 }, (_, i) => `line ${i}`)
+    let scrolled = 0
+    const child = {
+      id: "text-part",
+      y: 0,
+      height: lines.length,
+      gutter: { calculateWidth: () => 4 },
+      getChildren: () => [
+        {
+          _y: 0,
+          plainText: lines.join("\n"),
+          lineInfo: {
+            lineSources: lines.map((_, i) => i),
+            lineStartCols: lines.map(() => 0),
+            lineWidthCols: lines.map((line) => Bun.stringWidth(line)),
+            lineWraps: lines.map(() => 0),
+          },
+        },
+      ],
+    }
+    const scroll = {
+      y: 0,
+      height: 8,
+      width: 120,
+      scrollHeight: lines.length,
+      getChildren: () => [child],
+      scrollBy(delta: number) {
+        scrolled += delta
+      },
+    } as unknown as ScrollBoxRenderable
+    const cm = createCopyMode({
+      scroll: () => scroll,
+      messages: () => [{ id: "message", role: "assistant" }],
+      parts: () => [{ id: "part", type: "text", text: lines.join("\n") }] as Part[],
+      thinking: () => false,
+      details: () => false,
+      session: () => "session",
+      toBottom() {},
+    })
+    cm.prompt.enter()
+    cm.prompt.jump("top")
+
+    cm.prompt.halfPage("down")
+    expect(cm.state().idx).toBe(2)
+    expect(scrolled).toBe(2)
+
+    cm.prompt.halfPage("up")
+    expect(cm.state().idx).toBe(0)
+    expect(scrolled).toBe(0)
+  })
+
+  test("half-page movement follows screen geometry across copy row gaps", () => {
+    let offset = 0
+    const makeChild = (id: string, y: number) => ({
+      id: `text-${id}`,
+      get y() {
+        return y - offset
+      },
+      height: 1,
+      gutter: { calculateWidth: () => 4 },
+      getChildren: () => [
+        {
+          _y: 0,
+          plainText: id,
+          lineInfo: {
+            lineSources: [0],
+            lineStartCols: [0],
+            lineWidthCols: [Bun.stringWidth(id)],
+            lineWraps: [0],
+          },
+        },
+      ],
+    })
+    const children = [makeChild("first", 0), makeChild("middle", 2), makeChild("last", 10)]
+    const scroll = {
+      y: 0,
+      height: 8,
+      width: 120,
+      scrollHeight: 11,
+      getChildren: () => children,
+      scrollBy(delta: number) {
+        offset = Math.max(0, Math.min(offset + delta, 3))
+      },
+    } as unknown as ScrollBoxRenderable
+    const ids = ["first", "middle", "last"]
+    const cm = createCopyMode({
+      scroll: () => scroll,
+      messages: () => [{ id: "message", role: "assistant" }],
+      parts: () => ids.map((id) => ({ id, type: "text", text: id })) as Part[],
+      thinking: () => false,
+      details: () => false,
+      session: () => "session",
+      toBottom() {},
+    })
+    cm.prompt.enter()
+    cm.prompt.jump("top")
+
+    cm.prompt.halfPage("down")
+    expect(cm.row()?.id).toBe("text-middle")
+    expect(cm.row()?.y).toBe(0)
+    expect(offset).toBe(2)
+
+    cm.prompt.halfPage("up")
+    expect(cm.row()?.id).toBe("text-first")
+    expect(cm.row()?.y).toBe(0)
+    expect(offset).toBe(0)
+  })
+
   function createTableCopyMode(cells: string[][], options?: { rowHeights?: number[]; cellLineInfo?: unknown[][] }) {
     const rowHeights = options?.rowHeights ?? cells.map(() => 1)
     const rowOffsets = [0]
@@ -11118,13 +11232,27 @@ describe("copy mode", () => {
     }
   })
 
-  test("copy mode ctrl scroll keys still scroll", () => {
+  test("copy mode ctrl+d and ctrl+u move by half pages", () => {
+    const ctx = createHandler("abc", { mode: "copy" })
+
+    for (const [key, direction] of [
+      ["d", "down"],
+      ["u", "up"],
+    ] as const) {
+      const evt = createEvent(key, { ctrl: true })
+      expect(ctx.handler.handleKey(evt.event)).toBe(true)
+      expect(evt.prevented()).toBe(true)
+      expect(ctx.copyHalfPages.at(-1)).toBe(direction)
+    }
+
+    expect(ctx.scrollCalls).toEqual([])
+  })
+
+  test("other copy mode ctrl scroll keys still scroll", () => {
     const ctx = createHandler("abc", { mode: "copy" })
     const keys: Array<[string, VimScroll]> = [
       ["e", "line-down"],
       ["y", "line-up"],
-      ["d", "half-down"],
-      ["u", "half-up"],
       ["f", "page-down"],
       ["b", "page-up"],
     ]

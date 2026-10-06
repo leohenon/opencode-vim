@@ -853,6 +853,31 @@ export function createCopyMode(input: {
     exitPreserveScroll()
   }
 
+  function halfPage(direction: "up" | "down") {
+    const scr = input.scroll()
+    const s = state()
+    if (!s.active) return
+    const list = rows()
+    const current = list[s.idx]
+    if (!current) return
+    const distance = Math.max(1, Math.floor(scr.height / 4))
+    const delta = direction === "up" ? -distance : distance
+    const targetY = current.y + delta
+    const step = direction === "up" ? -1 : 1
+    const next = Math.max(0, Math.min(s.idx + step, list.length - 1))
+    let idx = next
+    for (let i = next + step; i >= 0 && i < list.length; i += step) {
+      if (Math.abs(list[i]!.y - targetY) >= Math.abs(list[idx]!.y - targetY)) break
+      idx = i
+    }
+    scr.scrollBy(delta)
+    sync(idx)
+    const row = rows()[state().idx]
+    if (!row) return
+    const col = resolveStick(row, s.stick)
+    setState((prev) => ({ ...prev, col }))
+  }
+
   function move(action: "up" | "down" | "left" | "right") {
     const scroll = input.scroll()
     const s = state()
@@ -1673,6 +1698,7 @@ export function createCopyMode(input: {
       exitVisual,
       visualMode: () => state().visual,
       move,
+      halfPage,
       jump,
       wordNext,
       wordPrev,

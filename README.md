@@ -128,7 +128,7 @@ When in search mode, `Enter` submits the search, and `Escape` clears search high
 
 ### Dialog controls
 
-Searchable dialogs and custom question answer inputs use modal controls.
+Searchable dialogs, prompt dialogs, and custom question answer inputs use modal controls.
 
 | Area               | Controls                                                                |
 | ------------------ | ----------------------------------------------------------------------- |
@@ -262,7 +262,7 @@ Yank and delete operations sync to the system clipboard, `p` / `P` paste from it
 
 ### Modal dialog inputs
 
-Disable modal controls in searchable dialogs and custom question answer inputs:
+Disable modal controls in searchable dialogs, prompt dialogs, and custom question answer inputs:
 
 ```json
 {

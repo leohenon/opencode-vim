@@ -1,10 +1,17 @@
 import { TextareaRenderable, TextAttributes } from "@opentui/core"
 import { useTheme } from "../context/theme"
 import { useDialog, type DialogContext } from "./dialog"
-import { Show, createEffect, createSignal, onMount, type JSX } from "solid-js"
+import { Show, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js"
 import { Spinner } from "../component/spinner"
 import { useTuiConfig } from "../config"
-import { useBindings, useCommandShortcut } from "../keymap"
+import { OPENCODE_VIM_MODE_KEY, useBindings, useCommandShortcut, useOpencodeKeymap } from "../keymap"
+import { useVimEnabled } from "../component/vim"
+import {
+  createModalInputControls,
+  type ModalInputKeyEvent,
+  type ModalInputMode,
+} from "../component/vim/modal-input-controls"
+import { vimCursorStyle } from "../component/vim/cursor-style"
 
 export type DialogPromptProps = {
   title: string
@@ -21,12 +28,56 @@ export function DialogPrompt(props: DialogPromptProps) {
   const dialog = useDialog()
   const { theme } = useTheme()
   const tuiConfig = useTuiConfig()
+  const keymap = useOpencodeKeymap()
+  const vimEnabled = useVimEnabled()
+  const previousVimMode = keymap.getData(OPENCODE_VIM_MODE_KEY)
   const submitShortcut = useCommandShortcut("dialog.prompt.submit")
   const [textareaTarget, setTextareaTarget] = createSignal<TextareaRenderable>()
+  const [inputMode, setInputMode] = createSignal<ModalInputMode>("insert")
+  const modalInputEnabled = createMemo(() => vimEnabled() && tuiConfig.vim_modal_input)
   let textarea: TextareaRenderable
+
+  createEffect(() => {
+    keymap.setData(OPENCODE_VIM_MODE_KEY, modalInputEnabled() ? inputMode() : undefined)
+  })
+
+  onCleanup(() => {
+    keymap.setData(OPENCODE_VIM_MODE_KEY, previousVimMode)
+  })
+
+  const modalInput = createModalInputControls({
+    mode: inputMode,
+    setMode: setInputMode,
+    focus: () => textarea?.focus(),
+    text: () => textarea?.plainText ?? "",
+    cursor: () => textarea?.cursorOffset ?? 0,
+    setCursor: (offset) => {
+      if (!textarea || textarea.isDestroyed) return
+      textarea.cursorOffset = offset
+    },
+    setText: (text) => {
+      if (!textarea || textarea.isDestroyed) return
+      textarea.setText(text)
+    },
+    langmap: () => tuiConfig.vim_langmap,
+    vimEscapeSequence: () => tuiConfig.vim_escape_sequence,
+  })
+
+  const cursorStyle = createMemo(() => vimCursorStyle(modalInputEnabled() ? inputMode() : undefined, tuiConfig.cursor))
+
+  createEffect(() => {
+    if (!textarea || textarea.isDestroyed) return
+    textarea.cursorStyle = cursorStyle()
+  })
+
+  function enterNormalMode() {
+    modalInput.clearPending()
+    modalInput.enterNormal()
+  }
 
   function confirm() {
     if (props.busy) return
+    modalInput.clearPending()
     props.onConfirm?.(textarea.plainText)
   }
 
@@ -43,7 +94,19 @@ export function DialogPrompt(props: DialogPromptProps) {
         run: confirm,
       },
     ],
-    bindings: tuiConfig.keybinds.gather("dialog.prompt", ["dialog.prompt.submit"]),
+    bindings: [
+      ...tuiConfig.keybinds.gather("dialog.prompt", ["dialog.prompt.submit"]),
+      ...(modalInputEnabled() && inputMode() === "insert"
+        ? [
+            {
+              key: "escape",
+              desc: "Enter normal mode",
+              group: "Dialog",
+              cmd: enterNormalMode,
+            },
+          ]
+        : []),
+    ],
   }))
 
   onMount(() => {
@@ -95,8 +158,11 @@ export function DialogPrompt(props: DialogPromptProps) {
           placeholderColor={theme.textMuted}
           textColor={props.busy ? theme.textMuted : theme.text}
           focusedTextColor={props.busy ? theme.textMuted : theme.text}
-          cursorColor={props.busy ? theme.backgroundElement : theme.text}
-          cursorStyle={tuiConfig.cursor}
+          cursorColor={props.busy ? theme.backgroundElement : theme.primary}
+          cursorStyle={cursorStyle()}
+          onKeyDown={(event: ModalInputKeyEvent) => {
+            if (modalInputEnabled() && !props.busy && modalInput.handleKey(event)) return
+          }}
         />
         <Show when={props.busy}>
           <Spinner color={theme.textMuted}>{props.busyText ?? "Working…"}</Spinner>

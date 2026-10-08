@@ -5,7 +5,7 @@ import { testRender, useRenderer } from "@opentui/solid"
 import { expect, test } from "bun:test"
 import { mkdir } from "node:fs/promises"
 import path from "node:path"
-import { onCleanup } from "solid-js"
+import { onCleanup, onMount } from "solid-js"
 import { tmpdir } from "../../fixture/fixture"
 import { createTuiResolvedConfig } from "../../fixture/tui-runtime"
 import type { TuiKeybind } from "../../../src/config/keybind"
@@ -22,14 +22,19 @@ async function wait(fn: () => boolean, timeout = 2000) {
 async function mountPrompt(input: {
   root: string
   keybinds: Partial<TuiKeybind.Keybinds>
+  config?: {
+    vim?: boolean
+    vim_modal_input?: boolean
+  }
   onConfirm: (value: string) => void
+  onClose?: () => void
 }) {
   const state = path.join(input.root, "state")
   await mkdir(state, { recursive: true })
   await Bun.write(path.join(state, "kv.json"), "{}")
 
   const [
-    { DialogProvider },
+    { DialogProvider, useDialog },
     { DialogPrompt },
     { KVProvider },
     { ThemeProvider },
@@ -52,9 +57,21 @@ async function mountPrompt(input: {
     const resolvedConfig = createTuiResolvedConfig({
       keybinds: input.keybinds,
       leader_timeout: 1000,
+      ...input.config,
     })
     const off = registerOpencodeKeymap(keymap, renderer, resolvedConfig)
     onCleanup(off)
+
+    function PromptLauncher() {
+      const dialog = useDialog()
+      onMount(() => {
+        dialog.replace(
+          () => <DialogPrompt title="Rename Session" value="draft" onConfirm={input.onConfirm} />,
+          input.onClose,
+        )
+      })
+      return null
+    }
 
     return (
       <TestTuiContexts
@@ -71,7 +88,7 @@ async function mountPrompt(input: {
               <ThemeProvider mode="dark">
                 <ToastProvider>
                   <DialogProvider>
-                    <DialogPrompt title="Rename Session" value="draft" onConfirm={input.onConfirm} />
+                    <PromptLauncher />
                   </DialogProvider>
                 </ToastProvider>
               </ThemeProvider>
@@ -112,6 +129,89 @@ test("dialog prompt submit wins when return is also input newline", async () => 
 
     expect(confirmed).toEqual(["draft"])
     expect(textarea.plainText).toBe("draft")
+  } finally {
+    await prompt.cleanup()
+  }
+})
+
+test("dialog prompt enters normal mode, handles motions, then dismisses on escape", async () => {
+  await using tmp = await tmpdir()
+  let closed = 0
+  const prompt = await mountPrompt({
+    root: tmp.path,
+    keybinds: {},
+    config: {
+      vim: true,
+      vim_modal_input: true,
+    },
+    onConfirm: () => {},
+    onClose: () => closed++,
+  })
+
+  try {
+    await wait(() => prompt.app.renderer.currentFocusedEditor instanceof TextareaRenderable)
+    const textarea = prompt.app.renderer.currentFocusedEditor
+    if (!(textarea instanceof TextareaRenderable)) throw new Error("expected focused dialog textarea")
+
+    expect(textarea.cursorOffset).toBe(5)
+    prompt.app.mockInput.pressKey("ESCAPE")
+    expect(textarea.cursorOffset).toBe(4)
+    expect(closed).toBe(0)
+
+    prompt.app.mockInput.pressKey("h")
+    expect(textarea.cursorOffset).toBe(3)
+    expect(textarea.plainText).toBe("draft")
+
+    prompt.app.mockInput.pressKey("ESCAPE")
+    expect(closed).toBe(1)
+  } finally {
+    await prompt.cleanup()
+  }
+})
+
+test("dialog prompt keeps non-Vim input behavior when modal input is disabled", async () => {
+  await using tmp = await tmpdir()
+  const prompt = await mountPrompt({
+    root: tmp.path,
+    keybinds: {},
+    config: {
+      vim: true,
+      vim_modal_input: false,
+    },
+    onConfirm: () => {},
+  })
+
+  try {
+    await wait(() => prompt.app.renderer.currentFocusedEditor instanceof TextareaRenderable)
+    const textarea = prompt.app.renderer.currentFocusedEditor
+    if (!(textarea instanceof TextareaRenderable)) throw new Error("expected focused dialog textarea")
+
+    prompt.app.mockInput.pressKey("h")
+    expect(textarea.plainText).toBe("drafth")
+  } finally {
+    await prompt.cleanup()
+  }
+})
+
+test("dialog prompt keeps non-Vim input behavior when Vim is disabled globally", async () => {
+  await using tmp = await tmpdir()
+  const prompt = await mountPrompt({
+    root: tmp.path,
+    keybinds: {},
+    config: {
+      vim: false,
+      vim_modal_input: true,
+    },
+    onConfirm: () => {},
+  })
+
+  try {
+    await wait(() => prompt.app.renderer.currentFocusedEditor instanceof TextareaRenderable)
+    const textarea = prompt.app.renderer.currentFocusedEditor
+    if (!(textarea instanceof TextareaRenderable)) throw new Error("expected focused dialog textarea")
+
+    prompt.app.mockInput.pressKey("h")
+    expect(textarea.plainText).toBe("drafth")
   } finally {
     await prompt.cleanup()
   }

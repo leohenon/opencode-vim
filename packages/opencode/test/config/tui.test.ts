@@ -135,6 +135,7 @@ it.instance("loads tui config with the same precedence order as server config pa
           {
             theme: "local",
             diff_style: "stacked",
+            diff_viewer: { command: ["git", "difftool", "HEAD"] },
             vim_enter_submit: true,
             vim_insert_after_submit: true,
             vim_initial_mode: "normal",
@@ -148,6 +149,7 @@ it.instance("loads tui config with the same precedence order as server config pa
       const config = yield* getTuiConfig(test.directory)
       expect(config.theme).toBe("local")
       expect(config.diff_style).toBe("stacked")
+      expect(config.diff_viewer).toEqual({ command: ["git", "difftool", "HEAD"] })
       expect(config.vim_enter_submit).toBe(true)
       expect(config.vim_insert_after_submit).toBe(true)
       expect(config.vim_initial_mode).toBe("normal")

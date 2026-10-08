@@ -266,3 +266,80 @@ const pluginMeta = {
   fingerprint: "test",
   state: "same",
 } satisfies TuiPluginMeta
+
+test("uses the configured viewer with built-in fallback and prevents duplicate launches", async () => {
+  const commands = new Map<
+    string,
+    NonNullable<Parameters<TuiPluginApi["keymap"]["registerLayer"]>[0]["commands"]>[number]
+  >()
+  const toasts: Array<{ variant: string; message: string }> = []
+  const rendererEvents: string[] = []
+  let current: TuiRouteCurrent = startRoute
+  let directory = "/opencode/external-diff-directory-that-does-not-exist"
+  const base = createTuiPluginApi({
+    state: {
+      session: {
+        get: () => ({ ...session, directory }),
+      },
+    },
+  })
+  const api = {
+    ...base,
+    tuiConfig: createTuiResolvedConfig({
+      diff_viewer: { command: [process.execPath, "-e", "process.exit(0)"] },
+    }),
+    renderer: {
+      suspend: () => rendererEvents.push("suspend"),
+      resume: () => rendererEvents.push("resume"),
+      requestRender: () => rendererEvents.push("render"),
+      currentRenderBuffer: { clear: () => rendererEvents.push("clear") },
+    },
+    keymap: {
+      registerLayer(layer: Parameters<TuiPluginApi["keymap"]["registerLayer"]>[0]) {
+        layer.commands?.forEach((command) => commands.set(command.name, command))
+        return () => {}
+      },
+    },
+    route: {
+      register: () => () => {},
+      navigate(name: string, params?: Record<string, unknown>) {
+        current = params ? { name, params } : { name }
+      },
+      get current() {
+        return current
+      },
+    },
+    ui: {
+      ...base.ui,
+      toast(input: Parameters<TuiPluginApi["ui"]["toast"]>[0]) {
+        toasts.push({ variant: input.variant ?? "info", message: input.message ?? "" })
+      },
+    },
+  } as unknown as TuiPluginApi
+
+  await diffViewerPlugin.tui(api, undefined, pluginMeta)
+  commands.get("diff.open")?.run?.({} as never)
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  expect(toasts).toEqual([
+    {
+      variant: "warning",
+      message:
+        "Diff directory does not exist: /opencode/external-diff-directory-that-does-not-exist. Opening the built-in diff viewer.",
+    },
+  ])
+  expect(current).toEqual({
+    name: "diff",
+    params: { mode: "git", sessionID: "session-1", returnRoute: startRoute },
+  })
+
+  current = startRoute
+  directory = process.cwd()
+  commands.get("diff.open")?.run?.({} as never)
+  commands.get("diff.open")?.run?.({} as never)
+  for (let attempt = 0; attempt < 20 && !rendererEvents.includes("render"); attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
+  expect(current).toEqual(startRoute)
+  expect(rendererEvents).toEqual(["suspend", "clear", "clear", "resume", "render"])
+})

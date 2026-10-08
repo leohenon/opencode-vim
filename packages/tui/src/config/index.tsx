@@ -30,6 +30,11 @@ export const ScrollAcceleration = Schema.Struct({
 export const DiffStyle = Schema.Literals(["auto", "stacked"]).annotate({
   description: "Control diff rendering style: 'auto' adapts to terminal width, 'stacked' always shows single column",
 })
+export const DiffViewer = Schema.Struct({
+  command: Schema.Array(Schema.String).check(Schema.isMinLength(1)),
+}).annotate({
+  description: "External diff viewer command. The first item is the executable and remaining items are arguments",
+})
 export const Cursor = Schema.Struct({
   style: Schema.optional(Schema.Literals(["block", "underline", "line", "default"])).annotate({
     description: "Cursor shape. Use 'default' to preserve the terminal setting",
@@ -96,6 +101,7 @@ export const Info = Schema.Struct({
   scroll_speed: Schema.optional(ScrollSpeed).annotate({ description: "TUI scroll speed" }),
   scroll_acceleration: Schema.optional(ScrollAcceleration),
   diff_style: Schema.optional(DiffStyle),
+  diff_viewer: Schema.optional(DiffViewer),
   cursor: Schema.optional(Cursor),
   vim: Schema.optional(Schema.Boolean).annotate({ description: "Enable vim-style input for the prompt" }),
   vim_modal_input: Schema.optional(Schema.Boolean).annotate({

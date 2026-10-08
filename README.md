@@ -154,7 +154,8 @@ Toggle via command palette > `Toggle minimal ui`.
 | ------------------------------- | ---------------------------------------- |
 | `prompt_max_height`             | Set max prompt input height              |
 | `prompt_scrollbar`              | Show the prompt scrollbar                |
-| `vim_initial_mode`              | Start in `insert` (default) or `normal`   |
+| `diff_viewer.command`           | Run an external viewer for `/diff`       |
+| `vim_initial_mode`              | Start in `insert` (default) or `normal`  |
 | `vim_enter_submit`              | Submit with Enter from insert mode       |
 | `vim_insert_after_submit`       | Return to insert mode after submit       |
 | `vim_system_clipboard_register` | Use the system clipboard as Vim register |
@@ -338,6 +339,23 @@ Set a two-character sequence to leave insert mode without pressing `Escape`:
 ```json
 {
   "vim_escape_sequence": "jk"
+}
+```
+
+### External diff viewer
+
+Open `/diff` with an external viewer, such as [Diffview.nvim](https://github.com/sindrets/diffview.nvim):
+
+```json
+{
+  "diff_viewer": {
+    "command": ["nvim", "-c", "DiffviewOpen"]
+  },
+  "keybinds": {
+    "vim.normal": {
+      "diff_open": "<leader>d"
+    }
+  }
 }
 ```
 

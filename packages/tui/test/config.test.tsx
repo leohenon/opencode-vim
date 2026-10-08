@@ -32,6 +32,7 @@ test("validates config constraints", () => {
       prompt: { max_height: 10, max_width: "auto" },
       scroll_speed: 0.001,
       diff_style: "stacked",
+      diff_viewer: { command: ["git", "difftool", "--no-prompt", "HEAD"] },
       cursor: { blinking: false },
       plugin: ["example-plugin"],
     }),
@@ -39,12 +40,15 @@ test("validates config constraints", () => {
     leader_timeout: 250,
     attention: { volume: 1 },
     diff_style: "stacked",
+    diff_viewer: { command: ["git", "difftool", "--no-prompt", "HEAD"] },
     cursor: { blinking: false },
   })
   expect(() => decodeInfo({ leader_timeout: 0 })).toThrow()
   expect(() => decodeInfo({ attention: { volume: 1.1 } })).toThrow()
   expect(() => decodeInfo({ prompt: { max_width: 0 } })).toThrow()
   expect(() => decodeInfo({ scroll_speed: 0 })).toThrow()
+  expect(() => decodeInfo({ diff_viewer: { command: [] } })).toThrow()
+  expect(() => decodeInfo({ diff_viewer: { command: "git difftool" } })).toThrow()
   expect(() => decodeInfo({ cursor: { style: "beam" } })).toThrow()
   expect(decodeInfo({ attention: { sounds: { unknown: "sound.wav" } } })).toEqual({ attention: { sounds: {} } })
   expect(decodeInfo({ keybinds: { "vim.normal": { input_move_down: "j" } } })).toEqual({

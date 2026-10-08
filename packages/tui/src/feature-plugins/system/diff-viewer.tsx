@@ -18,6 +18,7 @@ import { DiffViewerFileTree } from "./diff-viewer-file-tree"
 import { Panel, PanelGroup, Separator } from "./diff-viewer-ui"
 import { DialogSelect } from "../../ui/dialog-select"
 import { getScrollAcceleration } from "../../util/scroll"
+import { openExternalDiffViewer } from "./external-diff-viewer"
 import {
   allExpandedFileTreeDirectories,
   buildFileTree,
@@ -1050,6 +1051,48 @@ const tui: TuiPlugin = async (api) => {
     },
   ])
 
+  const context = () => {
+    const returnRoute = api.route.current
+    const sessionID = "params" in returnRoute ? returnRoute.params?.sessionID : undefined
+    return {
+      returnRoute,
+      sessionID: typeof sessionID === "string" ? sessionID : undefined,
+    }
+  }
+  const openBuiltin = (input = context()) => {
+    api.route.navigate(ROUTE, {
+      mode: "git",
+      sessionID: input.sessionID,
+      returnRoute: input.returnRoute,
+    })
+    api.ui.dialog.clear()
+  }
+  let externalViewerOpen = false
+  const openConfigured = () => {
+    const input = context()
+    const command = api.tuiConfig.diff_viewer?.command
+    if (!command) return openBuiltin(input)
+    if (externalViewerOpen) return
+
+    const directory =
+      (input.sessionID ? api.state.session.get(input.sessionID)?.directory : undefined) ?? api.state.path.directory
+    api.ui.dialog.clear()
+    externalViewerOpen = true
+    void openExternalDiffViewer({ command, directory, renderer: api.renderer })
+      .catch((error) => {
+        const reason = error instanceof Error ? error.message : String(error)
+        api.ui.toast({
+          variant: "warning",
+          title: "External diff viewer failed",
+          message: `${reason}. Opening the built-in diff viewer.`,
+        })
+        openBuiltin(input)
+      })
+      .finally(() => {
+        externalViewerOpen = false
+      })
+  }
+
   api.keymap.registerLayer({
     commands: [
       {
@@ -1058,14 +1101,7 @@ const tui: TuiPlugin = async (api) => {
         slashName: "diff",
         category: "VCS",
         namespace: "palette",
-        run() {
-          api.route.navigate(ROUTE, {
-            mode: "git",
-            sessionID: "params" in api.route.current ? api.route.current.params?.sessionID : undefined,
-            returnRoute: api.route.current,
-          })
-          api.ui.dialog.clear()
-        },
+        run: openConfigured,
       },
     ],
   })

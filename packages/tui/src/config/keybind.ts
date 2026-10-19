@@ -25,6 +25,7 @@ const BindingObject = Schema.StructWithRest(
 )
 
 const BindingItem = Schema.Union([Schema.String, KeyStroke, BindingObject])
+type BindingItem = Schema.Schema.Type<typeof BindingItem>
 export const BindingValueSchema = Schema.Union([
   Schema.Literal(false),
   Schema.Literal("none"),
@@ -105,6 +106,7 @@ export const Definitions = {
 
   "session.export": keybind("<leader>x", "Export session to editor"),
   "session.copy": keybind("none", "Copy session transcript"),
+  "session.copy_mode": keybind("<leader>v", "Enter copy mode"),
   "session.copy.id": keybind("none", "Copy session ID"),
   "session.move": keybind("none", "Manage workspaces"),
   "session.new": keybind("<leader>n", "Create a new session"),
@@ -195,6 +197,7 @@ export const Definitions = {
   "session.toggle.thinking": keybind("none", "Toggle thinking blocks visibility"),
 
   "prompt.submit": keybind("none", "Submit prompt"),
+  "prompt.copy_selection": keybind("<leader>y", "Copy prompt selection"),
   "prompt.queue": keybind("<leader>return", "Queue prompt"),
   "prompt.editor_context.clear": keybind("none", "Clear editor context"),
   "prompt.images.view": keybind("<leader>i", "View image attachments"),
@@ -303,20 +306,39 @@ export const Definitions = {
 type KeybindName = keyof typeof Definitions
 const KeybindNames = new Set<string>(Object.keys(Definitions))
 
-export const KeybindOverrides = Schema.Struct(
-  Object.fromEntries(
-    Object.entries(Definitions).map(([name, item]) => [
-      name,
-      Schema.optional(BindingValueSchema).annotate({ description: item.description }),
+// ocv: keybind overrides scoped to an input mode. Bindings inside a scope only
+// apply while the matching keymap mode is active.
+const VimModeScopes = {
+  "vim.normal": ["normal"],
+} as const satisfies Record<string, readonly string[]>
+
+type VimModeScope = keyof typeof VimModeScopes
+const VimModeScopeNames = new Set<string>(Object.keys(VimModeScopes))
+
+const KeybindOverrideFields = Object.fromEntries(
+  Object.entries(Definitions).map(([name, item]) => [
+    name,
+    Schema.optional(BindingValueSchema).annotate({ description: item.description }),
+  ]),
+)
+
+const KeybindOverrideBase = Schema.Struct(KeybindOverrideFields)
+
+export const KeybindOverrides = Schema.Struct({
+  ...KeybindOverrideFields,
+  ...Object.fromEntries(
+    Object.keys(VimModeScopes).map((scope) => [
+      scope,
+      Schema.optional(KeybindOverrideBase).annotate({ description: `TUI keybinding overrides scoped to ${scope}` }),
     ]),
   ),
-).annotate({ description: "TUI keybinding overrides" })
+}).annotate({ description: "TUI keybinding overrides" })
 export const Descriptions = Object.fromEntries(
   Object.entries(Definitions).map(([name, item]) => [name, item.description]),
 ) as Record<KeybindName, string>
 
 export type Keybinds = { [K in KeybindName]: BindingValueSchema }
-export type KeybindOverrides = Partial<Keybinds>
+export type KeybindOverrides = Partial<Keybinds> & Partial<Record<VimModeScope, Partial<Keybinds>>>
 export type BindingLookupView = {
   readonly bindings: readonly Binding<Renderable, KeyEvent>[]
   get(command: string): readonly Binding<Renderable, KeyEvent>[]
@@ -339,16 +361,85 @@ export function defaultValue(name: KeybindName) {
 export function parse(keybinds: KeybindOverrides): Keybinds {
   const invalid = unknownKeys(keybinds)
   if (invalid.length) throw new Error(`Unrecognized keybind${invalid.length === 1 ? "" : "s"}: ${invalid.join(", ")}`)
-  return Object.fromEntries(
+  const scopedLeader = hasScopedKeybind(keybinds, "leader")
+  const result = Object.fromEntries(
     Object.entries(Definitions).map(([name, item]) => [
       name,
-      decodeBindingValue(keybinds[name as KeybindName] ?? item.default),
+      decodeBindingValue(
+        scopedLeader && name === "leader" && keybinds.leader === undefined
+          ? "none"
+          : keybinds[name as KeybindName] ?? item.default,
+      ),
     ]),
   ) as Keybinds
+
+  for (const [scope, modes] of Object.entries(VimModeScopes)) {
+    const scoped = keybinds[scope as VimModeScope]
+    if (!scoped || typeof scoped !== "object" || Array.isArray(scoped)) continue
+    for (const [name, value] of Object.entries(scoped)) {
+      if (!KeybindNames.has(name)) continue
+      const scopedItems = scopedBindingItems(decodeBindingValue(value), modes)
+      if (!scopedItems.length) continue
+      result[name as KeybindName] = appendBindingItems(result[name as KeybindName], scopedItems)
+    }
+  }
+
+  return result
+}
+
+export const Keybinds = { parse }
+
+function hasScopedKeybind(keybinds: KeybindOverrides, name: KeybindName) {
+  return Object.keys(VimModeScopes).some((scope) => {
+    const scoped = keybinds[scope as VimModeScope]
+    return !!scoped && typeof scoped === "object" && !Array.isArray(scoped) && name in scoped
+  })
 }
 
 export function unknownKeys(input: object) {
-  return Object.keys(input).filter((key) => !KeybindNames.has(key))
+  return Object.entries(input).flatMap(([key, value]) => {
+    if (KeybindNames.has(key)) return []
+    if (!VimModeScopeNames.has(key)) return [key]
+    if (!value || typeof value !== "object" || Array.isArray(value)) return []
+    return Object.keys(value).filter((nested) => !KeybindNames.has(nested)).map((nested) => `${key}.${nested}`)
+  })
+}
+
+export function dropUnknown(input: Record<string, unknown>) {
+  return Object.fromEntries(
+    Object.entries(input).flatMap(([key, value]) => {
+      if (KeybindNames.has(key)) return [[key, value]]
+      if (!VimModeScopeNames.has(key)) return []
+      if (!value || typeof value !== "object" || Array.isArray(value)) return [[key, value]]
+      const nested = Object.fromEntries(Object.entries(value).filter(([nestedKey]) => KeybindNames.has(nestedKey)))
+      return [[key, nested]]
+    }),
+  )
+}
+
+function isBindingItemArray(value: BindingValueSchema): value is readonly BindingItem[] {
+  return Array.isArray(value)
+}
+
+function bindingItems(value: BindingValueSchema): readonly BindingItem[] {
+  if (value === false || value === "none") return []
+  return isBindingItemArray(value) ? value : [value]
+}
+
+function scopedBindingItems(value: BindingValueSchema, modes: readonly string[]): BindingItem[] {
+  return bindingItems(value).flatMap((item) =>
+    modes.map((vimMode) => {
+      if (typeof item === "string" || !("key" in item)) return { key: item, vimMode }
+      return { ...item, vimMode }
+    }),
+  )
+}
+
+function appendBindingItems(value: BindingValueSchema, items: readonly BindingItem[]): BindingValueSchema {
+  if (items.length === 0) return value
+  if (value === false || value === "none") return items
+  if (isBindingItemArray(value)) return [...value, ...items]
+  return [value, ...items]
 }
 
 export function bindingDefaults(): BindingDefaults<Renderable, KeyEvent> {

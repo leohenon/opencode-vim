@@ -40,6 +40,12 @@ declare module "@opentui/keymap" {
 
 const MODE = { key: "opencode.mode", base: "base" } as const
 
+// ocv: copy mode runs the session transcript as a vim window. The window token
+// lets the fork bind the same commands under ctrl+w as under the leader key.
+export const VIM_WINDOW_TOKEN = "vim-window"
+export const OPENCODE_COPY_MODE = "copy"
+export const OPENCODE_VIM_MODE_KEY = "opencode.vim.mode"
+
 type OpenTuiKeymap = Parameters<typeof KeymapProvider>[0]["keymap"]
 type Mode = ReturnType<typeof createMode>
 type KeymapConfig = {
@@ -144,6 +150,18 @@ function Provider(props: ParentProps<{ config?: KeymapConfig }>) {
       }),
     )
   }
+  // ocv: the vim window token makes ctrl+w a prefix for the same commands the
+  // leader key reaches, so copy mode can be entered and left from the prompt.
+  dispose.push(keymap.registerToken({ name: VIM_WINDOW_TOKEN, key: "ctrl+w" }))
+  // ocv: bindings may declare a vim mode. They stay inactive until the prompt
+  // publishes the matching mode through the vim mode data key.
+  dispose.push(
+    keymap.registerBindingFields({
+      vimMode(value, ctx) {
+        ctx.require(OPENCODE_VIM_MODE_KEY, value)
+      },
+    }),
+  )
   onCleanup(() => {
     dispose.reverse().forEach((item) => item())
     mode.dispose()
@@ -181,6 +199,11 @@ export interface Keymap {
   intercept: OpenTuiKeymap["intercept"]
   /** Returns whether an event matches the configured leader key. */
   isLeader(event: KeyEvent): boolean
+  /** Reads and writes keymap scoped data. */
+  readonly data: {
+    get(key: string): unknown
+    set(key: string, value: unknown): void
+  }
 }
 
 function use(): Keymap {
@@ -198,6 +221,10 @@ function use(): Keymap {
     },
     intercept: value.keymap.intercept.bind(value.keymap),
     isLeader,
+    data: {
+      get: (key) => value.keymap.getData(key),
+      set: (key, data) => value.keymap.setData(key, data),
+    },
   }
 }
 

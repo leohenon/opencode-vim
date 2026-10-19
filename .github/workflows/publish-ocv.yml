@@ -1,0 +1,554 @@
+name: Release ocv
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version (e.g. 1.2.20)"
+        required: true
+        type: string
+      force_nix_hash_refresh:
+        description: "Force Nix hash refresh"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: release-ocv-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      branch: ${{ steps.nix.outputs.branch }}
+      sha: ${{ steps.nix.outputs.sha }}
+      nix_hashes_current: ${{ steps.nix.outputs.current }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Validate version
+        shell: bash
+        run: |
+          VERSION="${{ inputs.version }}"
+          TRACK=$(tr -d '[:space:]' < .github/ocv-track)
+          if ! printf '%s' "$TRACK" | grep -Eq '^[0-9]+\.[0-9]+$'; then
+            echo "Invalid ocv track: '$TRACK'"
+            exit 1
+          fi
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+-ocv\.[0-9]+\.[0-9]+$'; then
+            echo "Invalid ocv version: '$VERSION'"
+            exit 1
+          fi
+          if [ "${VERSION##*-ocv.}" != "$TRACK" ]; then
+            echo "Version track '${VERSION##*-ocv.}' does not match pinned track '$TRACK'"
+            exit 1
+          fi
+
+      - name: Detect Nix hash state
+        id: nix
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SHA=$(git rev-parse HEAD)
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
+          if [ "${{ github.ref_type }}" != "branch" ]; then
+            echo "branch=" >> "$GITHUB_OUTPUT"
+            echo "current=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "branch=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+
+          if [ "${{ inputs.force_nix_hash_refresh }}" = "true" ]; then
+            echo "Nix hash refresh forced"
+            echo "current=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          HASH_BASE=$(git log -n 1 --format=%H -- nix/hashes.json || true)
+
+          if [ -n "$HASH_BASE" ] && git diff --quiet "$HASH_BASE"..HEAD -- \
+            bun.lock \
+            package.json \
+            'packages/*/package.json' \
+            flake.lock \
+            nix/node_modules.nix \
+            nix/scripts \
+            patches; then
+            echo "Nix hashes are current"
+            echo "current=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Nix hashes are stale"
+          echo "current=false" >> "$GITHUB_OUTPUT"
+
+  compute-nix-hash:
+    needs: prepare
+    if: needs.prepare.outputs.branch != '' && needs.prepare.outputs.nix_hashes_current != 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - system: x86_64-linux
+            runner: ubuntu-24.04
+          - system: aarch64-linux
+            runner: ubuntu-24.04-arm
+          - system: x86_64-darwin
+            runner: macos-15-intel
+          - system: aarch64-darwin
+            runner: macos-latest
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+
+      - name: Setup Nix
+        uses: nixbuild/nix-quick-install-action@2c9db80fb984ceb1bcaa77cdda3fdf8cfba92035 # v34
+
+      - name: Compute node_modules hash
+        env:
+          SYSTEM: ${{ matrix.system }}
+        run: nix/scripts/compute-node-modules-hash.sh
+
+      - name: Upload hash
+        uses: actions/upload-artifact@v4
+        with:
+          name: hash-${{ matrix.system }}
+          path: hash.txt
+          retention-days: 1
+
+  update-nix-hashes:
+    needs:
+      - prepare
+      - compute-nix-hash
+    if: always() && needs.prepare.result == 'success'
+    runs-on: ubuntu-24.04
+    outputs:
+      sha: ${{ steps.final.outputs.sha }}
+
+    steps:
+      - name: Require successful Nix hash computation
+        if: needs.prepare.outputs.branch != '' && needs.prepare.outputs.nix_hashes_current != 'true' && needs.compute-nix-hash.result != 'success'
+        run: |
+          echo "::error::Nix hash computation failed"
+          exit 1
+
+      - name: Checkout repository
+        if: needs.prepare.outputs.branch != '' && needs.prepare.outputs.nix_hashes_current != 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          fetch-depth: 0
+
+      - name: Configure git committer
+        if: needs.prepare.outputs.branch != '' && needs.prepare.outputs.nix_hashes_current != 'true'
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Download hash artifacts
+        if: needs.prepare.outputs.branch != '' && needs.prepare.outputs.nix_hashes_current != 'true'
+        uses: actions/download-artifact@v4
+        with:
+          path: hashes
+          pattern: hash-*
+
+      - name: Update hashes.json
+        if: needs.prepare.outputs.branch != '' && needs.prepare.outputs.nix_hashes_current != 'true'
+        run: nix/scripts/update-node-modules-hashes-json.sh
+
+      - name: Commit Nix hashes
+        if: needs.prepare.outputs.branch != '' && needs.prepare.outputs.nix_hashes_current != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          BRANCH="${{ needs.prepare.outputs.branch }}"
+          PREPARED_SHA="${{ needs.prepare.outputs.sha }}"
+          HASH_FILE="nix/hashes.json"
+
+          for attempt in 1 2 3; do
+            git fetch origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
+            REMOTE_SHA="$(git rev-parse "origin/$BRANCH")"
+
+            if [ "$REMOTE_SHA" != "$PREPARED_SHA" ]; then
+              # The branch advanced while we were computing hashes. It is only
+              # safe to continue if the hash inputs are unchanged (e.g. a
+              # concurrent nix/hashes.json commit); otherwise our hashes are
+              # stale and a fresh release must recompute them.
+              if ! git diff --quiet "$PREPARED_SHA" "$REMOTE_SHA" -- \
+                bun.lock \
+                package.json \
+                'packages/*/package.json' \
+                flake.lock \
+                nix/node_modules.nix \
+                nix/scripts \
+                patches; then
+                echo "::error::Hash inputs changed on $BRANCH while preparing; rerun the release"
+                exit 1
+              fi
+              # Re-anchor onto the advanced branch before re-applying hashes.
+              git checkout -f -B "$BRANCH" "$REMOTE_SHA"
+            fi
+
+            # Re-apply the freshly computed hashes from the downloaded artifacts.
+            nix/scripts/update-node-modules-hashes-json.sh
+
+            if [ -z "$(git status --short -- "$HASH_FILE")" ]; then
+              echo "Nix hashes already current on $BRANCH"
+              git rev-parse HEAD > final-sha.txt
+              exit 0
+            fi
+
+            git add "$HASH_FILE"
+            git commit -m "chore(deps): update nix node_modules hashes"
+            if git push origin HEAD:"$BRANCH"; then
+              git rev-parse HEAD > final-sha.txt
+              exit 0
+            fi
+
+            echo "Push race on $BRANCH; retrying (attempt $attempt)..."
+            git reset --hard "$REMOTE_SHA"
+          done
+
+          echo "::error::Failed to push Nix hashes after multiple attempts"
+          exit 1
+
+      - name: Set final release SHA
+        id: final
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "${{ needs.prepare.outputs.branch }}" = "" ] || [ "${{ needs.prepare.outputs.nix_hashes_current }}" = "true" ]; then
+            echo "sha=${{ needs.prepare.outputs.sha }}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "sha=$(cat final-sha.txt)" >> "$GITHUB_OUTPUT"
+
+  release:
+    needs:
+      - update-nix-hashes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.update-nix-hashes.outputs.sha }}
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Add release contributors
+        if: github.ref_type == 'branch'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ inputs.version }}"
+          PREV_TAG=$(git tag --list 'v*-ocv.*' --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+-ocv\.[0-9]+\.[0-9]+$' | grep -vx "v$VERSION" | head -n 1 || true)
+          if [ -z "$PREV_TAG" ]; then
+            echo "No previous ocv release found, skipping contributor update"
+            exit 0
+          fi
+
+          bun script/update-contributors.ts --from "$PREV_TAG" --to HEAD --repo "$GITHUB_REPOSITORY" --base ocv
+          if git diff --quiet README.md; then
+            exit 0
+          fi
+
+          git add README.md assets/contributors
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -m "chore(release): update contributors"
+          git push origin HEAD:${{ github.ref_name }}
+
+      - name: Build CLI
+        run: bun run packages/opencode/script/build.ts --single=false
+        env:
+          OPENCODE_VERSION: ${{ inputs.version }}
+
+      - name: Package binaries
+        shell: bash
+        run: |
+          DIST="packages/opencode/dist"
+          mkdir -p "$DIST/release"
+
+          for dir in $DIST/opencode-*/; do
+            [ -d "$dir" ] || continue
+            name=$(basename "$dir")
+            target="${name/opencode/ocv}"
+            bin="$dir/bin/opencode"
+            if [ ! -f "$bin" ]; then
+              bin="$dir/bin/opencode.exe"
+            fi
+
+            if [[ "$name" == *windows* ]]; then
+              cp "$bin" "$DIST/release/$target.exe"
+            else
+              cp "$bin" "$DIST/release/$target"
+            fi
+
+            if [[ "$name" == *linux* ]]; then
+              tar -czf "$DIST/release/$target.tar.gz" -C "$dir/bin" .
+            else
+              (cd "$dir/bin" && zip -r "../../release/$target.zip" .)
+            fi
+          done
+
+          ls -lh "$DIST/release/"
+
+      - name: Generate release notes
+        id: notes
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ inputs.version }}"
+          BASE="${VERSION%%-ocv.*}"
+          PATCH="${VERSION##*-ocv.}"
+          NOTES_FILE="$RUNNER_TEMP/ocv-release-notes.txt"
+          PRS_FILE="$RUNNER_TEMP/ocv-release-prs.txt"
+          PREV_TAG=$(git tag --list 'v*-ocv.*' --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+-ocv\.[0-9]+\.[0-9]+$' | grep -vx "v$VERSION" | head -n 1 || true)
+          PREV_PATCH=""
+
+          if [ -n "$PREV_TAG" ]; then
+            PREV_PATCH="${PREV_TAG##*-ocv.}"
+            git log --first-parent --reverse --format='%H' "$PREV_TAG"..HEAD | while read -r sha; do
+              gh api "repos/${{ github.repository }}/commits/$sha/pulls" -q '.[] | select(.base.ref == "ocv") | "\(.number)\t\(.title)\t\(.user.login // "")"' || true
+            done | awk -F '\t' '!seen[$1]++' | while IFS=$'\t' read -r num title author; do
+              [ -n "$num" ] || continue
+              if [ -n "$author" ]; then
+                echo "$title - #$num (@$author)"
+                continue
+              fi
+              echo "$title - #$num"
+            done > "$PRS_FILE"
+          else
+            : > "$PRS_FILE"
+          fi
+
+          echo "based on opencode v$BASE" > "$NOTES_FILE"
+
+          if [ -s "$PRS_FILE" ] || { [ -n "$PREV_PATCH" ] && [ "$PATCH" != "$PREV_PATCH" ]; }; then
+            {
+              echo
+              echo "ocv patch $PATCH"
+              cat "$PRS_FILE"
+            } >> "$NOTES_FILE"
+          fi
+
+          echo "file=$NOTES_FILE" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        shell: bash
+        run: |
+          VERSION="${{ inputs.version }}"
+          DIST="packages/opencode/dist/release"
+          NOTES_FILE="${{ steps.notes.outputs.file }}"
+          if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "v$VERSION" --repo "$GITHUB_REPOSITORY" --clobber "$DIST"/*
+            gh release edit "v$VERSION" --repo "$GITHUB_REPOSITORY" --title "v$VERSION" --notes-file "$NOTES_FILE"
+          else
+            gh release create "v$VERSION" \
+              --title "v$VERSION" \
+              --notes-file "$NOTES_FILE" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$(git rev-parse HEAD)" \
+              "$DIST"/*
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+
+      - name: Compute checksums
+        id: sum
+        shell: bash
+        run: |
+          DIST="packages/opencode/dist/release"
+          echo "darwin_arm64=$(shasum -a 256 "$DIST/ocv-darwin-arm64.zip" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+          echo "darwin_x64=$(shasum -a 256 "$DIST/ocv-darwin-x64.zip" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+          echo "linux_arm64=$(shasum -a 256 "$DIST/ocv-linux-arm64.tar.gz" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+          echo "linux_x64=$(shasum -a 256 "$DIST/ocv-linux-x64.tar.gz" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout tap
+        id: checkout_tap
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          repository: leohenon/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+
+      - name: Update formula
+        id: update_formula
+        if: steps.checkout_tap.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: |
+          VERSION="${{ inputs.version }}"
+          DARWIN_ARM64="${{ steps.sum.outputs.darwin_arm64 }}"
+          DARWIN_X64="${{ steps.sum.outputs.darwin_x64 }}"
+          LINUX_ARM64="${{ steps.sum.outputs.linux_arm64 }}"
+          LINUX_X64="${{ steps.sum.outputs.linux_x64 }}"
+          cat > tap/Formula/ocv.rb <<EOF
+          class Ocv < Formula
+            desc "OpenCode with Vim keybindings - AI coding assistant for the terminal"
+            homepage "https://github.com/leohenon/opencode-vim"
+            version "${VERSION}"
+            license "MIT"
+
+            on_macos do
+              if Hardware::CPU.arm?
+                url "https://github.com/leohenon/opencode-vim/releases/download/v${VERSION}/ocv-darwin-arm64.zip"
+                sha256 "${DARWIN_ARM64}"
+              else
+                url "https://github.com/leohenon/opencode-vim/releases/download/v${VERSION}/ocv-darwin-x64.zip"
+                sha256 "${DARWIN_X64}"
+              end
+            end
+
+            on_linux do
+              if Hardware::CPU.arm?
+                url "https://github.com/leohenon/opencode-vim/releases/download/v${VERSION}/ocv-linux-arm64.tar.gz"
+                sha256 "${LINUX_ARM64}"
+              else
+                url "https://github.com/leohenon/opencode-vim/releases/download/v${VERSION}/ocv-linux-x64.tar.gz"
+                sha256 "${LINUX_X64}"
+              end
+            end
+
+            def install
+              bin.install "opencode" => "ocv"
+            end
+
+            test do
+              assert_match version.to_s, shell_output("\#{bin}/ocv --version", 2)
+            end
+          end
+          EOF
+
+      - name: Push formula
+        id: push_formula
+        if: steps.checkout_tap.outcome == 'success' && steps.update_formula.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: |
+          cd tap
+          git add Formula/ocv.rb
+          if git diff --cached --quiet; then
+            echo "Formula unchanged, skipping push"
+            exit 0
+          fi
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -m "chore(release): update ocv formula v${{ inputs.version }}"
+          git push
+
+      - name: Close Homebrew failure issues
+        if: steps.checkout_tap.outcome == 'success' && steps.update_formula.outcome == 'success' && steps.push_formula.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          NUMBERS=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 100 --search "Homebrew tap update failed in:title" --json number,title --jq '.[] | select(.title | test("^\\[ci\\]: Homebrew tap update failed for v[0-9]+\\.[0-9]+\\.[0-9]+-ocv\\.[0-9]+\\.[0-9]+$")) | .number')
+          if [ -z "$NUMBERS" ]; then
+            echo "No open Homebrew failure issue found"
+            exit 0
+          fi
+          while read -r NUMBER; do
+            [ -n "$NUMBER" ] || continue
+            gh issue close "$NUMBER" --repo "$GITHUB_REPOSITORY" --comment "Closed automatically after a successful Homebrew tap update for v${{ inputs.version }}: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          done <<< "$NUMBERS"
+
+      - name: Create Homebrew failure issue
+        if: steps.checkout_tap.outcome == 'failure' || steps.update_formula.outcome == 'failure' || steps.push_formula.outcome == 'failure'
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TITLE="[ci]: Homebrew tap update failed for v${{ inputs.version }}"
+          BODY_FILE=$(mktemp)
+          cat > "$BODY_FILE" <<EOF
+          The ocv release workflow failed to update the Homebrew tap for \`v${{ inputs.version }}\`.
+
+          Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          EOF
+          if gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 100 --search "Homebrew tap update failed in:title" --json title --jq '.[].title' | grep -Fxq "$TITLE"; then
+            echo "Issue already exists: $TITLE"
+            exit 0
+          fi
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" --label ci --body-file "$BODY_FILE"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Publish npm package
+        id: npm_publish
+        continue-on-error: true
+        run: bun run packages/opencode/script/publish-ocv-npm.ts
+        env:
+          OPENCODE_VERSION: ${{ inputs.version }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Close npm failure issues
+        if: steps.npm_publish.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          NUMBERS=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 100 --search "npm publish failed in:title" --json number,title --jq '.[] | select(.title | test("^\\[ci\\]: npm publish failed for v[0-9]+\\.[0-9]+\\.[0-9]+-ocv\\.[0-9]+\\.[0-9]+$")) | .number')
+          if [ -z "$NUMBERS" ]; then
+            echo "No open npm failure issue found"
+            exit 0
+          fi
+          while read -r NUMBER; do
+            [ -n "$NUMBER" ] || continue
+            gh issue close "$NUMBER" --repo "$GITHUB_REPOSITORY" --comment "Closed automatically after a successful npm publish for v${{ inputs.version }}: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          done <<< "$NUMBERS"
+
+      - name: Create npm failure issue
+        if: steps.npm_publish.outcome == 'failure'
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TITLE="[ci]: npm publish failed for v${{ inputs.version }}"
+          BODY_FILE=$(mktemp)
+          cat > "$BODY_FILE" <<EOF
+          The ocv release workflow failed to publish \`@leohenon/ocv@${{ inputs.version }}\` to npm.
+
+          Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          EOF
+          if gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 100 --search "npm publish failed in:title" --json title --jq '.[].title' | grep -Fxq "$TITLE"; then
+            echo "Issue already exists: $TITLE"
+            exit 0
+          fi
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" --label ci --body-file "$BODY_FILE"
+
+      - name: Fail release on publish errors
+        if: steps.npm_publish.outcome == 'failure' || steps.checkout_tap.outcome == 'failure' || steps.update_formula.outcome == 'failure' || steps.push_formula.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "One or more release distribution steps failed"
+          exit 1

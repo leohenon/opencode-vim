@@ -18,3 +18,6 @@ if (process.versions.bun !== expectedBunVersion) {
 }
 '
 bun run check
+
+cd packages/tui
+bun test ./test/cli/tui/vim-*.test.ts

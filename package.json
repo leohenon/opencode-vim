@@ -32,6 +32,8 @@
     "postinstall": "bun run --cwd packages/core fix-node-pty",
     "prepare": "husky",
     "random": "echo 'Random script'",
+    "hello": "echo 'Hello World!'",
+    "build:site": "bun run docs/build.ts",
     "sso": "aws sso login --sso-session=opencode --no-browser",
     "test": "echo 'do not run tests from root' && exit 1"
   },

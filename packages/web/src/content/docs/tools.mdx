@@ -174,7 +174,7 @@ To configure which LSP servers are available for your project, see [LSP Servers]
 
 ---
 
-### apply_patch
+### patch
 
 Apply patches to files.
 
@@ -188,10 +188,6 @@ Apply patches to files.
 ```
 
 This tool applies patch files to your codebase. Useful for applying diffs and patches from various sources.
-
-When handling `tool.execute.before` or `tool.execute.after` hooks, check `input.tool === "apply_patch"` (not `"patch"`).
-
-`apply_patch` uses `output.args.patchText` instead of `output.args.filePath`. Paths are embedded in marker lines within `patchText` and are relative to the project root (for example: `*** Add File: src/new-file.ts`, `*** Update File: src/existing.ts`, `*** Move to: src/renamed.ts`, `*** Delete File: src/obsolete.ts`).
 
 :::note
 The `apply_patch` tool is controlled by the `edit` permission, which covers all file modifications (`edit`, `write`, `apply_patch`).

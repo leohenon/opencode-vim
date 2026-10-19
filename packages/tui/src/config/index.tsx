@@ -66,6 +66,57 @@ export const Cursor = Schema.Struct({
   }),
 }).annotate({ description: "Terminal cursor settings" })
 
+const VimLangmapCharacter = Schema.String.check(Schema.isPattern(/^.$/u)).annotate({
+  description: "A single Vim langmap character",
+})
+
+export const VimLangmap = Schema.Record(VimLangmapCharacter, VimLangmapCharacter).annotate({
+  description: "Map keyboard-layout characters to Vim command keys in normal, visual, and copy modes",
+})
+
+export const VimInitialMode = Schema.Literals(["normal", "insert"]).annotate({
+  description: "Initial Vim mode for the prompt",
+})
+export type VimInitialMode = Schema.Schema.Type<typeof VimInitialMode>
+
+export const VimLineMotions = Schema.Literals(["logical", "display_vertical", "display"]).annotate({
+  description: "Use logical lines, display lines for j/k only, or display lines for j/k and 0/^/$ Vim motions",
+})
+export type VimLineMotions = Schema.Schema.Type<typeof VimLineMotions>
+
+export const Vim = Schema.Struct({
+  enabled: Schema.optional(Schema.Boolean).annotate({
+    description: "Enable Vim-style input for the prompt",
+  }),
+  modal_input: Schema.optional(Schema.Boolean).annotate({
+    description: "Enable Vim-style modal controls for command palette and small dialog inputs",
+  }),
+  enter_submit: Schema.optional(Schema.Boolean).annotate({
+    description: "Submit prompt with Enter in Vim insert and replace modes",
+  }),
+  insert_after_submit: Schema.optional(Schema.Boolean).annotate({
+    description: "Return prompt to Vim insert mode after submitting",
+  }),
+  initial_mode: Schema.optional(VimInitialMode).annotate({
+    description: "Initial Vim mode for the prompt",
+  }),
+  system_clipboard_register: Schema.optional(Schema.Boolean).annotate({
+    description: "Use the system clipboard instead of Vim's internal register for yank and paste",
+  }),
+  langmap: Schema.optional(VimLangmap).annotate({
+    description: "Map keyboard-layout characters to Vim command keys in normal, visual, and copy modes",
+  }),
+  line_motions: Schema.optional(VimLineMotions).annotate({
+    description: "Use logical lines, display lines for j/k only, or display lines for j/k and 0/^/$ Vim motions",
+  }),
+  showbreak: Schema.optional(Schema.Boolean).annotate({
+    description: "Show a marker in the prompt gutter for wrapped rows",
+  }),
+  escape_sequence: Schema.optional(Schema.String.check(Schema.isPattern(/^.{2}$/u))).annotate({
+    description: "Two-character sequence to exit Vim insert mode (e.g. 'jk')",
+  }),
+}).annotate({ description: "Vim-style input settings" })
+
 export const Info = Schema.Struct({
   theme: Schema.optional(
     Schema.Struct({
@@ -253,10 +304,14 @@ export const Info = Schema.Struct({
   }),
   mouse: Schema.optional(Schema.Boolean).annotate({ description: "Enable terminal mouse capture" }),
   cursor: Schema.optional(Cursor),
+  vim: Schema.optional(Vim),
 })
 export type Info = Schema.Schema.Type<typeof Info>
 
-export type Resolved = Omit<Info, "attention" | "cursor" | "keybinds" | "leader" | "mouse" | "session" | "tabs"> & {
+export type Resolved = Omit<
+  Info,
+  "attention" | "cursor" | "keybinds" | "leader" | "mouse" | "session" | "tabs" | "vim"
+> & {
   attention: {
     notifications: boolean
     sound: boolean
@@ -270,6 +325,18 @@ export type Resolved = Omit<Info, "attention" | "cursor" | "keybinds" | "leader"
   cursor?: {
     style: "block" | "underline" | "line" | "default"
     blinking: boolean
+  }
+  vim: {
+    enabled: boolean
+    modal_input: boolean
+    enter_submit: boolean
+    insert_after_submit: boolean
+    initial_mode: VimInitialMode
+    system_clipboard_register: boolean
+    langmap?: Record<string, string>
+    line_motions: VimLineMotions
+    showbreak: boolean
+    escape_sequence?: string
   }
   session: Omit<NonNullable<Info["session"]>, "new_location" | "permissions" | "tps"> & {
     new_location: "launch" | "inherit"
@@ -321,6 +388,18 @@ export function resolve(
           blinking: input.cursor.blinking ?? true,
         }
       : undefined,
+    vim: {
+      enabled: input.vim?.enabled ?? false,
+      modal_input: input.vim?.modal_input ?? true,
+      enter_submit: input.vim?.enter_submit ?? false,
+      insert_after_submit: input.vim?.insert_after_submit ?? true,
+      initial_mode: input.vim?.initial_mode ?? "insert",
+      system_clipboard_register: input.vim?.system_clipboard_register ?? false,
+      langmap: input.vim?.langmap,
+      line_motions: input.vim?.line_motions ?? "logical",
+      showbreak: input.vim?.showbreak ?? false,
+      escape_sequence: input.vim?.escape_sequence,
+    },
     session: {
       ...input.session,
       new_location: input.session?.new_location ?? "launch",

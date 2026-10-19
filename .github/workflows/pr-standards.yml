@@ -71,10 +71,10 @@ jobs:
                 repo: context.repo.repo,
                 issue_number: pr.number
               });
-              
+
               const existing = comments.find(c => c.body.includes(markerText));
               if (existing) return;
-              
+
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,

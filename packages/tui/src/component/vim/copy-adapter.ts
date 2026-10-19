@@ -1,4 +1,5 @@
 import type { VimRegister } from "./vim-state"
+import type { TuiCopySelection } from "@opencode-ai/plugin/tui"
 
 export type CopySearchDirection = "forward" | "backward"
 export type CopyVisualMode = "char" | "line" | "block"
@@ -12,6 +13,7 @@ export type CopyModeAdapter = {
   focusInput: () => void
   visual: (mode: CopyVisualMode) => void
   yank: () => VimRegister
+  selection: () => TuiCopySelection | undefined
   yankLine: () => VimRegister
   yankMatchingBracket: () => VimRegister
   copy: () => Promise<void> | void

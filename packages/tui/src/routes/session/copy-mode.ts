@@ -1,6 +1,7 @@
 import { batch, createEffect, createMemo, createSignal, onCleanup, type Accessor } from "solid-js"
 import type { ScrollBoxRenderable } from "@opentui/core"
 import type { Part } from "@opencode-ai/sdk/v2"
+import type { TuiCopySelection } from "@opencode-ai/plugin/tui"
 import {
   copyMatchingBracket,
   copyNextParagraph,
@@ -16,6 +17,7 @@ import { write as writeClipboard } from "../../clipboard"
 export type CopyRow = {
   key: string
   id: string
+  messageID?: string
   role: "user" | "assistant"
   kind: "user" | "text" | "reasoning" | "tool"
   part?: string
@@ -121,6 +123,7 @@ export function createCopyMode(input: {
     const meta = new Map<
       string,
       {
+        messageID: string
         role: "user" | "assistant"
         kind: "user" | "text" | "reasoning" | "tool"
         part?: string
@@ -133,16 +136,24 @@ export function createCopyMode(input: {
       if (msg.role === "user") continue
 
       for (const part of parts) {
-        const partKey = "messageID" in part && typeof part.messageID === "string" ? `${part.messageID}-${part.id}` : part.id
-        if (part.type === "text") meta.set(`text-${partKey}`, { role: "assistant", kind: "text", part: part.id })
+        const partKey =
+          "messageID" in part && typeof part.messageID === "string" ? `${part.messageID}-${part.id}` : part.id
+        if (part.type === "text")
+          meta.set(`text-${partKey}`, { messageID: msg.id, role: "assistant", kind: "text", part: part.id })
         if (part.type === "reasoning") {
           if (!input.thinking()) continue
           if (state().active) continue
-          meta.set(`text-${partKey}`, { role: "assistant", kind: "reasoning", part: part.id })
+          meta.set(`text-${partKey}`, { messageID: msg.id, role: "assistant", kind: "reasoning", part: part.id })
         }
         if (part.type === "tool") {
           if (!input.details() && part.state.status === "completed") continue
-          meta.set(`tool-${partKey}`, { role: "assistant", kind: "tool", part: part.id, tool: part.tool })
+          meta.set(`tool-${partKey}`, {
+            messageID: msg.id,
+            role: "assistant",
+            kind: "tool",
+            part: part.id,
+            tool: part.tool,
+          })
         }
       }
     }
@@ -161,6 +172,7 @@ export function createCopyMode(input: {
         return Array.from({ length: Math.max(0, end - start) }, (_, i) => ({
           key: `${m.kind}:${child.id}:${i}`,
           id: child.id,
+          messageID: m.messageID,
           role: m.role,
           kind: m.kind,
           part: m.part,
@@ -1257,6 +1269,25 @@ export function createCopyMode(input: {
     return { text, linewise: false }
   }
 
+  function selection(): TuiCopySelection | undefined {
+    const s = state()
+    const text = selectionText()
+    if (!s.active || !s.visual || !s.anchor || !text.trim()) return
+    const { start, end } = orderEndpoints(s.anchor, { idx: s.idx, col: s.col })
+    const references = [
+      ...new Map(
+        rows()
+          .slice(start.idx, end.idx + 1)
+          .filter((row) => row.messageID)
+          .map((row) => [
+            `${row.messageID}:${row.part ?? ""}`,
+            { messageID: row.messageID!, partID: row.part, role: row.role },
+          ]),
+      ).values(),
+    ]
+    return { sessionID: input.session(), text, mode: s.visual, references }
+  }
+
   function yankLine() {
     const list = rows()
     const s = state()
@@ -1689,6 +1720,7 @@ export function createCopyMode(input: {
       focusInput,
       visual,
       yank,
+      selection,
       yankLine,
       yankMatchingBracket,
       copy,

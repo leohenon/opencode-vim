@@ -185,6 +185,7 @@ export function createTuiPluginApi(opts: Opts = {}): HostPluginApi {
   }
 
   return {
+    copy: { selection: () => undefined },
     app: {
       get version() {
         return opts.app?.version ?? "0.0.0-test"

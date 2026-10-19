@@ -8872,6 +8872,53 @@ describe("copy mode", () => {
     return cm
   }
 
+  test("selection snapshots retain rendered text and message identity without mutating selection", () => {
+    const cm = createRenderedCopyMode(["alpha beta", "second line"])
+    expect(cm.prompt.selection()).toBeUndefined()
+    cm.prompt.visual("char")
+    cm.prompt.move("right")
+    const snapshot = cm.prompt.selection()!
+    expect(snapshot.text).toBe(cm.prompt.yank()!.text)
+    expect(snapshot.sessionID).toBe("session")
+    expect(snapshot.mode).toBe("char")
+    expect(snapshot.references).toEqual([{ messageID: "message", partID: "part", role: "assistant" }])
+    cm.prompt.move("right")
+    expect(cm.prompt.selection()!.text).not.toBe(snapshot.text)
+    expect(snapshot.text).toBe("al")
+    cm.prompt.exitVisual()
+    expect(cm.prompt.selection()).toBeUndefined()
+  })
+
+  test("line selection snapshots deduplicate references across rendered rows", () => {
+    const cm = createRenderedCopyMode(["alpha beta", "second line"])
+    cm.prompt.visual("line")
+    cm.prompt.move("down")
+    expect(cm.prompt.selection()).toEqual({
+      sessionID: "session",
+      text: "alpha beta\nsecond line",
+      mode: "line",
+      references: [{ messageID: "message", partID: "part", role: "assistant" }],
+    })
+    expect(cm.prompt.isVisual()).toBe(true)
+  })
+
+  test("block selection snapshots use the selected columns", () => {
+    const cm = createRenderedCopyMode(["alpha beta", "second line"])
+    cm.prompt.visual("block")
+    cm.prompt.move("right")
+    cm.prompt.move("down")
+    expect(cm.prompt.selection()?.text).toBe("al\nse")
+    expect(cm.prompt.selection()?.mode).toBe("block")
+  })
+
+  test("blank and exited selections have no snapshot", () => {
+    const cm = createRenderedCopyMode(["   "])
+    cm.prompt.visual("line")
+    expect(cm.prompt.selection()).toBeUndefined()
+    cm.prompt.exit()
+    expect(cm.prompt.selection()).toBeUndefined()
+  })
+
   test("yank line preserves markdown list markers from source", () => {
     const cm = createRenderedCopyMode(["• Inspect current branch", "[x] Push visual-fix"], 4, {
       content: "- Inspect current branch\n- [x] Push visual-fix",

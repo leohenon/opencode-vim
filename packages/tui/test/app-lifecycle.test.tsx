@@ -337,7 +337,8 @@ test("session lifecycle updates the terminal title and prints the epilogue after
     await task
 
     expect(stdout).toContain("Renamed session")
-    expect(stdout).toContain("opencode -s dummy")
+    // ocv: the fork's binary is ocv, so the epilogue suggests the ocv command.
+    expect(stdout).toContain("ocv -s dummy")
     expect(promptRequests).toBe(0)
   } finally {
     process.stdout.write = originalWrite

@@ -1,5 +1,6 @@
 import {
   batch,
+  createContext,
   createEffect,
   createMemo,
   createSignal,
@@ -10,6 +11,7 @@ import {
   onCleanup,
   Show,
   Switch,
+  useContext,
   type Accessor,
 } from "solid-js"
 import path from "node:path"
@@ -123,6 +125,8 @@ import { isRecord } from "../../util/record"
 import { createHistoryPrepend } from "./history"
 import { context, use, type PendingAction } from "./render-context"
 import { INLINE_TOOL_ICON_WIDTH, InlineToolRow, ReasoningPart, TextPart, toolDisplay } from "./message-parts"
+import { createCopyMode, type CopyMode } from "./copy-mode"
+import { CopyOverlay, type CopyPosition } from "./copy-overlay"
 import { defaultVerbosity, type GroupKind, type SessionEntry } from "./grouping/session"
 import { SessionGroupView } from "./group-view"
 import { useEntryAnchor } from "./anchor-view"
@@ -141,6 +145,16 @@ const BACKGROUND_TOOL_HINT_DELAY = 3_000
 // The tail comfortably overfills a tall viewport; older rows mount as the reader approaches them.
 const TRANSCRIPT_TAIL_ROWS = 40
 const TRANSCRIPT_BACKFILL_CHUNK = 60
+
+// ocv: copy mode runs the transcript as a vim window. The tools register their
+// disclosure here so copy mode can expand and collapse them, and they read the
+// copy state to keep the diff view copy friendly.
+const copyContext = createContext<{
+  registerCollapsedToggle: (id: string, toggle: () => void) => () => void
+  copyActive: () => boolean
+  copyRowID: () => string | undefined
+  copyPartID: () => string | undefined
+}>()
 
 export function Session(props: {
   scrollRef?: (scroll: ScrollBoxRenderable | undefined) => void
@@ -389,6 +403,60 @@ export function Session(props: {
     seeded = true
     r.set(route.prompt)
   }
+
+  // ocv: copy mode. The transcript rows carry the ids the session view renders
+  // them with, so the copy mode classifies the rendered rows from the same rows.
+  const collapsedToggles = new Map<string, () => void>()
+  const registerCollapsedToggle = (id: string, toggle: () => void) => {
+    collapsedToggles.set(id, toggle)
+    return () => {
+      if (collapsedToggles.get(id) === toggle) collapsedToggles.delete(id)
+    }
+  }
+  const findToolPart = (id: string) => {
+    for (const message of data.session.message.list(route.sessionID)) {
+      if (message.type !== "assistant") continue
+      const part = message.content.find(
+        (item): item is SessionMessageAssistantTool => item.type === "tool" && item.id === id,
+      )
+      if (part) return part
+    }
+    return undefined
+  }
+  const cm = createCopyMode({
+    scroll: () => scroll,
+    transcript: () => rows,
+    boundaries,
+    messages: () => data.session.message.list(route.sessionID),
+    thinking: () => thinkingMode() === "show",
+    details: () => true,
+    session: () => route.sessionID,
+    toBottom() {
+      setTimeout(() => {
+        if (!scroll || scroll.isDestroyed) return
+        scroll.scrollTo(scroll.scrollHeight)
+      }, 50)
+    },
+    clipboard,
+    toggleCollapsed(id) {
+      const toggle = collapsedToggles.get(id)
+      if (!toggle) return false
+      toggle()
+      return true
+    },
+    activate(row) {
+      // ocv: a subagent row opens the child session.
+      if (row.kind !== "tool" || row.tool !== "subagent" || !row.part) return false
+      const part = findToolPart(row.part)
+      if (!part) return false
+      const state = part.state
+      const metadata = state.status === "streaming" ? undefined : state.metadata
+      const child = stringValue(metadata?.sessionID) ?? stringValue(metadata?.sessionId)
+      if (!child) return false
+      navigate({ type: "session", sessionID: child })
+      return true
+    },
+  })
 
   /** Runs after layout has settled (two frames), unless the transcript was torn down. */
   const afterLayout = (continuation: () => void) => {
@@ -764,15 +832,19 @@ export function Session(props: {
   function moveTranscript(delta: number) {
     clearMessageNavigation()
     if (delta < 0 && revealOlderRows(delta)) {
+      // ocv: keep the copy mode cursor on a visible row.
+      cm.clamp(delta)
       dialog.clear()
       return
     }
     if (delta > 0 && revealNewerRows(delta)) {
+      cm.clamp(delta)
       dialog.clear()
       return
     }
     scroll.scrollBy(delta)
     updateAwayFromBottom()
+    cm.clamp(delta)
     dialog.clear()
   }
 
@@ -1388,57 +1460,67 @@ export function Session(props: {
           paddingRight={dimensions().width < 44 ? 1 : 2}
         >
           <Show when={session()}>
-            <box flexGrow={1} minHeight={0} position="relative">
-              <scrollbox
-                ref={(r) => {
-                  scroll = r
-                  props.scrollRef?.(r)
-                  scroll.verticalScrollBar.on("change", updateAwayFromBottom)
-                  scroll.content.on("resize", holdAnchor)
-                }}
-                viewportOptions={{
-                  paddingRight: showScrollbar() ? 1 : 0,
-                }}
-                verticalScrollbarOptions={{
-                  paddingLeft: 1,
-                  visible: showScrollbar(),
-                  trackOptions: {
-                    backgroundColor: theme.decrease(theme.background.raised.base),
-                    foregroundColor: theme.border.base,
-                  },
-                }}
-                stickyScroll={!navigationMessage() && !navigationSlack()}
-                stickyStart="bottom"
-                flexGrow={1}
-                scrollAcceleration={scrollAcceleration()}
-                onMouseScroll={(event) => {
-                  if (firstJump()) clearMessageNavigation()
-                  if (event.scroll?.direction === "up" && revealOlderRows()) return
-                  if (event.scroll?.direction === "down" && revealNewerRows()) return
-                  updateAwayFromBottom()
-                }}
-              >
-                <For each={visibleRows()}>
-                  {(row, index) => (
-                    <SessionRowView
-                      row={row}
-                      message={(messageID) => data.session.message.get(route.sessionID, messageID)}
-                      boundaryID={boundaries()[index() + hidden()]}
+            <copyContext.Provider
+              value={{
+                registerCollapsedToggle,
+                copyActive: cm.unified,
+                copyRowID: () => cm.row()?.id,
+                copyPartID: () => cm.row()?.part,
+              }}
+            >
+              <box flexGrow={1} minHeight={0} position="relative">
+                <scrollbox
+                  ref={(r) => {
+                    scroll = r
+                    props.scrollRef?.(r)
+                    scroll.verticalScrollBar.on("change", updateAwayFromBottom)
+                    scroll.content.on("resize", holdAnchor)
+                  }}
+                  viewportOptions={{
+                    paddingRight: showScrollbar() ? 1 : 0,
+                  }}
+                  verticalScrollbarOptions={{
+                    paddingLeft: 1,
+                    visible: showScrollbar(),
+                    trackOptions: {
+                      backgroundColor: theme.decrease(theme.background.raised.base),
+                      foregroundColor: theme.border.base,
+                    },
+                  }}
+                  stickyScroll={!navigationMessage() && !navigationSlack()}
+                  stickyStart="bottom"
+                  flexGrow={1}
+                  scrollAcceleration={scrollAcceleration()}
+                  onMouseScroll={(event) => {
+                    if (firstJump()) clearMessageNavigation()
+                    if (event.scroll?.direction === "up" && revealOlderRows()) return
+                    if (event.scroll?.direction === "down" && revealNewerRows()) return
+                    updateAwayFromBottom()
+                  }}
+                >
+                  <For each={visibleRows()}>
+                    {(row, index) => (
+                      <SessionRowView
+                        row={row}
+                        message={(messageID) => data.session.message.get(route.sessionID, messageID)}
+                        boundaryID={boundaries()[index() + hidden()]}
+                        copy={cm}
+                      />
+                    )}
+                  </For>
+                  <BackgroundToolHint messages={messages()} />
+                  <Show when={session()?.revert?.messageID}>
+                    <RevertMessage
+                      count={messagesFromRevert().filter((message) => message.type === "user").length}
+                      files={session()!.revert!.files ?? []}
                     />
-                  )}
-                </For>
-                <BackgroundToolHint messages={messages()} />
-                <Show when={session()?.revert?.messageID}>
-                  <RevertMessage
-                    count={messagesFromRevert().filter((message) => message.type === "user").length}
-                    files={session()!.revert!.files ?? []}
-                  />
-                </Show>
-                <Show when={navigationSlack()}>
-                  {(height) => <box id={NAVIGATION_SLACK_ID} height={height()} flexShrink={0} />}
-                </Show>
-              </scrollbox>
-            </box>
+                  </Show>
+                  <Show when={navigationSlack()}>
+                    {(height) => <box id={NAVIGATION_SLACK_ID} height={height()} flexShrink={0} />}
+                  </Show>
+                </scrollbox>
+              </box>
+            </copyContext.Provider>
             <box height={1} flexShrink={0} flexDirection="row" justifyContent="flex-end">
               <Show when={firstJump()}>
                 <text fg={theme.text.feedback.info.base}>Loading session history…</text>
@@ -1516,6 +1598,7 @@ export function Session(props: {
                     visible={true}
                     ref={bind}
                     muted={props.promptMuted}
+                    copy={cm.prompt}
                     onSubmit={() => {
                       toBottom()
                     }}
@@ -1540,6 +1623,7 @@ type SessionRowViewProps = {
   row: SessionRow
   message: (messageID: string) => SessionMessageInfo | undefined
   boundaryID?: string
+  copy?: CopyMode
 }
 
 function SessionRowView(props: SessionRowViewProps) {
@@ -1548,8 +1632,36 @@ function SessionRowView(props: SessionRowViewProps) {
     entry: () => (props.row.type === "group" ? undefined : props.row),
     node: target,
   })
+  // ocv: the copy mode addresses the rendered rows by the id they are mounted with.
+  const id = createMemo(() => sessionRowID(props.row, props.boundaryID))
+  const user = createMemo(() => {
+    if (props.row.type !== "message") return false
+    return props.message(props.row.messageID)?.type === "user"
+  })
+  const copy = createMemo<CopyPosition | undefined>(() => {
+    const cm = props.copy
+    if (!cm) return undefined
+    const row = cm.row()
+    if (!row || row.id !== id()) return undefined
+    return {
+      line: row.line,
+      col: cm.cursorCol(),
+      visual: !!cm.state().visual,
+      cursorText: cm.cursorText(),
+      rowHasText: cm.rowHasText(),
+      action: cm.action(),
+    }
+  })
+  const highlights = createMemo(() => {
+    const current = id()
+    if (!current) return []
+    return props.copy?.highlights().get(current) ?? []
+  })
   return (
-    <box ref={setTarget} id={sessionRowID(props.row, props.boundaryID)} marginTop={1} flexShrink={0}>
+    <box ref={setTarget} id={id()} marginTop={1} flexShrink={0}>
+      <Show when={id()}>
+        <CopyOverlay copy={copy()} topOffset={user() ? 1 : 0} highlights={highlights()} />
+      </Show>
       <Switch>
         <Match when={props.row.type === "group" ? props.row : undefined}>
           {(row) => (
@@ -2230,6 +2342,13 @@ function UserMessage(props: { message: SessionMessageUser }) {
   const [hover, setHover] = createSignal(false)
   const color = createMemo(() => local.agent.color(data.session.get(ctx.sessionID)?.agent ?? "build"))
   const delivery = createMemo(() => ctx.pendingDelivery(props.message.id))
+  // ocv: the copy mode cursor marks the message it sits on.
+  const copy = useContext(copyContext)
+  const copied = createMemo(() => copy?.copyRowID() === props.message.id)
+  const border = createMemo(() => {
+    if (copied()) return theme.text.base
+    return delivery() ? theme.border.base : color()
+  })
   const dialog = useDialog()
   const renderer = useRenderer()
   const promptRef = usePromptRef()
@@ -2242,7 +2361,7 @@ function UserMessage(props: { message: SessionMessageUser }) {
     <Show when={props.message.text.trim() || files().length || skills().length}>
       <box
         border={["left"]}
-        borderColor={delivery() ? theme.border.base : color()}
+        borderColor={border()}
         customBorderChars={SplitBorder.customBorderChars}
         backgroundColor={theme.background.raised.base}
       >
@@ -2566,11 +2685,19 @@ type ToolProps = {
 }
 function GenericTool(props: ToolProps) {
   const theme = useTheme()
+  const copy = useContext(copyContext)
   const output = createMemo(() => props.output?.trim() ?? "")
   const input = createMemo(() => Object.entries(props.input))
   const [expanded, setExpanded] = createSignal(false)
   const expandable = createMemo(() => input().length > 0 || output().length > 0)
   const loading = createMemo(() => props.part.state.status === "streaming" || props.part.state.status === "running")
+
+  // ocv: copy mode expands and collapses the tool output.
+  createEffect(() => {
+    if (!expandable()) return
+    const unregister = copy?.registerCollapsedToggle(props.part.id, () => setExpanded((value) => !value))
+    onCleanup(() => unregister?.())
+  })
 
   return (
     <>
@@ -2647,9 +2774,12 @@ function InlineTool(props: {
 }) {
   const theme = useTheme()
   const renderer = useRenderer()
+  const copy = useContext(copyContext)
   const [hover, setHover] = createSignal(false)
   const [errorExpanded, setErrorExpanded] = createSignal(false)
   const permission = useToolPermission(() => props.part)
+  // ocv: the copy mode cursor mirrors the mouse hover on the tool it sits on.
+  const keyboardHover = createMemo(() => props.onClick !== undefined && copy?.copyPartID() === props.part.id)
 
   const error = createMemo(() =>
     !props.running && props.part.state.status === "error" ? props.part.state.error.message : undefined,
@@ -2669,7 +2799,7 @@ function InlineTool(props: {
     if (props.color) return props.color
     if (permission()) return theme.text.feedback.warning.base
     if (failed()) return theme.text.feedback.error.base
-    if (hover() && props.onClick) return theme.text.base
+    if ((hover() || keyboardHover()) && props.onClick) return theme.text.base
     return theme.text.muted
   })
 
@@ -2731,14 +2861,17 @@ function BlockTool(props: BlockToolProps) {
   const background = () => theme.background.raised.base
   const ctx = use()
   const renderer = useRenderer()
+  const copy = useContext(copyContext)
   const [hover, setHover] = createSignal(false)
   const error = createMemo(
     () => props.error ?? (props.part?.state.status === "error" ? props.part.state.error.message : undefined),
   )
   const permission = useToolPermission(() => props.part)
+  // ocv: the copy mode highlights the whole row, so the border steps aside.
+  const copied = createMemo(() => Boolean(props.part) && copy?.copyPartID() === props.part?.id)
   return (
     <box
-      border={["left"]}
+      border={copied() ? [] : ["left"]}
       flexShrink={0}
       paddingTop={1}
       paddingBottom={1}
@@ -2838,6 +2971,7 @@ function ShellDisplay(props: {
 }) {
   const theme = useTheme()
   const ctx = use()
+  const copy = useContext(copyContext)
   const client = useClient()
   const data = useData()
   const pathFormatter = usePathFormatter()
@@ -2935,6 +3069,14 @@ function ShellDisplay(props: {
     setExpanded(next)
     if (next) void loadBackgroundOutput(!backgroundRunning())
   }
+
+  // ocv: copy mode expands and collapses the shell output.
+  createEffect(() => {
+    const part = props.part
+    if (!part || !expandable()) return
+    const unregister = copy?.registerCollapsedToggle(part.id, toggle)
+    onCleanup(() => unregister?.())
+  })
 
   return (
     <BlockTool part={props.part} error={props.error} onClick={expandable() ? toggle : undefined}>
@@ -3279,10 +3421,13 @@ function Execute(props: ToolProps) {
 function Edit(props: ToolProps) {
   const ctx = use()
   const theme = useTheme()
+  const copy = useContext(copyContext)
   const { currentSyntax: syntax } = useThemes()
   const pathFormatter = usePathFormatter()
 
   const view = createMemo(() => {
+    // ocv: copy mode reads the diff as text, so a split view would break the columns.
+    if (copy?.copyActive()) return "unified"
     const diffView = ctx.config.diffs?.view
     if (diffView === "unified") return "unified"
     if (diffView === "split") return "split"
@@ -3343,6 +3488,7 @@ function Edit(props: ToolProps) {
 function ApplyPatch(props: ToolProps) {
   const ctx = use()
   const theme = useTheme()
+  const copy = useContext(copyContext)
   const { currentSyntax: syntax } = useThemes()
   const pathFormatter = usePathFormatter()
   const files = createMemo(() => parseApplyPatchFiles(props.metadata.files))
@@ -3362,6 +3508,8 @@ function ApplyPatch(props: ToolProps) {
     })
   })
   const view = createMemo(() => {
+    // ocv: copy mode reads the diff as text, so a split view would break the columns.
+    if (copy?.copyActive()) return "unified"
     if (ctx.config.diffs?.view === "unified") return "unified"
     if (ctx.config.diffs?.view === "split") return "split"
     return ctx.width > 120 ? "split" : "unified"

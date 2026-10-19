@@ -1,13 +1,20 @@
 import type { KeymapActive, KeymapCommand, KeymapLayer, KeymapPending } from "@opencode/plugin/tui/context"
 import { InputRenderable, TextareaRenderable, type KeyEvent, type Renderable } from "@opentui/core"
-import { stringifyKeyStroke, type Binding, type CommandContext } from "@opentui/keymap"
+import {
+  stringifyKeyStroke,
+  type Binding,
+  type CommandContext,
+  type KeyLike,
+  type Keymap as OpentuiKeymap,
+  type KeymapEvent,
+  type KeySequencePart,
+} from "@opentui/keymap"
 import {
   registerBackspacePopsPendingSequence,
   registerBaseLayoutFallback,
   registerCommaBindings,
   registerEscapeClearsPendingSequence,
   registerManagedTextareaLayer,
-  registerTimedLeader,
 } from "@opentui/keymap/addons/opentui"
 import { formatCommandBindings, formatKeySequence } from "@opentui/keymap/extras"
 import { createDefaultOpenTuiKeymap } from "@opentui/keymap/opentui"
@@ -45,6 +52,11 @@ const MODE = { key: "opencode.mode", base: "base" } as const
 export const VIM_WINDOW_TOKEN = "vim-window"
 export const OPENCODE_COPY_MODE = "copy"
 export const OPENCODE_VIM_MODE_KEY = "opencode.vim.mode"
+// ocv: the prompt enters, toggles and leaves copy mode through the window
+// token, so the same keys work with or without a leader prefix.
+export const OPENCODE_COPY_MODE_ENTER_KEYS = `<${VIM_WINDOW_TOKEN}>k,<${VIM_WINDOW_TOKEN}>ctrl+k`
+export const OPENCODE_COPY_MODE_TOGGLE_KEYS = `<${VIM_WINDOW_TOKEN}>w,<${VIM_WINDOW_TOKEN}><${VIM_WINDOW_TOKEN}>,<${VIM_WINDOW_TOKEN}>ctrl+w`
+export const OPENCODE_COPY_MODE_EXIT_KEYS = `<${VIM_WINDOW_TOKEN}>j,<${VIM_WINDOW_TOKEN}>ctrl+j`
 
 type OpenTuiKeymap = Parameters<typeof KeymapProvider>[0]["keymap"]
 type Mode = ReturnType<typeof createMode>
@@ -140,16 +152,9 @@ function Provider(props: ParentProps<{ config?: KeymapConfig }>) {
       ].flatMap((command) => config.keybinds.get(command)),
     }),
   ]
-  const leader = config.keybinds.get("leader")?.[0]?.key
-  if (leader) {
-    dispose.push(
-      registerTimedLeader(keymap, {
-        trigger: leader,
-        name: "leader",
-        timeoutMs: config.leader?.timeout ?? ("leader_timeout" in config ? config.leader_timeout : undefined) ?? 2000,
-      }),
-    )
-  }
+  // ocv: the leader key can be scoped to an input mode, so it is registered
+  // through the fork's own leader registration instead of the plain addon.
+  dispose.push(registerOpencodeLeader(keymap, config))
   // ocv: the vim window token makes ctrl+w a prefix for the same commands the
   // leader key reaches, so copy mode can be entered and left from the prompt.
   dispose.push(keymap.registerToken({ name: VIM_WINDOW_TOKEN, key: "ctrl+w" }))
@@ -184,6 +189,89 @@ function Provider(props: ParentProps<{ config?: KeymapConfig }>) {
 }
 
 export type { KeymapCommand, KeymapLayer } from "@opencode/plugin/tui/context"
+
+// ocv: the leader key can be bound per input mode. A binding scoped to
+// "vim.normal" only becomes the leader key while the prompt is in vim normal
+// mode, so the same physical key can lead different commands per mode.
+type LeaderBinding = Binding<Renderable, KeyEvent> & { vimMode?: unknown }
+
+const SCOPED_LEADER_TOKEN_KEY = { name: "opencode-scoped-leader" } as const
+
+export function registerOpencodeLeader<TTarget extends object, TEvent extends KeymapEvent>(
+  keymap: OpentuiKeymap<TTarget, TEvent>,
+  config: {
+    readonly keybinds: { get(command: string): readonly Binding<Renderable, KeyEvent>[] }
+    readonly leader?: { readonly timeout: number }
+    readonly leader_timeout?: number
+  },
+) {
+  const bindings = config.keybinds.get("leader") as readonly LeaderBinding[]
+  const global = bindings.find((binding) => binding.vimMode === undefined)
+  const scoped = bindings.filter((binding) => binding.vimMode === "normal")
+  if (!global && scoped.length === 0) return () => {}
+
+  const tokenKey = global?.key ?? SCOPED_LEADER_TOKEN_KEY
+  const offToken = keymap.registerToken({ name: "leader", key: tokenKey })
+  const offScoped = scoped.length
+    ? registerScopedLeaderMatches(keymap, tokenKey, scoped.map((binding) => binding.key))
+    : () => {}
+  const offTimeout = registerLeaderTimeout(
+    keymap,
+    tokenKey,
+    config.leader?.timeout ?? ("leader_timeout" in config ? config.leader_timeout : undefined) ?? 2000,
+  )
+
+  return () => {
+    offTimeout()
+    offScoped()
+    offToken()
+  }
+}
+
+function registerScopedLeaderMatches<TTarget extends object, TEvent extends KeymapEvent>(
+  keymap: OpentuiKeymap<TTarget, TEvent>,
+  tokenKey: KeyLike,
+  triggers: readonly KeyLike[],
+) {
+  const matchers = triggers.map((trigger) => keymap.createKeyMatcher(trigger))
+  return keymap.prependEventMatchResolver((event, ctx) => {
+    if (keymap.getData(OPENCODE_VIM_MODE_KEY) !== "normal") return
+    if (!matchers.some((matches) => matches(event))) return
+    return [ctx.resolveKey(tokenKey)]
+  })
+}
+
+function registerLeaderTimeout<TTarget extends object, TEvent extends KeymapEvent>(
+  keymap: OpentuiKeymap<TTarget, TEvent>,
+  tokenKey: KeyLike,
+  timeoutMs: number,
+) {
+  const matchesLeader = keymap.createKeyMatcher(tokenKey)
+  let timeout: ReturnType<typeof setTimeout> | undefined
+
+  function clearTimer() {
+    if (!timeout) return
+    clearTimeout(timeout)
+    timeout = undefined
+  }
+
+  function sync(sequence: readonly KeySequencePart[]) {
+    if (matchesLeader(sequence[0])) {
+      clearTimer()
+      timeout = setTimeout(() => keymap.clearPendingSequence(), timeoutMs)
+      return
+    }
+    clearTimer()
+  }
+
+  const offPendingSequence = keymap.on("pendingSequence", sync)
+  sync(keymap.getPendingSequence())
+
+  return () => {
+    clearTimer()
+    offPendingSequence()
+  }
+}
 
 export interface Keymap {
   /** Dispatches a reachable command by ID. */

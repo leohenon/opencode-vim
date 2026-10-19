@@ -42,7 +42,7 @@ export function usePromptVim(opts: {
 
   const vimState = createVimState({
     enabled: vimEnabled,
-    initial: () => lastVimMode ?? cfg.vim.initial_mode ?? "insert",
+    initial: () => lastVimMode ?? cfg.data.vim.initial_mode ?? "insert",
   })
   let popCopyMode: (() => void) | undefined
   onCleanup(() => {
@@ -84,7 +84,7 @@ export function usePromptVim(opts: {
   })
 
   function useSystemClipboardRegister() {
-    return !!cfg.vim.system_clipboard_register
+    return !!cfg.data.vim.system_clipboard_register
   }
 
   function promptActive() {
@@ -209,7 +209,7 @@ export function usePromptVim(opts: {
     const key = vimLangmapKeyName(event)
     if (key.length !== 1) return false
     const mapped =
-      cfg.vim.langmap?.[key] ?? (event.shift ? cfg.vim.langmap?.[key.toLowerCase()]?.toUpperCase() : undefined) ?? key
+      cfg.data.vim.langmap?.[key] ?? (event.shift ? cfg.data.vim.langmap?.[key.toLowerCase()]?.toUpperCase() : undefined) ?? key
     return mapped.toLowerCase() === "p"
   }
 
@@ -252,9 +252,9 @@ export function usePromptVim(opts: {
       if (!sel) return false
       return !flashSpan || sel.start !== flashSpan.start || sel.end !== flashSpan.end
     },
-    langmap: () => cfg.vim.langmap,
-    vimLineMotions: () => cfg.vim.line_motions,
-    vimEscapeSequence: cfg.vim.escape_sequence,
+    langmap: () => cfg.data.vim.langmap,
+    vimLineMotions: () => cfg.data.vim.line_motions,
+    vimEscapeSequence: cfg.data.vim.escape_sequence,
     submit: opts.submit,
     commandPalette() {
       keymap.dispatch("command.palette.show")

@@ -84,6 +84,12 @@ export const VimLineMotions = Schema.Literals(["logical", "display_vertical", "d
 })
 export type VimLineMotions = Schema.Schema.Type<typeof VimLineMotions>
 
+export const DiffViewer = Schema.Struct({
+  command: Schema.Array(Schema.String).check(Schema.isMinLength(1)).annotate({
+    description: "External diff viewer command. The first item is the executable and remaining items are arguments",
+  }),
+}).annotate({ description: "External diff viewer settings" })
+
 export const Vim = Schema.Struct({
   enabled: Schema.optional(Schema.Boolean).annotate({
     description: "Enable Vim-style input for the prompt",
@@ -305,6 +311,7 @@ export const Info = Schema.Struct({
   mouse: Schema.optional(Schema.Boolean).annotate({ description: "Enable terminal mouse capture" }),
   cursor: Schema.optional(Cursor),
   vim: Schema.optional(Vim),
+  diff_viewer: Schema.optional(DiffViewer),
 })
 export type Info = Schema.Schema.Type<typeof Info>
 

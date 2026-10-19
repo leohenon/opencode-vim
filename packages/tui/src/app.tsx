@@ -92,6 +92,7 @@ import { ArgsProvider, useArgs, type Args } from "./context/args"
 import { openUrl } from "@opencode/util/open"
 import { PromptRefProvider, usePromptRef } from "./context/prompt"
 import { Config, ConfigProvider, useConfig } from "./config"
+import { useVimEnabled } from "./component/vim"
 import { newSessionLocation } from "./config/new-session-location"
 import { UpdateNotificationProvider, useUpdateNotification, type UpdateSource } from "./context/update-notification"
 import { PluginProvider, usePlugin, type PackageSource } from "./plugin/context"
@@ -180,6 +181,7 @@ const appBindingCommands = [
   "app.toggle.file_context",
   "app.toggle.diffwrap",
   "app.toggle.paste_summary",
+  "input.vim.toggle",
 ] as const
 
 export type TuiInput = {
@@ -460,6 +462,7 @@ function App() {
   const app = useTuiApp()
   const startup = useTuiStartup()
   const config = useConfig()
+  const vimEnabled = useVimEnabled()
   const devtools = createMemo(() => config.data.debug?.devtools ?? app.channel === "local")
   const route = useRoute()
   const dimensions = useTerminalDimensions()
@@ -1239,6 +1242,20 @@ function App() {
           void config
             .update((draft) => {
               draft.prompt = { ...draft.prompt, paste: pasteSummaryEnabled() ? "full" : "compact" }
+            })
+            .catch(toast.error)
+          dialog.clear()
+        },
+      },
+      {
+        name: "input.vim.toggle",
+        title: "Toggle vim mode",
+        category: "System",
+        palette: undefined,
+        run: () => {
+          void config
+            .update((draft) => {
+              draft.vim = { ...draft.vim, enabled: !vimEnabled() }
             })
             .catch(toast.error)
           dialog.clear()

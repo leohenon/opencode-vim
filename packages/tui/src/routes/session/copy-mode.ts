@@ -1,6 +1,6 @@
 import { batch, createEffect, createMemo, createSignal, onCleanup, type Accessor } from "solid-js"
 import type { ScrollBoxRenderable } from "@opentui/core"
-import type { Part } from "@opencode-ai/sdk/v2"
+import type { SessionMessageInfo } from "@opencode/client"
 import {
   copyMatchingBracket,
   copyNextParagraph,
@@ -11,7 +11,11 @@ import {
   firstNonWhitespace,
 } from "../../component/vim/vim-motions"
 import type { CopyModeAdapter, CopySearchDirection, CopyVisualMode } from "../../component/vim/copy-adapter"
-import { write as writeClipboard } from "../../clipboard"
+import type { ClipboardService } from "../../context/clipboard"
+import { canonicalToolName } from "../../util/tool-display"
+import { stringWidth } from "../../util/string-width"
+import { groupRefs, type SessionGroup, type SessionRow } from "./grouping/session"
+import { resolvePart, sessionRowID } from "./rows"
 
 export type CopyRow = {
   key: string
@@ -32,6 +36,14 @@ export type CopyHighlight = {
   text: string
   kind?: "search"
   current?: boolean
+}
+
+/** What a rendered transcript row is, derived from the v2 message model. */
+export type CopyRowMeta = {
+  role: "user" | "assistant"
+  kind: "user" | "text" | "reasoning" | "tool"
+  part?: string
+  tool?: string
 }
 
 type CopyState = {
@@ -68,6 +80,10 @@ const empty: CopyState = {
   anchor: undefined,
 }
 
+// Every transcript row indents its content by three columns: the user box
+// spends one column on its left border, the other rows pad three columns.
+const TEXT_COLUMN = 3
+
 const segmenter = new Intl.Segmenter()
 type RenderableEntry = { node: any; y: number; x: number; gutter: number; table?: TableCopy }
 type CopyLineResult = { text: string; col: number; copyable?: boolean }
@@ -82,14 +98,21 @@ function orderEndpoints(a: Endpoint, b: Endpoint): { start: Endpoint; end: Endpo
   return aFirst ? { start: a, end: b } : { start: b, end: a }
 }
 
+export type CopyMode = ReturnType<typeof createCopyMode>
+
 export function createCopyMode(input: {
   scroll: () => ScrollBoxRenderable
-  messages: Accessor<{ id: string; role: string }[]>
-  parts: (id: string) => Part[]
+  /** The rendered transcript rows, in display order. */
+  transcript: Accessor<readonly SessionRow[]>
+  /** Message boundary ids, parallel to the transcript rows. */
+  boundaries: Accessor<readonly (string | undefined)[]>
+  /** The session messages, used to classify the rendered rows. */
+  messages: Accessor<readonly SessionMessageInfo[]>
   thinking: () => boolean
   details: () => boolean
   session: Accessor<string>
   toBottom: () => void
+  clipboard: ClipboardService
   toggleCollapsed?: (id: string) => boolean
   activate?: (row: CopyRow) => boolean
 }) {
@@ -114,38 +137,81 @@ export function createCopyMode(input: {
 
   // --- row building ---
 
+  /**
+   * Maps the id of a rendered transcript row to its kind. The transcript rows
+   * carry the id the session view renders them with, so the map is built from
+   * the same rows and message boundaries.
+   */
+  function rowMeta(): Map<string, CopyRowMeta> {
+    const meta = new Map<string, CopyRowMeta>()
+    const list = input.transcript()
+    if (!list.length) return meta
+    const boundaries = input.boundaries()
+    const byID = new Map(input.messages().map((message) => [message.id, message]))
+    for (let index = 0; index < list.length; index++) {
+      const row = list[index]
+      if (!row) continue
+      const id = sessionRowID(row, boundaries[index])
+      if (!id) continue
+      const entry = classifyRow(row, byID)
+      if (!entry) continue
+      meta.set(id, entry)
+    }
+    return meta
+  }
+
+  /** Classifies a rendered row from the message and the part it shows. */
+  function classifyRow(row: SessionRow, byID: Map<string, SessionMessageInfo>): CopyRowMeta | undefined {
+    if (row.type === "message") {
+      const message = byID.get(row.messageID)
+      if (message?.type !== "user") return undefined
+      if (!message.text.trim()) return undefined
+      return { role: "user", kind: "user" }
+    }
+    if (row.type === "part") {
+      const message = byID.get(row.ref.messageID)
+      if (message?.type !== "assistant") return undefined
+      const part = resolvePart(message, row.ref.partID)
+      if (!part) return undefined
+      if (part.type === "text") return { role: "assistant", kind: "text", part: row.ref.partID }
+      if (part.type === "reasoning") {
+        if (!input.thinking()) return undefined
+        return { role: "assistant", kind: "reasoning", part: row.ref.partID }
+      }
+      if (!input.details() && part.state.status === "completed") return undefined
+      return { role: "assistant", kind: "tool", part: part.id, tool: canonicalToolName(part.name) }
+    }
+    if (row.type === "group") return classifyGroup(row, byID)
+    return undefined
+  }
+
+  /** A collapsed group renders as a single row: its first tool names the row. */
+  function classifyGroup(row: SessionGroup, byID: Map<string, SessionMessageInfo>): CopyRowMeta | undefined {
+    if (row.kind === "reasoning") {
+      if (!input.thinking()) return undefined
+      return { role: "assistant", kind: "reasoning" }
+    }
+    if (row.kind === "exploration" || row.kind === "activity") {
+      for (const ref of groupRefs(row, true)) {
+        const message = byID.get(ref.messageID)
+        if (message?.type !== "assistant") continue
+        const part = resolvePart(message, ref.partID)
+        if (part?.type !== "tool") continue
+        return { role: "assistant", kind: "tool", part: part.id, tool: canonicalToolName(part.name) }
+      }
+      return { role: "assistant", kind: "tool" }
+    }
+    return undefined
+  }
+
+  /** The classification only changes when the transcript or the messages do. */
+  const metaMap = createMemo(() => rowMeta())
+
   function rows(): CopyRow[] {
     const scroll = input.scroll()
     if (!scroll) return []
 
-    const meta = new Map<
-      string,
-      {
-        role: "user" | "assistant"
-        kind: "user" | "text" | "reasoning" | "tool"
-        part?: string
-        tool?: string
-      }
-    >()
-
-    for (const msg of input.messages()) {
-      const parts = input.parts(msg.id)
-      if (msg.role === "user") continue
-
-      for (const part of parts) {
-        const partKey = "messageID" in part && typeof part.messageID === "string" ? `${part.messageID}-${part.id}` : part.id
-        if (part.type === "text") meta.set(`text-${partKey}`, { role: "assistant", kind: "text", part: part.id })
-        if (part.type === "reasoning") {
-          if (!input.thinking()) continue
-          if (state().active) continue
-          meta.set(`text-${partKey}`, { role: "assistant", kind: "reasoning", part: part.id })
-        }
-        if (part.type === "tool") {
-          if (!input.details() && part.state.status === "completed") continue
-          meta.set(`tool-${partKey}`, { role: "assistant", kind: "tool", part: part.id, tool: part.tool })
-        }
-      }
-    }
+    const meta = metaMap()
 
     return scroll
       .getChildren()
@@ -167,7 +233,7 @@ export function createCopyMode(input: {
           tool: m.tool,
           line: i,
           y: child.y + start + i,
-          col: m.kind === "user" ? 2 : 3,
+          col: TEXT_COLUMN,
         }))
       })
   }
@@ -222,7 +288,7 @@ export function createCopyMode(input: {
           const start = (layout.columnOffsets?.[colIdx] ?? 0) + 1 + Math.max(0, Math.floor(node._cellPaddingX ?? 0))
           const text = cellLine(cell?.textBufferView, cellY)
           for (const seg of segmenter.segment(text)) {
-            const index = start + Bun.stringWidth(text.slice(0, seg.index))
+            const index = start + stringWidth(text.slice(0, seg.index))
             if (index >= 0 && index < chars.length) chars[index] = seg.segment
           }
         }
@@ -270,18 +336,18 @@ export function createCopyMode(input: {
         if (info.lineSources[i] === src) base = info.lineStartCols?.[i] ?? base
         else break
       }
-      return sliceCols(source, lineStart - base, info.lineWidthCols?.[local] ?? Bun.stringWidth(source))
+      return sliceCols(source, lineStart - base, info.lineWidthCols?.[local] ?? stringWidth(source))
     }
     return lines[local] ?? ""
   }
 
   function sliceCols(text: string, start: number, width: number): string {
-    if (start === 0 && width >= Bun.stringWidth(text)) return text
+    if (start === 0 && width >= stringWidth(text)) return text
     let col = 0
     let begin = -1
     let end = text.length
     for (const seg of segmenter.segment(text)) {
-      const w = Bun.stringWidth(seg.segment)
+      const w = stringWidth(seg.segment)
       if (begin < 0 && col + w > start) begin = seg.index
       col += w
       if (col >= start + width) {
@@ -314,7 +380,7 @@ export function createCopyMode(input: {
   }
 
   function stripPrefix(text: string, length: number) {
-    return { text: text.slice(length), width: Bun.stringWidth(text.slice(0, length)) }
+    return { text: text.slice(length), width: stringWidth(text.slice(0, length)) }
   }
 
   function stripMatchedPrefix(text: string, pattern: RegExp) {
@@ -337,7 +403,7 @@ export function createCopyMode(input: {
     const stripped = stripRenderedListPrefix(text, prefix)
     return {
       text: prefix + stripped.text,
-      colOffset: -Math.max(0, Bun.stringWidth(prefix) - stripped.width),
+      colOffset: -Math.max(0, stringWidth(prefix) - stripped.width),
     }
   }
 
@@ -392,7 +458,7 @@ export function createCopyMode(input: {
         const text = entryLine(entry, row.line)
         return {
           text: acc.text + " ".repeat(gap) + text,
-          width: entry.x - base + Bun.stringWidth(text),
+          width: entry.x - base + stringWidth(text),
         }
       },
       { text: "", width: 0 },
@@ -410,21 +476,21 @@ export function createCopyMode(input: {
     return match
   }
 
-  function taskSpinnerOffset(row: CopyRow, prefix: string, text: string) {
-    if (prefix || row.kind !== "tool" || row.tool !== "task") return { text, col: 0 }
+  function subagentSpinnerOffset(row: CopyRow, prefix: string, text: string) {
+    if (prefix || row.kind !== "tool" || row.tool !== "subagent") return { text, col: 0 }
     const leading = text.length - text.trimStart().length
     const trimmed = text.slice(leading)
-    if (!trimmed.includes(" Task — ")) return { text, col: 0 }
+    if (!trimmed.includes(" — ")) return { text, col: 0 }
     if (/^[✓│~]/.test(trimmed)) return { text, col: 0 }
     const marker = trimmed.match(/^[⋯⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\s*/)?.[0]
-    if (marker) return { text: text.slice(0, leading) + trimmed.slice(marker.length), col: Bun.stringWidth(marker) }
+    if (marker) return { text: text.slice(0, leading) + trimmed.slice(marker.length), col: stringWidth(marker) }
     // Spinner renderables are not text renderables, so copy mode reserves their
     // visual width without making the transient frame part of copyable text.
     return { text, col: 2 }
   }
 
-  function taskCopyResult(row: CopyRow, raw: string | undefined, prefix: string, text: string, col: number) {
-    const offset = taskSpinnerOffset(row, prefix, text)
+  function toolCopyResult(row: CopyRow, raw: string | undefined, prefix: string, text: string, col: number) {
+    const offset = subagentSpinnerOffset(row, prefix, text)
     return copyResult(raw, prefix, offset.text, col + offset.col)
   }
 
@@ -446,7 +512,7 @@ export function createCopyMode(input: {
       const source = lines[src] ?? ""
       const wrapped =
         info.lineSources[local - 1] === src || info.lineSources[local + 1] === src
-      if (!wrapped) return taskCopyResult(row, sourceLine(match.node, src), prefix, source, match.gutter)
+      if (!wrapped) return toolCopyResult(row, sourceLine(match.node, src), prefix, source, match.gutter)
       const lineStart = info.lineStartCols?.[local] ?? 0
       let base = lineStart
       for (let i = local - 1; i >= 0; i--) {
@@ -454,8 +520,8 @@ export function createCopyMode(input: {
         else break
       }
       const offset = lineStart - base
-      const width = info.lineWidthCols?.[local] ?? Bun.stringWidth(source)
-      return taskCopyResult(
+      const width = info.lineWidthCols?.[local] ?? stringWidth(source)
+      return toolCopyResult(
         row,
         offset === 0 ? sourceLine(match.node, src) : undefined,
         prefix,
@@ -465,19 +531,19 @@ export function createCopyMode(input: {
     }
     if (local >= lines.length) return { text: "", col: match.gutter }
     const text = lines[local] ?? ""
-    return taskCopyResult(row, sourceLine(match.node, local), prefix, text, match.gutter)
+    return toolCopyResult(row, sourceLine(match.node, local), prefix, text, match.gutter)
   }
 
   function shift(row?: CopyRow, gutter?: number) {
     if (row?.kind !== "tool") return 0
-    if (row.tool !== "edit" && row.tool !== "apply_patch") return 0
+    if (row.tool !== "edit" && row.tool !== "patch") return 0
     if (!gutter) return 0
     return 1
   }
 
   function copySign(row: CopyRow, cache?: Map<string, any>): string | undefined {
     if (row.kind !== "tool") return undefined
-    if (row.tool !== "edit" && row.tool !== "apply_patch") return undefined
+    if (row.tool !== "edit" && row.tool !== "patch") return undefined
     const child = childById(row.id, cache)
     if (!child) return undefined
     const entries = findRenderables(child)
@@ -492,9 +558,9 @@ export function createCopyMode(input: {
     return sign?.after?.trim()
   }
 
-  function taskDetailIndent(row: CopyRow, text: string) {
-    if (row.kind !== "tool" || row.tool !== "task") return 0
-    // Task detail rows render under the title text, after the icon/gap.
+  function toolDetailIndent(row: CopyRow, text: string) {
+    if (row.kind !== "tool" || row.tool !== "subagent") return 0
+    // Tool detail rows render under the title text, after the icon/gap.
     return text.trimStart().startsWith("↳") ? 2 : 0
   }
 
@@ -503,7 +569,7 @@ export function createCopyMode(input: {
     const child = childById(row.id, cache)
     if (!child) return row.col
     const line = copyLine(row, child)
-    return row.col + line.col + taskDetailIndent(row, line.text) + shift(row, line.col)
+    return row.col + line.col + toolDetailIndent(row, line.text) + shift(row, line.col)
   }
 
   function motionLine(row: CopyRow, cache?: Map<string, any>): { text: string; min: number; copyable?: boolean } {
@@ -515,7 +581,7 @@ export function createCopyMode(input: {
     const line = match.table?.display(row.line - match.y) ?? copyLine(row, child)
     const col = match.table ? match.gutter + line.col : line.col
     const text = line.text ?? ""
-    return { text, min: row.col + col + taskDetailIndent(row, text) + shift(row, col), copyable: line.copyable }
+    return { text, min: row.col + col + toolDetailIndent(row, text) + shift(row, col), copyable: line.copyable }
   }
 
   function motionMin(row?: CopyRow, cache?: Map<string, any>): number {
@@ -536,7 +602,7 @@ export function createCopyMode(input: {
     const child = childById(row.id, cache)
     if (!child) return ""
     const line = copyLine(row, child)
-    return " ".repeat(row.col + line.col + taskDetailIndent(row, line.text) + shift(row, line.col)) + line.text
+    return " ".repeat(row.col + line.col + toolDetailIndent(row, line.text) + shift(row, line.col)) + line.text
   }
 
   function rowText(row: CopyRow, cache?: Map<string, any>): string {
@@ -1187,12 +1253,7 @@ export function createCopyMode(input: {
 
   function rangeText(anchor: Endpoint, head: Endpoint, visual: CopyVisualMode): string {
     const list = rows()
-    const cache = new Map(
-      input
-        .scroll()
-        .getChildren()
-        .map((c) => [c.id, c]),
-    )
+    const cache = childCache()
     const { start, end } = orderEndpoints(anchor, head)
     if (visual === "line") {
       const lineRows = Array.from({ length: end.idx - start.idx + 1 }, (_, i) => list[start.idx + i])
@@ -1262,12 +1323,7 @@ export function createCopyMode(input: {
     const s = state()
     const row = list[s.idx]
     if (!row) return null
-    const cache = new Map(
-      input
-        .scroll()
-        .getChildren()
-        .map((c) => [c.id, c]),
-    )
+    const cache = childCache()
     if (!rowCopyable(row, cache)) return null
     const text = signedText(row, cache)
     setYankLineFlash(s.idx)
@@ -1280,12 +1336,7 @@ export function createCopyMode(input: {
     if (!s.active) return null
     const list = rows()
     if (!list.length) return null
-    const cache = new Map(
-      input
-        .scroll()
-        .getChildren()
-        .map((c) => [c.id, c]),
-    )
+    const cache = childCache()
     const next = copyMatchingBracket(wordRows(list, cache), (idx) => motionText(list[idx]!, cache), s.idx, s.col)
     if (next.idx === s.idx && next.col === s.col) return null
     const current = { idx: s.idx, col: s.col }
@@ -1298,81 +1349,7 @@ export function createCopyMode(input: {
   async function copy() {
     const text = selectionText()
     if (!text) return
-    await writeClipboard(text)
-  }
-
-  function isToolToggleRow(row: CopyRow) {
-    if (row.kind !== "tool") return false
-    const text = rowText(row).trim().toLowerCase()
-    return text === "click to expand" || text === "click to collapse"
-  }
-
-  function toolToggleText(row: CopyRow) {
-    if (row.kind !== "tool") return undefined
-    const text = rowText(row).trim().toLowerCase()
-    if (text === "click to expand" || text === "click to collapse") return text
-    return undefined
-  }
-
-  function lastToolToggleIndex(list: CopyRow[], id: string, expectedText?: string) {
-    return list.findLastIndex((candidate) => {
-      if (candidate.id !== id) return false
-      const text = toolToggleText(candidate)
-      return expectedText ? text === expectedText : !!text
-    })
-  }
-
-  function settleToolToggle(
-    id: string,
-    expectedText: string,
-    apply: (idx: number, row: CopyRow) => void,
-    afterSettle?: () => void,
-  ) {
-    if (compensateTimer) clearTimeout(compensateTimer)
-
-    const tryApply = () => {
-      const scr = input.scroll()
-      if (!scr || scr.isDestroyed) return false
-      const list = rows()
-      const idx = lastToolToggleIndex(list, id, expectedText)
-      const next = list[idx]
-      if (!next) return false
-      apply(idx, next)
-      return true
-    }
-
-    let attempts = 0
-    let settled = false
-    const poll = () => {
-      attempts++
-      const applied = tryApply()
-      if (applied && !settled && attempts >= 2) {
-        settled = true
-        afterSettle?.()
-      }
-      if (attempts >= 10) {
-        if (!settled) afterSettle?.()
-        return
-      }
-      compensateTimer = setTimeout(poll, attempts < 4 ? 4 : 16)
-    }
-    compensateTimer = setTimeout(poll, 0)
-  }
-
-  function revealToolToggle(id: string, expectedText: string, afterSettle?: () => void) {
-    settleToolToggle(id, expectedText, (idx) => sync(idx), afterSettle)
-  }
-
-  function preserveToolToggleOffset(id: string, expectedText: string, offset: number, afterSettle?: () => void) {
-    settleToolToggle(
-      id,
-      expectedText,
-      (_, row) => {
-        const scr = input.scroll()
-        scrollByScreenDelta(scr, row.y - viewportY(scr) - offset)
-      },
-      afterSettle,
-    )
+    await input.clipboard.write(text)
   }
 
   function activate() {
@@ -1383,33 +1360,54 @@ export function createCopyMode(input: {
     return input.activate?.(row) ?? false
   }
 
+  /**
+   * Expands or collapses the tool output under the cursor. The layout changes
+   * when the tool grows, so the cursor is restored once the row settled.
+   */
   function toggleCollapsed() {
     const s = state()
     if (!s.active) return false
     const list = rows()
     const row = list[s.idx]
-    if (!row || !isToolToggleRow(row)) return false
-    if (lastToolToggleIndex(list, row.id) !== s.idx) return false
-    const text = rowText(row).trim().toLowerCase()
-    const expanding = text === "click to expand"
-    const offset = row.y - viewportY(input.scroll())
+    if (!row || row.kind !== "tool" || !row.part) return false
     const targetID = row.id
-    const expectedText = expanding ? "click to collapse" : "click to expand"
-    const toggled = Boolean(input.toggleCollapsed?.(row.id) || (row.part ? input.toggleCollapsed?.(row.part) : false))
-    if (toggled) {
-      const restoreCursor = () => {
-        const list = rows()
-        const idx = lastToolToggleIndex(list, targetID, expectedText)
-        const next = list[idx]
-        if (!next) return
-        if (expanding) sync(idx)
-        else setState((prev) => ({ ...prev, active: true, idx }))
-        setState((prev) => ({ ...prev, col: copyMin(next), stick: "first" }))
-      }
-      if (expanding) revealToolToggle(targetID, expectedText, restoreCursor)
-      else preserveToolToggleOffset(targetID, expectedText, offset, restoreCursor)
+    const part = row.part
+    const offset = row.y - viewportY(input.scroll())
+    const snap = snapshotScroll()
+    const toggled = Boolean(input.toggleCollapsed?.(part))
+    if (!toggled) return false
+    compensateScroll(snap, () => restoreToolCursor(targetID, part, offset))
+    return true
+  }
+
+  function restoreToolCursor(id: string, part: string, offset: number) {
+    if (compensateTimer) clearTimeout(compensateTimer)
+
+    const tryApply = () => {
+      const scr = input.scroll()
+      if (!scr || scr.isDestroyed) return false
+      const list = rows()
+      const idx = list.findIndex((candidate) => candidate.id === id && candidate.part === part)
+      if (idx < 0) return false
+      const target = list[idx]
+      if (!target) return false
+      // The tool grew or shrank: keep it on the row it was on.
+      scrollByScreenDelta(scr, target.y - viewportY(scr) - offset)
+      sync(idx)
+      const next = rows()[state().idx]
+      if (!next) return true
+      setState((prev) => ({ ...prev, col: copyMin(next), stick: "first" }))
+      return true
     }
-    return toggled
+
+    let attempts = 0
+    const poll = () => {
+      attempts++
+      if (tryApply()) return
+      if (attempts >= 10) return
+      compensateTimer = setTimeout(poll, attempts < 4 ? 4 : 16)
+    }
+    compensateTimer = setTimeout(poll, 0)
   }
 
   // --- jumps ---
@@ -1664,7 +1662,7 @@ export function createCopyMode(input: {
     let col = 0
     for (const seg of segmenter.segment(line.text)) {
       if (line.min + col >= cursor) return seg.segment
-      col += Bun.stringWidth(seg.segment)
+      col += stringWidth(seg.segment)
     }
     return " "
   })
@@ -1674,7 +1672,7 @@ export function createCopyMode(input: {
     if (!s.active || s.visual) return undefined
     const list = rows()
     const row = list[s.idx]
-    if (row && isToolToggleRow(row) && lastToolToggleIndex(list, row.id) === s.idx) {
+    if (row && row.kind === "tool") {
       const text = rowText(row).trim()
       if (text) return { kind: "tool-toggle" as const, left: copyMin(row), text }
     }

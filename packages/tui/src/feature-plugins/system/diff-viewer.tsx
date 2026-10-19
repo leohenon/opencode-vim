@@ -28,6 +28,7 @@ import { type DiffSource, useConfig } from "../../config"
 import { locationKey } from "../../context/data"
 import { useTheme, useThemes } from "../../context/theme"
 import { PatchDiff, type PatchDiffRef } from "../../component/patch-diff"
+import { openExternalDiffViewer } from "./external-diff-viewer"
 import {
   allExpandedFileTreeDirectories,
   buildFileTree,
@@ -1320,43 +1321,66 @@ function Commands(props: { context: Plugin.Context }) {
         group: "VCS",
         palette: true,
         run() {
-          const route = props.context.ui.router.current()
-          props.context.ui.dialog.clear()
-          const current = props.context.ui.panel.current()
-          if (route.type === "session" && current?.sessionID === route.sessionID && current.name === ROUTE) {
-            props.context.ui.panel.close()
+          // ocv: a configured external viewer replaces the built-in diff view.
+          const external = config.data.diff_viewer?.command
+          if (external?.length) {
+            props.context.ui.dialog.clear()
+            void openExternalDiffViewer({
+              command: external,
+              directory: props.context.location?.directory ?? process.cwd(),
+              renderer: props.context.renderer,
+            }).catch((error) => {
+              const reason = error instanceof Error ? error.message : String(error)
+              props.context.ui.toast.show({
+                variant: "warning",
+                title: "External diff viewer failed",
+                message: `${reason}. Opening the built-in diff viewer.`,
+              })
+              openBuiltin(props.context)
+            })
             return
           }
-          // Outside a session there is no panel slot, so /diff falls back to the full-screen route.
-          if (
-            props.context.ui.panel.open(ROUTE, {
-              presentation: config.data.diffs?.fullscreen === true ? "fullscreen" : "panel",
-            })
-          )
-            return
-          const returnRoute: Route =
-            route.type === "home"
-              ? { type: "home" }
-              : route.type === "session"
-                ? { type: "session", sessionID: route.sessionID }
-                : {
-                    type: "plugin",
-                    id: route.id,
-                    name: route.name,
-                    ...(route.data ? { data: { ...route.data } } : {}),
-                  }
-          props.context.ui.router.navigate({
-            type: "plugin",
-            name: ROUTE,
-            data: {
-              sessionID: route.type === "session" ? route.sessionID : undefined,
-              returnRoute,
-            },
-          })
+          openBuiltin(props.context)
         },
       },
     ],
   }))
+
+  function openBuiltin(context: Plugin.Context) {
+    const route = context.ui.router.current()
+    context.ui.dialog.clear()
+    const current = context.ui.panel.current()
+    if (route.type === "session" && current?.sessionID === route.sessionID && current.name === ROUTE) {
+      context.ui.panel.close()
+      return
+    }
+    // Outside a session there is no panel slot, so /diff falls back to the full-screen route.
+    if (
+      context.ui.panel.open(ROUTE, {
+        presentation: config.data.diffs?.fullscreen === true ? "fullscreen" : "panel",
+      })
+    )
+      return
+    const returnRoute: Route =
+      route.type === "home"
+        ? { type: "home" }
+        : route.type === "session"
+          ? { type: "session", sessionID: route.sessionID }
+          : {
+              type: "plugin",
+              id: route.id,
+              name: route.name,
+              ...(route.data ? { data: { ...route.data } } : {}),
+            }
+    context.ui.router.navigate({
+      type: "plugin",
+      name: ROUTE,
+      data: {
+        sessionID: route.type === "session" ? route.sessionID : undefined,
+        returnRoute,
+      },
+    })
+  }
   return null
 }
 

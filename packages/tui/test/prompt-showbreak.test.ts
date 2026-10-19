@@ -19,8 +19,8 @@ describe("prompt showbreak", () => {
       },
     }
     const target = {
-      x: 5,
-      y: 10,
+      screenX: 5,
+      screenY: 10,
       height: 3,
       scrollY: 1,
       lineInfo: {
@@ -108,8 +108,8 @@ describe("prompt showbreak", () => {
     let calls = 0
     const buffer = { drawText: () => calls++ }
     const target = {
-      x: 5,
-      y: 0,
+      screenX: 5,
+      screenY: 0,
       height: 1,
       scrollY: 0,
       lineInfo: { lineWraps: [1] },
@@ -117,7 +117,7 @@ describe("prompt showbreak", () => {
     const color = RGBA.fromInts(255, 255, 255)
 
     drawShowbreak(buffer as any, target as any, false, color, color)
-    drawShowbreak(buffer as any, { ...target, x: 1 } as any, true, color, color)
+    drawShowbreak(buffer as any, { ...target, screenX: 1 } as any, true, color, color)
 
     expect(calls).toBe(0)
   })

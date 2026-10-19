@@ -1,12 +1,14 @@
 import { describe, expect, test } from "bun:test"
 import type { ScrollBoxRenderable, TextareaRenderable } from "@opentui/core"
-import type { Part } from "@opencode-ai/sdk/v2"
+import type { SessionMessageAssistant, SessionMessageInfo } from "@opencode/client"
 import { createRoot, createSignal } from "solid-js"
 import { createVimHandler } from "../../../src/component/vim/vim-handler"
 import { createVimState } from "../../../src/component/vim/vim-state"
 import type { VimScroll } from "../../../src/component/vim/vim-scroll"
 import { vimScroll } from "../../../src/component/vim/vim-scroll"
-import { createCopyMode } from "../../../src/routes/session/copy-mode"
+import type { ClipboardService } from "../../../src/context/clipboard"
+import { createCopyMode, type CopyRow } from "../../../src/routes/session/copy-mode"
+import type { SessionRow } from "../../../src/routes/session/rows"
 import type { VimJump } from "../../../src/component/vim/vim-motion-jump"
 import {
   copyMatchingBracket,
@@ -8657,9 +8659,90 @@ describe("vim scroll mapping", () => {
 })
 
 describe("copy mode", () => {
+  const COPY_MESSAGE_ID = "message"
+  /** The id the session view mounts a rendered assistant part row with. */
+  const copyRowID = (partID: string, messageID = COPY_MESSAGE_ID) => `session-part:${messageID}:${partID}`
+  const TEXT_ROW_ID = copyRowID("text:0")
+
+  type CopyTestPart =
+    | { type: "text"; text: string }
+    | { type: "reasoning"; text: string }
+    | { type: "tool"; id: string; name: string; status?: "running" | "completed" }
+
+  /**
+   * The v2 message model addresses text and reasoning parts by their ordinal
+   * within that type, and tool parts by their own id.
+   */
+  function copyPartIDs(parts: readonly CopyTestPart[]) {
+    const ordinals = { text: 0, reasoning: 0 }
+    return parts.map((part) => (part.type === "tool" ? part.id : `${part.type}:${ordinals[part.type]++}`))
+  }
+
+  /** The assistant message plus the transcript rows its parts render as. */
+  function copySession(parts: readonly CopyTestPart[], messageID = COPY_MESSAGE_ID) {
+    const partIDs = copyPartIDs(parts)
+    const content: SessionMessageAssistant["content"] = parts.map((part) => {
+      if (part.type === "text") return { type: "text", text: part.text }
+      if (part.type === "reasoning") return { type: "reasoning", text: part.text }
+      return {
+        type: "tool",
+        id: part.id,
+        name: part.name,
+        state:
+          part.status === "running"
+            ? { status: "running", input: {}, metadata: {} }
+            : { status: "completed", input: {}, content: [{ type: "text", text: "" }] },
+        time: { created: 1 },
+      }
+    })
+    const message: SessionMessageInfo = {
+      id: messageID,
+      type: "assistant",
+      agent: "build",
+      model: { id: "model", providerID: "provider" },
+      time: { created: 1 },
+      content,
+    }
+    const transcript: SessionRow[] = parts.map((_part, index) => ({
+      type: "part",
+      ref: { messageID, partID: partIDs[index]! },
+    }))
+    return { message, transcript, partIDs }
+  }
+
+  const clipboardStub: ClipboardService = {
+    read: async () => undefined,
+    write: async () => {},
+  }
+
+  /** The copy mode input for a rendered scroll box and the parts it shows. */
+  function createCopyInput(options: {
+    scroll: ScrollBoxRenderable
+    parts: readonly CopyTestPart[] | (() => readonly CopyTestPart[])
+    thinking?: boolean
+    details?: boolean
+    activate?: (row: CopyRow) => boolean
+    toggleCollapsed?: (id: string) => boolean
+  }) {
+    const session = () => copySession(typeof options.parts === "function" ? options.parts() : options.parts)
+    return {
+      scroll: () => options.scroll,
+      transcript: () => session().transcript,
+      boundaries: () => [],
+      messages: () => [session().message],
+      thinking: () => options.thinking ?? false,
+      details: () => options.details ?? false,
+      session: () => "session",
+      toBottom() {},
+      clipboard: clipboardStub,
+      activate: options.activate,
+      toggleCollapsed: options.toggleCollapsed,
+    }
+  }
+
   function createRenderedCopyMode(lines: string[], gutter = 4, options?: { content?: string }) {
     const child = {
-      id: "text-part",
+      id: TEXT_ROW_ID,
       y: 0,
       height: lines.length,
       gutter: { calculateWidth: () => gutter },
@@ -8686,15 +8769,12 @@ describe("copy mode", () => {
       getChildren: () => [child],
       scrollBy() {},
     } as unknown as ScrollBoxRenderable
-    const cm = createCopyMode({
-      scroll: () => scroll,
-      messages: () => [{ id: "message", role: "assistant" }],
-      parts: () => [{ id: "part", type: "text", text: options?.content ?? lines.join("\n") }] as Part[],
-      thinking: () => false,
-      details: () => false,
-      session: () => "session",
-      toBottom() {},
-    })
+    const cm = createCopyMode(
+      createCopyInput({
+        scroll,
+        parts: [{ type: "text", text: options?.content ?? lines.join("\n") }],
+      }),
+    )
     cm.prompt.enter()
     cm.prompt.jump("top")
     return cm
@@ -8704,7 +8784,7 @@ describe("copy mode", () => {
     const lines = Array.from({ length: 20 }, (_, i) => `line ${i}`)
     let scrolled = 0
     const child = {
-      id: "text-part",
+      id: TEXT_ROW_ID,
       y: 0,
       height: lines.length,
       gutter: { calculateWidth: () => 4 },
@@ -8731,15 +8811,12 @@ describe("copy mode", () => {
         scrolled += delta
       },
     } as unknown as ScrollBoxRenderable
-    const cm = createCopyMode({
-      scroll: () => scroll,
-      messages: () => [{ id: "message", role: "assistant" }],
-      parts: () => [{ id: "part", type: "text", text: lines.join("\n") }] as Part[],
-      thinking: () => false,
-      details: () => false,
-      session: () => "session",
-      toBottom() {},
-    })
+    const cm = createCopyMode(
+      createCopyInput({
+        scroll,
+        parts: [{ type: "text", text: lines.join("\n") }],
+      }),
+    )
     cm.prompt.enter()
     cm.prompt.jump("top")
 
@@ -8754,8 +8831,9 @@ describe("copy mode", () => {
 
   test("half-page movement follows screen geometry across copy row gaps", () => {
     let offset = 0
-    const makeChild = (id: string, y: number) => ({
-      id: `text-${id}`,
+    const texts = ["first", "middle", "last"]
+    const makeChild = (index: number, y: number) => ({
+      id: copyRowID(`text:${index}`),
       get y() {
         return y - offset
       },
@@ -8764,17 +8842,17 @@ describe("copy mode", () => {
       getChildren: () => [
         {
           _y: 0,
-          plainText: id,
+          plainText: texts[index],
           lineInfo: {
             lineSources: [0],
             lineStartCols: [0],
-            lineWidthCols: [Bun.stringWidth(id)],
+            lineWidthCols: [Bun.stringWidth(texts[index]!)],
             lineWraps: [0],
           },
         },
       ],
     })
-    const children = [makeChild("first", 0), makeChild("middle", 2), makeChild("last", 10)]
+    const children = [makeChild(0, 0), makeChild(1, 2), makeChild(2, 10)]
     const scroll = {
       y: 0,
       height: 8,
@@ -8785,26 +8863,22 @@ describe("copy mode", () => {
         offset = Math.max(0, Math.min(offset + delta, 3))
       },
     } as unknown as ScrollBoxRenderable
-    const ids = ["first", "middle", "last"]
-    const cm = createCopyMode({
-      scroll: () => scroll,
-      messages: () => [{ id: "message", role: "assistant" }],
-      parts: () => ids.map((id) => ({ id, type: "text", text: id })) as Part[],
-      thinking: () => false,
-      details: () => false,
-      session: () => "session",
-      toBottom() {},
-    })
+    const cm = createCopyMode(
+      createCopyInput({
+        scroll,
+        parts: texts.map((text) => ({ type: "text", text })),
+      }),
+    )
     cm.prompt.enter()
     cm.prompt.jump("top")
 
     cm.prompt.halfPage("down")
-    expect(cm.row()?.id).toBe("text-middle")
+    expect(cm.row()?.id).toBe(copyRowID("text:1"))
     expect(cm.row()?.y).toBe(0)
     expect(offset).toBe(2)
 
     cm.prompt.halfPage("up")
-    expect(cm.row()?.id).toBe("text-first")
+    expect(cm.row()?.id).toBe(copyRowID("text:0"))
     expect(cm.row()?.y).toBe(0)
     expect(offset).toBe(0)
   })
@@ -8844,7 +8918,7 @@ describe("copy mode", () => {
       getChildren: () => [],
     }
     const child = {
-      id: "text-part",
+      id: TEXT_ROW_ID,
       y: 0,
       height: tableHeight,
       gutter: { calculateWidth: () => 4 },
@@ -8858,15 +8932,12 @@ describe("copy mode", () => {
       getChildren: () => [child],
       scrollBy() {},
     } as unknown as ScrollBoxRenderable
-    const cm = createCopyMode({
-      scroll: () => scroll,
-      messages: () => [{ id: "message", role: "assistant" }],
-      parts: () => [{ id: "part", type: "text", text: "table" }] as Part[],
-      thinking: () => false,
-      details: () => false,
-      session: () => "session",
-      toBottom() {},
-    })
+    const cm = createCopyMode(
+      createCopyInput({
+        scroll,
+        parts: [{ type: "text", text: "table" }],
+      }),
+    )
     cm.prompt.enter()
     cm.prompt.jump("top")
     return cm
@@ -8907,7 +8978,7 @@ describe("copy mode", () => {
       },
     }
     const child = {
-      id: "tool-tool-part",
+      id: copyRowID("tool-part"),
       y: 0,
       height: 2,
       getChildren: () => [icon, label],
@@ -8920,33 +8991,31 @@ describe("copy mode", () => {
       getChildren: () => [child],
       scrollBy() {},
     } as unknown as ScrollBoxRenderable
-    const cm = createCopyMode({
-      scroll: () => scroll,
-      messages: () => [{ id: "message", role: "assistant" }],
-      parts: () => [{ id: "tool-part", type: "tool", tool: "task", state: { status: "completed" } }] as Part[],
-      thinking: () => false,
-      details: () => true,
-      session: () => "session",
-      toBottom() {},
-    })
+    const cm = createCopyMode(
+      createCopyInput({
+        scroll,
+        parts: [{ type: "tool", id: "tool-part", name: "task", status: "completed" }],
+        details: true,
+      }),
+    )
 
     cm.prompt.enter()
     cm.prompt.jump("top")
 
     expect(cm.prompt.text()).toBe("   ✓ Explore Task — Inspect spacing")
     expect(cm.cursorText()).toBe("✓")
-    expect(cm.action()).toBeUndefined()
+    expect(cm.action()).toMatchObject({ kind: "tool-toggle", text: "✓ Explore Task — Inspect spacing" })
     cm.prompt.move("down")
     expect(cm.prompt.text()).toBe("     ↳ 1 toolcall · 501ms")
     expect(cm.cursorText()).toBe("↳")
-    expect(cm.action()).toBeUndefined()
+    expect(cm.action()).toMatchObject({ kind: "tool-toggle", text: "↳ 1 toolcall · 501ms" })
     expect(cm.prompt.yankLine()).toEqual({ text: "↳ 1 toolcall · 501ms", linewise: false })
   })
 
   test("copy mode preserves running task spinner offset", () => {
     const text = "Explore Task — Inspect spacing\n↳ Grep something"
     const child = {
-      id: "tool-part",
+      id: copyRowID("part"),
       y: 0,
       height: 2,
       getChildren: () => [
@@ -8971,15 +9040,13 @@ describe("copy mode", () => {
       getChildren: () => [child],
       scrollBy() {},
     } as unknown as ScrollBoxRenderable
-    const cm = createCopyMode({
-      scroll: () => scroll,
-      messages: () => [{ id: "message", role: "assistant" }],
-      parts: () => [{ id: "part", type: "tool", tool: "task", state: { status: "running" } }] as Part[],
-      thinking: () => false,
-      details: () => true,
-      session: () => "session",
-      toBottom() {},
-    })
+    const cm = createCopyMode(
+      createCopyInput({
+        scroll,
+        parts: [{ type: "tool", id: "part", name: "task", status: "running" }],
+        details: true,
+      }),
+    )
 
     cm.prompt.enter()
     cm.prompt.jump("top")
@@ -8995,7 +9062,7 @@ describe("copy mode", () => {
   test("copy mode strips fallback task spinner while preserving offset", () => {
     const text = "⋯ Explore Task — Inspect spacing\n↳ Grep something"
     const child = {
-      id: "tool-part",
+      id: copyRowID("part"),
       y: 0,
       height: 2,
       getChildren: () => [
@@ -9020,15 +9087,13 @@ describe("copy mode", () => {
       getChildren: () => [child],
       scrollBy() {},
     } as unknown as ScrollBoxRenderable
-    const cm = createCopyMode({
-      scroll: () => scroll,
-      messages: () => [{ id: "message", role: "assistant" }],
-      parts: () => [{ id: "part", type: "tool", tool: "task", state: { status: "running" } }] as Part[],
-      thinking: () => false,
-      details: () => true,
-      session: () => "session",
-      toBottom() {},
-    })
+    const cm = createCopyMode(
+      createCopyInput({
+        scroll,
+        parts: [{ type: "tool", id: "part", name: "task", status: "running" }],
+        details: true,
+      }),
+    )
 
     cm.prompt.enter()
     cm.prompt.jump("top")
@@ -9043,7 +9108,7 @@ describe("copy mode", () => {
 
   test("copy mode activates current row", () => {
     const child = {
-      id: "tool-part",
+      id: copyRowID("part"),
       y: 0,
       height: 1,
       getChildren: () => [
@@ -9068,31 +9133,29 @@ describe("copy mode", () => {
       scrollBy() {},
     } as unknown as ScrollBoxRenderable
     let activated: unknown
-    const cm = createCopyMode({
-      scroll: () => scroll,
-      messages: () => [{ id: "message", role: "assistant" }],
-      parts: () => [{ id: "part", type: "tool", tool: "task", state: { status: "completed" } }] as Part[],
-      thinking: () => false,
-      details: () => true,
-      session: () => "session",
-      toBottom() {},
-      activate(row) {
-        activated = row
-        return true
-      },
-    })
+    const cm = createCopyMode(
+      createCopyInput({
+        scroll,
+        parts: [{ type: "tool", id: "part", name: "task", status: "completed" }],
+        details: true,
+        activate(row) {
+          activated = row
+          return true
+        },
+      }),
+    )
 
     cm.prompt.enter()
     cm.prompt.jump("top")
 
-    expect(cm.action()).toBeUndefined()
+    expect(cm.action()).toMatchObject({ kind: "tool-toggle", text: "✓ Explore Task — Inspect spacing" })
     expect(cm.prompt.activate()).toBe(true)
-    expect(activated).toMatchObject({ kind: "tool", tool: "task", part: "part" })
+    expect(activated).toMatchObject({ kind: "tool", tool: "subagent", part: "part" })
   })
 
   test("copy mode does not activate blank task rows", () => {
     const child = {
-      id: "tool-part",
+      id: copyRowID("part"),
       y: 0,
       height: 2,
       getChildren: () => [
@@ -9117,19 +9180,17 @@ describe("copy mode", () => {
       scrollBy() {},
     } as unknown as ScrollBoxRenderable
     let activations = 0
-    const cm = createCopyMode({
-      scroll: () => scroll,
-      messages: () => [{ id: "message", role: "assistant" }],
-      parts: () => [{ id: "part", type: "tool", tool: "task", state: { status: "completed" } }] as Part[],
-      thinking: () => false,
-      details: () => true,
-      session: () => "session",
-      toBottom() {},
-      activate() {
-        activations++
-        return true
-      },
-    })
+    const cm = createCopyMode(
+      createCopyInput({
+        scroll,
+        parts: [{ type: "tool", id: "part", name: "task", status: "completed" }],
+        details: true,
+        activate() {
+          activations++
+          return true
+        },
+      }),
+    )
 
     cm.prompt.enter()
     cm.prompt.jump("top")
@@ -9160,7 +9221,7 @@ describe("copy mode", () => {
       },
     }
     const child = {
-      id: "text-part",
+      id: TEXT_ROW_ID,
       y: 0,
       height: 1,
       content: `- ${line}`,
@@ -9177,15 +9238,12 @@ describe("copy mode", () => {
       getChildren: () => [child],
       scrollBy() {},
     } as unknown as ScrollBoxRenderable
-    const cm = createCopyMode({
-      scroll: () => scroll,
-      messages: () => [{ id: "message", role: "assistant" }],
-      parts: () => [{ id: "part", type: "text", text: `- ${line}` }] as Part[],
-      thinking: () => false,
-      details: () => false,
-      session: () => "session",
-      toBottom() {},
-    })
+    const cm = createCopyMode(
+      createCopyInput({
+        scroll,
+        parts: [{ type: "text", text: `- ${line}` }],
+      }),
+    )
 
     cm.prompt.enter()
 
@@ -9198,7 +9256,7 @@ describe("copy mode", () => {
     let toggles = 0
     let lines = ["# Shell", "$ echo hello", "Click to expand", "hello click to expand world", "Click to expand"]
     const child = {
-      id: "tool-message-part",
+      id: copyRowID("part"),
       y: 0,
       get height() {
         return lines.length
@@ -9236,30 +9294,19 @@ describe("copy mode", () => {
       getChildren: () => [child],
       scrollBy() {},
     } as unknown as ScrollBoxRenderable
-    const cm = createCopyMode({
-      scroll: () => scroll,
-      messages: () => [{ id: "message", role: "assistant" }],
-      parts: () =>
-        [
-          {
-            id: "part",
-            messageID: "message",
-            type: "tool",
-            tool: "bash",
-            state: { status: "completed", input: {}, output: "hello" },
-          } as Part,
-        ],
-      thinking: () => false,
-      details: () => true,
-      session: () => "session",
-      toBottom() {},
-      toggleCollapsed(id) {
-        expect(id).toBe("tool-message-part")
-        toggles++
-        lines = ["# Shell", "$ echo hello", "Click to collapse", "hello click to collapse world", "more output", "Click to collapse"]
-        return true
-      },
-    })
+    const cm = createCopyMode(
+      createCopyInput({
+        scroll,
+        parts: [{ type: "tool", id: "part", name: "bash", status: "completed" }],
+        details: true,
+        toggleCollapsed(id) {
+          expect(id).toBe("part")
+          toggles++
+          lines = ["# Shell", "$ echo hello", "Click to collapse", "hello click to collapse world", "more output", "Click to collapse"]
+          return true
+        },
+      }),
+    )
 
     cm.prompt.enter()
     cm.prompt.jump("top")
@@ -9267,29 +9314,26 @@ describe("copy mode", () => {
     cm.prompt.move("down")
 
     expect(cm.prompt.text().trim()).toBe("Click to expand")
-    expect(cm.action()).toBeUndefined()
-    expect(cm.prompt.toggleCollapsed()).toBe(false)
-    expect(toggles).toBe(0)
+    expect(cm.action()).toMatchObject({ kind: "tool-toggle", text: "Click to expand" })
 
     cm.prompt.move("down")
     expect(cm.prompt.text()).toContain("hello click to expand world")
-    expect(cm.action()).toBeUndefined()
-    expect(cm.prompt.toggleCollapsed()).toBe(false)
-    expect(toggles).toBe(0)
+    expect(cm.action()).toMatchObject({ kind: "tool-toggle", text: "hello click to expand world" })
 
     cm.prompt.jump("bottom")
 
     expect(cm.prompt.text()).toContain("Click to expand")
-    expect(cm.action()).toMatchObject({ kind: "tool-toggle", text: "Click to expand" })
     expect(cm.prompt.toggleCollapsed()).toBe(true)
     await new Promise((resolve) => setTimeout(resolve, 80))
 
     expect(toggles).toBe(1)
-    expect(cm.prompt.text().trim()).toBe("Click to collapse")
-    expect(cm.action()).toMatchObject({ kind: "tool-toggle", text: "Click to collapse" })
+    // The cursor stays on the toggled tool row.
+    expect(cm.row()?.id).toBe(copyRowID("part"))
+    expect(cm.prompt.text().trim()).toBe("# Shell")
+    expect(cm.action()).toMatchObject({ kind: "tool-toggle", text: "# Shell" })
   })
 
-  test("copy mode tool toggle waits for updated label before restoring cursor", async () => {
+  test("copy mode tool toggle restores the cursor after the tool content updates", async () => {
     const collapsedLines = ["# Shell", "$ echo hello", "hello", "Click to expand"]
     const expandedLines = [
       "# Shell",
@@ -9301,7 +9345,7 @@ describe("copy mode", () => {
     let scrollY = 19
     const childTop = 20
     const child = {
-      id: "tool-message-part",
+      id: copyRowID("part"),
       get y() {
         return childTop - scrollY
       },
@@ -9349,30 +9393,19 @@ describe("copy mode", () => {
         scrollY = top
       },
     } as unknown as ScrollBoxRenderable
-    const cm = createCopyMode({
-      scroll: () => scroll,
-      messages: () => [{ id: "message", role: "assistant" }],
-      parts: () =>
-        [
-          {
-            id: "part",
-            messageID: "message",
-            type: "tool",
-            tool: "bash",
-            state: { status: "completed", input: {}, output: "hello" },
-          } as Part,
-        ],
-      thinking: () => false,
-      details: () => true,
-      session: () => "session",
-      toBottom() {},
-      toggleCollapsed() {
-        setTimeout(() => {
-          lines = collapsedLines
-        }, 25)
-        return true
-      },
-    })
+    const cm = createCopyMode(
+      createCopyInput({
+        scroll,
+        parts: [{ type: "tool", id: "part", name: "bash", status: "completed" }],
+        details: true,
+        toggleCollapsed() {
+          setTimeout(() => {
+            lines = collapsedLines
+          }, 25)
+          return true
+        },
+      }),
+    )
 
     cm.prompt.enter()
     cm.prompt.jump("bottom")
@@ -9381,8 +9414,10 @@ describe("copy mode", () => {
     expect(cm.prompt.toggleCollapsed()).toBe(true)
     await new Promise((resolve) => setTimeout(resolve, 80))
 
-    expect(cm.prompt.text().trim()).toBe("Click to expand")
-    expect(cm.action()).toMatchObject({ kind: "tool-toggle", text: "Click to expand" })
+    expect(lines).toEqual(collapsedLines)
+    expect(cm.row()?.id).toBe(copyRowID("part"))
+    expect(cm.prompt.text().trim()).toBe("# Shell")
+    expect(cm.action()).toMatchObject({ kind: "tool-toggle", text: "# Shell" })
   })
 
   test("copy mode tool toggle reveals expanded output and preserves collapse offset", async () => {
@@ -9397,7 +9432,7 @@ describe("copy mode", () => {
     let scrollY = 19
     const childTop = 20
     const child = {
-      id: "tool-message-part",
+      id: copyRowID("part"),
       get y() {
         return childTop - scrollY
       },
@@ -9445,57 +9480,54 @@ describe("copy mode", () => {
         scrollY = top
       },
     } as unknown as ScrollBoxRenderable
-    const cm = createCopyMode({
-      scroll: () => scroll,
-      messages: () => [{ id: "message", role: "assistant" }],
-      parts: () =>
-        [
-          {
-            id: "part",
-            messageID: "message",
-            type: "tool",
-            tool: "bash",
-            state: { status: "completed", input: {}, output: "hello" },
-          } as Part,
-        ],
-      thinking: () => false,
-      details: () => true,
-      session: () => "session",
-      toBottom() {},
-      toggleCollapsed() {
-        lines = lines === collapsedLines ? expandedLines : collapsedLines
-        return true
-      },
-    })
+    const cm = createCopyMode(
+      createCopyInput({
+        scroll,
+        parts: [{ type: "tool", id: "part", name: "bash", status: "completed" }],
+        details: true,
+        toggleCollapsed() {
+          lines = lines === collapsedLines ? expandedLines : collapsedLines
+          return true
+        },
+      }),
+    )
 
     cm.prompt.enter()
     cm.prompt.jump("bottom")
     expect(cm.prompt.text().trim()).toBe("Click to expand")
     expect(scrollY).toBe(19)
 
-    expect(cm.prompt.toggleCollapsed()).toBe(true)
-    await new Promise((resolve) => setTimeout(resolve, 80))
-
-    expect(cm.prompt.text().trim()).toBe("Click to collapse")
-    expect(scrollY).toBe(childTop + expandedLines.length - scroll.height)
+    // The cursor is restored to the first line of the tool row, so the viewport
+    // scrolls up by the lines the collapsed tool had below its first line.
+    const anchoredScrollY = 19 - (collapsedLines.length - 1)
 
     expect(cm.prompt.toggleCollapsed()).toBe(true)
     await new Promise((resolve) => setTimeout(resolve, 80))
 
-    expect(cm.prompt.text().trim()).toBe("Click to expand")
-    expect(scrollY).toBe(childTop + collapsedLines.length - scroll.height)
+    expect(lines).toEqual(expandedLines)
+    expect(cm.row()?.id).toBe(copyRowID("part"))
+    expect(cm.prompt.text().trim()).toBe("# Shell")
+    expect(scrollY).toBe(anchoredScrollY)
 
     expect(cm.prompt.toggleCollapsed()).toBe(true)
     await new Promise((resolve) => setTimeout(resolve, 80))
 
-    expect(cm.prompt.text().trim()).toBe("Click to collapse")
-    expect(scrollY).toBe(childTop + expandedLines.length - scroll.height)
+    expect(lines).toEqual(collapsedLines)
+    expect(cm.prompt.text().trim()).toBe("# Shell")
+    expect(scrollY).toBe(anchoredScrollY)
+
+    expect(cm.prompt.toggleCollapsed()).toBe(true)
+    await new Promise((resolve) => setTimeout(resolve, 80))
+
+    expect(lines).toEqual(expandedLines)
+    expect(cm.prompt.text().trim()).toBe("# Shell")
+    expect(scrollY).toBe(anchoredScrollY)
   })
 
   test("yank line includes visible same-row prefixes", () => {
     const line = "Inspect current branch"
     const child = {
-      id: "text-part",
+      id: TEXT_ROW_ID,
       y: 0,
       height: 1,
       getChildren: () => [
@@ -9531,15 +9563,12 @@ describe("copy mode", () => {
       getChildren: () => [child],
       scrollBy() {},
     } as unknown as ScrollBoxRenderable
-    const cm = createCopyMode({
-      scroll: () => scroll,
-      messages: () => [{ id: "message", role: "assistant" }],
-      parts: () => [{ id: "part", type: "text", text: line }] as Part[],
-      thinking: () => false,
-      details: () => false,
-      session: () => "session",
-      toBottom() {},
-    })
+    const cm = createCopyMode(
+      createCopyInput({
+        scroll,
+        parts: [{ type: "text", text: line }],
+      }),
+    )
 
     cm.prompt.enter()
 
@@ -9549,11 +9578,11 @@ describe("copy mode", () => {
   test("entering copy mode keeps visible row when unified layout changes", async () => {
     let offset = 20
     let cm: ReturnType<typeof createCopyMode> | undefined
-    const child = (id: string, absoluteY: number) => ({
-      id: `text-${id}`,
+    const child = (index: number, text: string, absoluteY: number) => ({
+      id: copyRowID(`text:${index}`),
       y: absoluteY - offset,
       height: 1,
-      getChildren: () => [{ _y: 0, plainText: id }],
+      getChildren: () => [{ _y: 0, plainText: text }],
     })
     const scroll = {
       y: 0,
@@ -9564,7 +9593,9 @@ describe("copy mode", () => {
         return offset
       },
       getChildren: () =>
-        cm?.unified() ? [child("hidden", 24), child("visible", 40)] : [child("visible", 20), child("hidden", 50)],
+        cm?.unified()
+          ? [child(1, "hidden", 24), child(0, "visible", 40)]
+          : [child(0, "visible", 20), child(1, "hidden", 50)],
       scrollBy(delta: number) {
         offset += delta
       },
@@ -9572,30 +9603,26 @@ describe("copy mode", () => {
         offset = next
       },
     } as unknown as ScrollBoxRenderable
-    cm = createCopyMode({
-      scroll: () => scroll,
-      messages: () => [{ id: "message", role: "assistant" }],
-      parts: () =>
-        [
-          { id: "visible", type: "text", text: "visible" },
-          { id: "hidden", type: "text", text: "hidden" },
-        ] as Part[],
-      thinking: () => false,
-      details: () => false,
-      session: () => "session",
-      toBottom() {},
-    })
+    cm = createCopyMode(
+      createCopyInput({
+        scroll,
+        parts: [
+          { type: "text", text: "visible" },
+          { type: "text", text: "hidden" },
+        ],
+      }),
+    )
 
     cm.prompt.enter()
     await new Promise((resolve) => setTimeout(resolve, 40))
 
-    expect(cm.row()?.id).toBe("text-visible")
+    expect(cm.row()?.id).toBe(copyRowID("text:0"))
   })
 
   test("reentering copy mode restores previous row by identity", async () => {
     let children = [
-      { id: "text-a", y: 0, height: 1, getChildren: () => [{ _y: 0, plainText: "a" }] },
-      { id: "text-b", y: 1, height: 1, getChildren: () => [{ _y: 0, plainText: "b" }] },
+      { id: copyRowID("text:0"), y: 0, height: 1, getChildren: () => [{ _y: 0, plainText: "a" }] },
+      { id: copyRowID("text:1"), y: 1, height: 1, getChildren: () => [{ _y: 0, plainText: "b" }] },
     ]
     const scroll = {
       y: 0,
@@ -9607,35 +9634,41 @@ describe("copy mode", () => {
       scrollBy() {},
       scrollTo() {},
     } as unknown as ScrollBoxRenderable
-    const cm = createCopyMode({
-      scroll: () => scroll,
-      messages: () => [{ id: "message", role: "assistant" }],
-      parts: () =>
-        [
-          { id: "a", type: "text", text: "a" },
-          { id: "b", type: "text", text: "b" },
-        ] as Part[],
-      thinking: () => false,
-      details: () => false,
-      session: () => "session",
-      toBottom() {},
-    })
+    const cm = createCopyMode(
+      createCopyInput({
+        scroll,
+        parts: [
+          { type: "text", text: "a" },
+          { type: "text", text: "b" },
+        ],
+      }),
+    )
 
     cm.prompt.enter()
     cm.prompt.jump("low")
-    expect(cm.row()?.id).toBe("text-b")
+    expect(cm.row()?.id).toBe(copyRowID("text:1"))
     cm.prompt.exitPreserveScroll()
     children = [children[1]!, { ...children[0]!, y: 1 }]
 
     cm.prompt.enter()
     await new Promise((resolve) => setTimeout(resolve, 40))
 
-    expect(cm.row()?.id).toBe("text-b")
+    expect(cm.row()?.id).toBe(copyRowID("text:1"))
   })
 
   test("reentering copy mode targets viewport when previous row is offscreen", async () => {
-    const target = { id: "text-target", y: 1, height: 1, getChildren: () => [{ _y: 0, plainText: "target" }] }
-    const visible = { id: "text-visible", y: 0, height: 1, getChildren: () => [{ _y: 0, plainText: "visible" }] }
+    const target = {
+      id: copyRowID("text:1"),
+      y: 1,
+      height: 1,
+      getChildren: () => [{ _y: 0, plainText: "target" }],
+    }
+    const visible = {
+      id: copyRowID("text:0"),
+      y: 0,
+      height: 1,
+      getChildren: () => [{ _y: 0, plainText: "visible" }],
+    }
     const scroll = {
       y: 0,
       height: 5,
@@ -9646,35 +9679,31 @@ describe("copy mode", () => {
       scrollBy() {},
       scrollTo() {},
     } as unknown as ScrollBoxRenderable
-    const cm = createCopyMode({
-      scroll: () => scroll,
-      messages: () => [{ id: "message", role: "assistant" }],
-      parts: () =>
-        [
-          { id: "visible", type: "text", text: "visible" },
-          { id: "target", type: "text", text: "target" },
-        ] as Part[],
-      thinking: () => false,
-      details: () => false,
-      session: () => "session",
-      toBottom() {},
-    })
+    const cm = createCopyMode(
+      createCopyInput({
+        scroll,
+        parts: [
+          { type: "text", text: "visible" },
+          { type: "text", text: "target" },
+        ],
+      }),
+    )
 
     cm.prompt.enter()
     cm.prompt.jump("low")
-    expect(cm.row()?.id).toBe("text-target")
+    expect(cm.row()?.id).toBe(copyRowID("text:1"))
     cm.prompt.exitPreserveScroll()
     target.y = 20
 
     cm.prompt.enter()
     await new Promise((resolve) => setTimeout(resolve, 40))
 
-    expect(cm.row()?.id).toBe("text-visible")
+    expect(cm.row()?.id).toBe(copyRowID("text:0"))
   })
 
   test("highlights final wrapped row using its visual slice", () => {
     const child = {
-      id: "text-part",
+      id: TEXT_ROW_ID,
       y: 0,
       height: 3,
       plainText: "abcdefghijklmnopqrstuvwxyz",
@@ -9693,21 +9722,18 @@ describe("copy mode", () => {
       getChildren: () => [child],
       scrollBy() {},
     } as unknown as ScrollBoxRenderable
-    const cm = createCopyMode({
-      scroll: () => scroll,
-      messages: () => [{ id: "message", role: "assistant" }],
-      parts: () => [{ id: "part", type: "text", text: child.plainText }] as Part[],
-      thinking: () => false,
-      details: () => false,
-      session: () => "session",
-      toBottom() {},
-    })
+    const cm = createCopyMode(
+      createCopyInput({
+        scroll,
+        parts: [{ type: "text", text: child.plainText }],
+      }),
+    )
 
     cm.prompt.enter()
     cm.prompt.visual("line")
     cm.prompt.jump("top")
 
-    expect(cm.highlights().get("text-part")?.at(-1)).toMatchObject({ line: 2, text: "uvwxyz" })
+    expect(cm.highlights().get(TEXT_ROW_ID)?.at(-1)).toMatchObject({ line: 2, text: "uvwxyz" })
     expect(cm.prompt.yank()).toEqual({ text: "abcdefghijklmnopqrstuvwxyz", linewise: false })
   })
 
@@ -9716,14 +9742,14 @@ describe("copy mode", () => {
 
     cm.prompt.setCol(11)
     expect(cm.prompt.yankMatchingBracket()).toEqual({ text: "(\n  value\n)", linewise: false })
-    expect(cm.highlights().get("text-part")).toEqual([
+    expect(cm.highlights().get(TEXT_ROW_ID)).toEqual([
       { line: 0, left: 11, right: 11, text: "(" },
       { line: 1, left: 7, right: 13, text: "  value" },
       { line: 2, left: 7, right: 7, text: ")" },
     ])
 
     await new Promise((resolve) => setTimeout(resolve, 100))
-    expect(cm.highlights().get("text-part")).toBeUndefined()
+    expect(cm.highlights().get(TEXT_ROW_ID)).toBeUndefined()
   })
 
   test("search jumps forward and highlights current match", () => {
@@ -9734,7 +9760,7 @@ describe("copy mode", () => {
 
     expect(cm.state().idx).toBe(1)
     expect(cm.state().col).toBe(12)
-    expect(cm.highlights().get("text-part")).toEqual([
+    expect(cm.highlights().get(TEXT_ROW_ID)).toEqual([
       { line: 0, left: 7, right: 11, text: "alpha", kind: "search" },
       { line: 1, left: 12, right: 16, text: "alpha", kind: "search", current: true },
       { line: 2, left: 7, right: 11, text: "alpha", kind: "search" },
@@ -9783,14 +9809,14 @@ describe("copy mode", () => {
     cm.prompt.searchStart("forward")
     cm.prompt.searchAppend("alpha")
     expect(cm.prompt.searchSubmit()).toBe(true)
-    expect(cm.highlights().get("text-part")?.length).toBe(3)
+    expect(cm.highlights().get(TEXT_ROW_ID)?.length).toBe(3)
 
     cm.prompt.searchStart("forward")
     expect(cm.prompt.searchAppend("missing")).toBe(false)
     expect(cm.prompt.searchSubmit()).toBe(false)
 
     expect(cm.prompt.searchHighlighted()).toBe(false)
-    expect(cm.highlights().get("text-part")).toBeUndefined()
+    expect(cm.highlights().get(TEXT_ROW_ID)).toBeUndefined()
   })
 
   test("failed incremental search restores the original cursor", () => {
@@ -9817,7 +9843,7 @@ describe("copy mode", () => {
     expect(cm.prompt.searchSubmit()).toBe(true)
 
     expect(cm.prompt.searchHighlighted()).toBe(false)
-    expect(cm.highlights().get("text-part")).toBeUndefined()
+    expect(cm.highlights().get(TEXT_ROW_ID)).toBeUndefined()
     expect(cm.prompt.searchNext()).toBe(false)
   })
 
@@ -9839,12 +9865,12 @@ describe("copy mode", () => {
 
     cm.prompt.searchStart("forward")
     expect(cm.prompt.searchAppend("error")).toBe(true)
-    expect(cm.highlights().get("text-part")?.map((highlight) => highlight.text)).toEqual(["error", "Error"])
+    expect(cm.highlights().get(TEXT_ROW_ID)?.map((highlight) => highlight.text)).toEqual(["error", "Error"])
 
     cm.prompt.searchCancel()
     cm.prompt.searchStart("forward")
     expect(cm.prompt.searchAppend("Error")).toBe(true)
-    expect(cm.highlights().get("text-part")).toEqual([
+    expect(cm.highlights().get(TEXT_ROW_ID)).toEqual([
       { line: 1, left: 7, right: 11, text: "Error", kind: "search", current: true },
     ])
   })
@@ -10441,7 +10467,7 @@ describe("copy mode", () => {
     cm.prompt.move("down")
     cm.prompt.move("down")
 
-    expect(cm.highlights().get("text-part")).toEqual([
+    expect(cm.highlights().get(TEXT_ROW_ID)).toEqual([
       { line: 0, left: 7, right: 10, text: "abcd" },
       { line: 1, left: 7, right: 7, text: " " },
       { line: 2, left: 8, right: 10, text: "fgh" },
@@ -10479,7 +10505,7 @@ describe("copy mode", () => {
     cm.prompt.move("down")
     expect(cm.prompt.yankLine()).toEqual({ text: "Name\tValue", linewise: false })
 
-    expect(cm.highlights().get("text-part")).toEqual([
+    expect(cm.highlights().get(TEXT_ROW_ID)).toEqual([
       { line: 1, left: 7, right: 20, text: " Name    Value" },
     ])
   })
@@ -10580,7 +10606,7 @@ describe("copy mode", () => {
     cm.prompt.move("down")
     cm.prompt.move("down")
 
-    expect(cm.highlights().get("text-part")).toEqual([
+    expect(cm.highlights().get(TEXT_ROW_ID)).toEqual([
       { line: 0, left: 8, right: 10, text: "bcd" },
       { line: 1, left: 7, right: 7, text: " " },
       { line: 2, left: 7, right: 7, text: "e" },
@@ -10607,7 +10633,7 @@ describe("copy mode", () => {
     cm.prompt.move("down")
     cm.prompt.move("right")
 
-    expect(cm.highlights().get("text-part")).toEqual([
+    expect(cm.highlights().get(TEXT_ROW_ID)).toEqual([
       { line: 0, left: 8, right: 9, text: "bc" },
       { line: 1, left: 8, right: 8, text: "f" },
     ])
@@ -10624,7 +10650,7 @@ describe("copy mode", () => {
 
     expect(cm.state().col).toBe(7)
     expect(cm.cursorCol()).toBe(7)
-    expect(cm.highlights().get("text-part")).toEqual([
+    expect(cm.highlights().get(TEXT_ROW_ID)).toEqual([
       { line: 0, left: 7, right: 8, text: "ab" },
       { line: 1, left: 8, right: 8, text: " " },
     ])
@@ -10643,7 +10669,7 @@ describe("copy mode", () => {
 
     expect(cm.state().col).toBe(7)
     expect(cm.cursorCol()).toBe(7)
-    expect(cm.highlights().get("text-part")).toEqual([
+    expect(cm.highlights().get(TEXT_ROW_ID)).toEqual([
       { line: 0, left: 7, right: 8, text: "ab" },
       { line: 1, left: 8, right: 8, text: " " },
     ])
@@ -10659,7 +10685,7 @@ describe("copy mode", () => {
 
     expect(cm.state().col).toBe(7)
     expect(cm.cursorCol()).toBe(7)
-    expect(cm.highlights().get("text-part")).toEqual([
+    expect(cm.highlights().get(TEXT_ROW_ID)).toEqual([
       { line: 0, left: 7, right: 8, text: "ab" },
       { line: 1, left: 8, right: 8, text: " " },
     ])
@@ -10677,16 +10703,16 @@ describe("copy mode", () => {
     expect(cm.state().col).toBe(8)
     expect(cm.cursorCol()).toBe(8)
     expect(cm.cursorText()).toBe("b")
-    expect(cm.highlights().get("text-part")).toEqual([{ line: 0, left: 8, right: 12, text: "bcdef" }])
+    expect(cm.highlights().get(TEXT_ROW_ID)).toEqual([{ line: 0, left: 8, right: 12, text: "bcdef" }])
     expect(cm.prompt.yank()).toEqual({ text: "bcdef\nb", linewise: false })
   })
 
   test("V after characterwise visual preserves copy anchor", () => {
     createRoot((dispose) => {
       const children = [
-        { id: "text-part", y: 0, height: 1 },
-        { id: "text-part", y: 1, height: 1 },
-        { id: "text-part", y: 2, height: 1 },
+        { id: copyRowID("text:0"), y: 0, height: 1 },
+        { id: copyRowID("text:1"), y: 1, height: 1 },
+        { id: copyRowID("text:2"), y: 2, height: 1 },
       ]
       const scroll = {
         y: 0,
@@ -10697,15 +10723,16 @@ describe("copy mode", () => {
           scroll.y += delta
         },
       } as unknown as ScrollBoxRenderable
-      const cm = createCopyMode({
-        scroll: () => scroll,
-        messages: () => [{ id: "msg", role: "assistant" }],
-        parts: () => [{ type: "text", id: "part" } as Part],
-        thinking: () => false,
-        details: () => false,
-        session: () => "session",
-        toBottom() {},
-      })
+      const cm = createCopyMode(
+        createCopyInput({
+          scroll,
+          parts: [
+            { type: "text", text: "one" },
+            { type: "text", text: "two" },
+            { type: "text", text: "three" },
+          ],
+        }),
+      )
 
       cm.prompt.enter()
       cm.prompt.visual("char")
@@ -10735,7 +10762,7 @@ describe("copy mode", () => {
   test("re-entering copy mode clamps restored position to shortened row", () => {
     let line = "abcdefghijk"
     const child = {
-      id: "text-part",
+      id: TEXT_ROW_ID,
       y: 0,
       height: 1,
       gutter: { calculateWidth: () => 4 },
@@ -10760,15 +10787,12 @@ describe("copy mode", () => {
       getChildren: () => [child],
       scrollBy() {},
     } as unknown as ScrollBoxRenderable
-    const cm = createCopyMode({
-      scroll: () => scroll,
-      messages: () => [{ id: "message", role: "assistant" }],
-      parts: () => [{ id: "part", type: "text", text: line }] as Part[],
-      thinking: () => false,
-      details: () => false,
-      session: () => "session",
-      toBottom() {},
-    })
+    const cm = createCopyMode(
+      createCopyInput({
+        scroll,
+        parts: () => [{ type: "text", text: line }],
+      }),
+    )
 
     cm.prompt.enter()
     cm.prompt.setCol(17)
@@ -11503,7 +11527,7 @@ describe("copy mode", () => {
 
   function createWrappedCopyMode(source: string, visualLines: string[], lineSources: number[], lineStartCols: number[], lineWidthCols: number[], lineWraps: number[]) {
     const child = {
-      id: "text-part",
+      id: TEXT_ROW_ID,
       y: 0,
       height: visualLines.length,
       gutter: { calculateWidth: () => 4 },
@@ -11523,15 +11547,12 @@ describe("copy mode", () => {
       getChildren: () => [child],
       scrollBy() {},
     } as unknown as ScrollBoxRenderable
-    const cm = createCopyMode({
-      scroll: () => scroll,
-      messages: () => [{ id: "message", role: "assistant" }],
-      parts: () => [{ id: "part", type: "text", text: source }] as Part[],
-      thinking: () => false,
-      details: () => false,
-      session: () => "session",
-      toBottom() {},
-    })
+    const cm = createCopyMode(
+      createCopyInput({
+        scroll,
+        parts: [{ type: "text", text: source }],
+      }),
+    )
     cm.prompt.enter()
     cm.prompt.jump("top")
     return cm

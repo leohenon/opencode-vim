@@ -1,6 +1,6 @@
 import { For, Show, createMemo } from "solid-js"
 import { RGBA } from "@opentui/core"
-import { selectedForeground, useTheme } from "../../context/theme"
+import { selectedForeground, useVimTheme } from "../../component/vim/theme"
 import type { CopyHighlight, CopyRow } from "./copy-mode"
 
 export type CopyPosition = {
@@ -18,12 +18,12 @@ export type CopyPosition = {
 export type CopyContext = CopyRow & CopyPosition
 
 export function CopyOverlay(props: { copy?: CopyPosition; topOffset?: number; highlights?: CopyHighlight[] }) {
-  const { theme } = useTheme()
+  const theme = useVimTheme()
   const top = (line: number) => line + (props.topOffset ?? 0)
-  const highlightFg = createMemo(() => selectedForeground(theme, theme.secondary))
-  const searchHighlightFg = createMemo(() => selectedForeground(theme, theme.textMuted))
-  const currentHighlightFg = createMemo(() => selectedForeground(theme, theme.primary))
-  const cursorFg = createMemo(() => selectedForeground(theme, theme.text))
+  const highlightFg = createMemo(() => selectedForeground(theme(), theme().secondary))
+  const searchHighlightFg = createMemo(() => selectedForeground(theme(), theme().textMuted))
+  const currentHighlightFg = createMemo(() => selectedForeground(theme(), theme().primary))
+  const cursorFg = createMemo(() => selectedForeground(theme(), theme().text))
   return (
     <>
       <Show when={props.copy && !props.copy.visual}>
@@ -39,7 +39,7 @@ export function CopyOverlay(props: { copy?: CopyPosition; topOffset?: number; hi
       <For each={props.highlights ?? []}>
         {(highlight) => {
           const background = () =>
-            highlight.kind === "search" ? (highlight.current ? theme.primary : theme.textMuted) : theme.secondary
+            highlight.kind === "search" ? (highlight.current ? theme().primary : theme().textMuted) : theme().secondary
           const foreground = () =>
             highlight.kind === "search"
               ? highlight.current
@@ -57,7 +57,7 @@ export function CopyOverlay(props: { copy?: CopyPosition; topOffset?: number; hi
       </For>
       <Show when={props.copy}>
         <box position="absolute" top={top(props.copy!.line)} left={props.copy!.col} width={1} height={1}>
-          <text bg={theme.text} fg={cursorFg()}>
+          <text bg={theme().text} fg={cursorFg()}>
             {props.copy!.cursorText}
           </text>
         </box>

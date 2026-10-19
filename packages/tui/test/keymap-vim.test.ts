@@ -9,7 +9,7 @@ import {
   OPENCODE_VIM_MODE_KEY,
   VIM_WINDOW_TOKEN,
   registerOpencodeLeader,
-} from "../src/keymap"
+} from "../src/context/keymap"
 import { TuiKeybind } from "../src/config/keybind"
 
 const MODE_KEY = "test.mode"
@@ -19,10 +19,9 @@ function createResolvedKeymapConfig(input: TuiKeybind.KeybindOverrides = {}) {
   const keybinds = TuiKeybind.parse(input)
   return {
     keybinds: createBindingLookup(TuiKeybind.toBindingConfig(keybinds), {
-      commandMap: TuiKeybind.CommandMap,
       bindingDefaults: TuiKeybind.bindingDefaults(),
     }),
-    leader_timeout: 2000,
+    leader: { timeout: 2000 },
   }
 }
 
@@ -143,7 +142,7 @@ describe("opencode keymap", () => {
   test("default leader still starts leader sequences", () => {
     const testKeymap = createTestKeymap({ defaultKeys: true })
     const calls: string[] = []
-    const config = createResolvedKeymapConfig({ session_new: "<leader>n" })
+    const config = createResolvedKeymapConfig({ "session.new": "<leader>n" })
     const offLeader = registerOpencodeLeader(testKeymap.keymap, config)
 
     testKeymap.keymap.registerLayer({
@@ -163,7 +162,7 @@ describe("opencode keymap", () => {
     const calls: string[] = []
     const config = createResolvedKeymapConfig({
       "vim.normal": { leader: "space" },
-      session_new: "<leader>n",
+      "session.new": "<leader>n",
     })
     const offLeader = registerOpencodeLeader(testKeymap.keymap, config)
 
@@ -190,7 +189,7 @@ describe("opencode keymap", () => {
     const calls: string[] = []
     const config = createResolvedKeymapConfig({
       "vim.normal": { leader: "space" },
-      session_new: "<leader>n",
+      "session.new": "<leader>n",
     })
     const offLeader = registerOpencodeLeader(testKeymap.keymap, config)
 
@@ -218,7 +217,7 @@ describe("opencode keymap", () => {
     const config = createResolvedKeymapConfig({
       leader: "ctrl+x",
       "vim.normal": { leader: "space" },
-      session_new: "<leader>n",
+      "session.new": "<leader>n",
     })
     const offLeader = registerOpencodeLeader(testKeymap.keymap, config)
 

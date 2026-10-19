@@ -196,6 +196,7 @@ export const Definitions = {
   "session.redo": keybind("<leader>r", "Redo message"),
   "session.toggle.thinking": keybind("none", "Toggle thinking blocks visibility"),
 
+  "input.vim.toggle": keybind("none", "Toggle vim mode"),
   "prompt.submit": keybind("none", "Submit prompt"),
   "prompt.copy_selection": keybind("<leader>y", "Copy prompt selection"),
   "prompt.queue": keybind("<leader>return", "Queue prompt"),

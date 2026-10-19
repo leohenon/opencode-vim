@@ -16,7 +16,14 @@ import { useData, type FormWithLocation } from "../../context/data"
 import { useClipboard } from "../../context/clipboard"
 import { SplitBorder } from "../../ui/border"
 import { useToast } from "../../ui/toast"
-import { Keymap } from "../../context/keymap"
+import { Keymap, OPENCODE_VIM_MODE_KEY } from "../../context/keymap"
+import { useVimEnabled } from "../../component/vim"
+import {
+  createModalInputControls,
+  type ModalInputKeyEvent,
+  type ModalInputMode,
+} from "../../component/vim/modal-input-controls"
+import { vimCursorStyle } from "../../component/vim/cursor-style"
 import { useInteractivity } from "../../context/interactivity"
 import { useConfig } from "../../config"
 import { errorMessage } from "../../util/error"
@@ -89,6 +96,46 @@ export function FormPrompt(props: { form: FormWithLocation }) {
   let textarea: TextareaRenderable | undefined
   const [inputTarget, setInputTarget] = createSignal<TextareaRenderable>()
   let review: ScrollBoxRenderable | undefined
+
+  // ocv: vim-style modal editing for free-form answers.
+  const vimEnabled = useVimEnabled()
+  const [inputMode, setInputMode] = createSignal<ModalInputMode>("insert")
+  const modalInputEnabled = createMemo(() => vimEnabled() && config.vim.modal_input)
+
+  createEffect(() => {
+    keymap.data.set(OPENCODE_VIM_MODE_KEY, modalInputEnabled() ? inputMode() : undefined)
+  })
+
+  onCleanup(() => {
+    keymap.data.set(OPENCODE_VIM_MODE_KEY, undefined)
+  })
+
+  const modalInput = createModalInputControls({
+    mode: inputMode,
+    setMode: setInputMode,
+    focus: () => textarea?.focus(),
+    text: () => textarea?.plainText ?? "",
+    cursor: () => textarea?.cursorOffset ?? 0,
+    setCursor: (offset) => {
+      if (!textarea || textarea.isDestroyed) return
+      textarea.cursorOffset = offset
+    },
+    setText: (text) => {
+      if (!textarea || textarea.isDestroyed) return
+      textarea.setText(text)
+    },
+    langmap: () => config.vim.langmap,
+    vimEscapeSequence: () => config.vim.escape_sequence,
+  })
+
+  const answerCursorStyle = createMemo(() =>
+    vimCursorStyle(modalInputEnabled() ? inputMode() : undefined, config.cursor),
+  )
+
+  createEffect(() => {
+    if (!textarea || textarea.isDestroyed) return
+    textarea.cursorStyle = answerCursorStyle()
+  })
 
   const message = createMemo(() => {
     const value = props.form.metadata?.["message"]
@@ -885,7 +932,11 @@ export function FormPrompt(props: { form: FormWithLocation }) {
             <Show when={textual() ? answerField()!.key : undefined} keyed>
               <box paddingLeft={1}>
                 <textarea
-                  cursorStyle={config.cursor}
+                  cursorStyle={answerCursorStyle()}
+                  onKeyDown={(event: ModalInputKeyEvent) => {
+                    if (!modalInputEnabled()) return
+                    modalInput.handleKey(event)
+                  }}
                   ref={(val: TextareaRenderable) => {
                     textarea = val
                     val.traits = { status: "ANSWER" }

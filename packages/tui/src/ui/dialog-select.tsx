@@ -1,5 +1,5 @@
 import { CliRenderEvents, InputRenderable, RGBA, ScrollBoxRenderable, TextAttributes } from "@opentui/core"
-import { Keymap, type KeymapCommand } from "../context/keymap"
+import { Keymap, OPENCODE_VIM_MODE_KEY, type KeymapCommand } from "../context/keymap"
 import { useTheme } from "../context/theme"
 import { entries, filter, flatMap, groupBy, pipe } from "remeda"
 import { batch, createEffect, createMemo, createSignal, For, Show, type JSX, on, onCleanup, onMount } from "solid-js"
@@ -21,6 +21,13 @@ import {
 import { Locale } from "../util/locale"
 import { getScrollAcceleration } from "../util/scroll"
 import { useConfig, useNewDesigns } from "../config"
+import { useVimEnabled } from "../component/vim"
+import {
+  createModalInputControls,
+  type ModalInputKeyEvent,
+  type ModalInputMode,
+} from "../component/vim/modal-input-controls"
+import { vimCursorStyle } from "../component/vim/cursor-style"
 import { moveSelection, reconcileSelection } from "./select-controller"
 
 export interface DialogSelectProps<T> {
@@ -43,6 +50,8 @@ export interface DialogSelectProps<T> {
   renderFilter?: boolean
   locked?: boolean
   preserveSelection?: boolean
+  /** ocv: force vim-style modal editing for the filter input. Defaults to the vim.modal_input setting. */
+  modalInput?: boolean
   actions?: DialogSelectAction<T>[]
   footerHints?: {
     title: string
@@ -137,7 +146,69 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
   const [store, setStore] = createStore({
     selected: 0,
     filter: "",
+    inputMode: "insert" as ModalInputMode,
   })
+
+  // ocv: vim-style modal editing for the filter input.
+  const keymap = Keymap.use()
+  const vimEnabled = useVimEnabled()
+  const modalInputEnabled = createMemo(
+    () => vimEnabled() && props.renderFilter !== false && (props.modalInput ?? config.vim.modal_input),
+  )
+
+  createEffect(() => {
+    keymap.data.set(OPENCODE_VIM_MODE_KEY, modalInputEnabled() ? store.inputMode : undefined)
+  })
+
+  onCleanup(() => {
+    keymap.data.set(OPENCODE_VIM_MODE_KEY, undefined)
+  })
+
+  let input: InputRenderable | undefined
+
+  const modalInput = createModalInputControls({
+    mode: () => store.inputMode,
+    setMode: (mode) => setStore("inputMode", mode),
+    move: (direction) => {
+      move(direction)
+    },
+    moveToStart: () => {
+      if (props.locked) return
+      moveTo(0)
+    },
+    moveToEnd: () => {
+      if (props.locked) return
+      moveTo(flat().length - 1)
+    },
+    focus: () => input?.focus(),
+    text: () => input?.plainText ?? "",
+    cursor: () => input?.cursorOffset ?? 0,
+    setCursor: (offset) => {
+      if (!input || input.isDestroyed) return
+      input.cursorOffset = offset
+    },
+    setText: (text) => {
+      if (!input || input.isDestroyed) return
+      input.setText(text)
+      setStore("filter", text)
+      props.onFilter?.(text)
+    },
+    langmap: () => config.vim.langmap,
+    vimEscapeSequence: () => config.vim.escape_sequence,
+  })
+
+  const filterCursorStyle = createMemo(() =>
+    vimCursorStyle(modalInputEnabled() ? store.inputMode : undefined, config.cursor),
+  )
+
+  createEffect(() => {
+    if (!input || input.isDestroyed) return
+    input.cursorStyle = filterCursorStyle()
+  })
+
+  function clearModalInputPending() {
+    if (modalInputEnabled()) modalInput.clearPending()
+  }
   let selection: { value: T; category?: string } | undefined
   let resetSelection = false
   let pendingScroll: (() => void) | undefined
@@ -170,8 +241,6 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
       },
     ),
   )
-
-  let input: InputRenderable | undefined
 
   const actions = createMemo(() => props.actions ?? [])
   const shownActions = createMemo(() => actions().filter((item) => !item.hidden))
@@ -375,6 +444,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
   )
 
   function move(direction: number) {
+    clearModalInputPending()
     if (props.locked) return
     if (flat().length === 0) return
     moveTo(moveSelection(store.selected, { count: flat().length, delta: direction, policy: "wrap" }), true)
@@ -434,6 +504,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
   }
 
   function submit() {
+    clearModalInputPending()
     if (props.locked) return
     const option = selected()
     if (!option) return
@@ -446,7 +517,20 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
 
     return {
       mode: "modal",
+      priority: modalInputEnabled() ? 1 : undefined,
       commands: [
+        // ocv: escape leaves insert mode and enters vim normal mode.
+        {
+          id: "dialog.select.vim_normal",
+          title: "Enter normal mode",
+          group: "Dialog",
+          bind: "escape",
+          enabled: () => modalInputEnabled() && store.inputMode === "insert",
+          run() {
+            modalInput.clearPending()
+            modalInput.enterNormal()
+          },
+        },
         {
           id: "dialog.select.prev",
           title: "Previous item",
@@ -632,8 +716,11 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
       }}
       focusedBackgroundColor={theme.background.formfield.focused}
       cursorColor={newDesigns() ? theme.text.base : theme.text.formfield.focused}
-      cursorStyle={config.cursor}
+      cursorStyle={filterCursorStyle()}
       focusedTextColor={theme.text.formfield.focused}
+      onKeyDown={(event: ModalInputKeyEvent) => {
+        if (modalInputEnabled() && modalInput.handleKey(event)) return
+      }}
       ref={(r) => {
         input = r
         input.traits = { status: "FILTER" }

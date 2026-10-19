@@ -1,11 +1,14 @@
 import { TextareaRenderable } from "@opentui/core"
-import { Keymap } from "../context/keymap"
+import { Keymap, OPENCODE_VIM_MODE_KEY } from "../context/keymap"
 import { useTheme } from "../context/theme"
 import { DialogFooter, DialogHeader, DialogLayout, useDialog, type DialogSize } from "./dialog"
-import { Show, createEffect, createSignal, onMount, type JSX } from "solid-js"
+import { Show, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js"
 import { Spinner } from "../component/spinner"
 import { useConfig, useNewDesigns } from "../config"
 import { useRenderer } from "@opentui/solid"
+import { useVimEnabled } from "../component/vim"
+import { createModalInputControls, type ModalInputKeyEvent } from "../component/vim/modal-input-controls"
+import { vimCursorStyle } from "../component/vim/cursor-style"
 
 export type DialogPromptAction = {
   title: string
@@ -40,8 +43,48 @@ export function DialogPrompt(props: DialogPromptProps) {
   const [textareaTarget, setTextareaTarget] = createSignal<TextareaRenderable>()
   let textarea: TextareaRenderable
 
+  // ocv: vim-style modal editing for the dialog input.
+  const keymap = Keymap.use()
+  const vimEnabled = useVimEnabled()
+  const [inputMode, setInputMode] = createSignal<"insert" | "normal">("insert")
+  const modalInputEnabled = createMemo(() => vimEnabled() && config.vim.modal_input)
+
+  createEffect(() => {
+    keymap.data.set(OPENCODE_VIM_MODE_KEY, modalInputEnabled() ? inputMode() : undefined)
+  })
+
+  onCleanup(() => {
+    keymap.data.set(OPENCODE_VIM_MODE_KEY, undefined)
+  })
+
+  const modalInput = createModalInputControls({
+    mode: inputMode,
+    setMode: setInputMode,
+    focus: () => textarea?.focus(),
+    text: () => textarea?.plainText ?? "",
+    cursor: () => textarea?.cursorOffset ?? 0,
+    setCursor: (offset) => {
+      if (!textarea || textarea.isDestroyed) return
+      textarea.cursorOffset = offset
+    },
+    setText: (text) => {
+      if (!textarea || textarea.isDestroyed) return
+      textarea.setText(text)
+    },
+    langmap: () => config.vim.langmap,
+    vimEscapeSequence: () => config.vim.escape_sequence,
+  })
+
+  const cursorStyle = createMemo(() => vimCursorStyle(modalInputEnabled() ? inputMode() : undefined, config.cursor))
+
+  createEffect(() => {
+    if (!textarea || textarea.isDestroyed) return
+    textarea.cursorStyle = cursorStyle()
+  })
+
   function confirm() {
     if (props.busy) return
+    modalInput.clearPending()
     props.onConfirm?.(textarea.plainText)
   }
 
@@ -79,6 +122,27 @@ export function DialogPrompt(props: DialogPromptProps) {
         group: "Dialog",
         run: () => action.onTrigger(handle),
       })),
+    ],
+  }))
+
+  // ocv: escape leaves insert mode and enters vim normal mode.
+  Keymap.createLayer(() => ({
+    mode: "modal",
+    target: textareaTarget,
+    enabled: textareaTarget() !== undefined && !props.busy,
+    priority: 2,
+    commands: [
+      {
+        id: "dialog.prompt.vim_normal",
+        title: "Enter normal mode",
+        group: "Dialog",
+        bind: "escape",
+        enabled: () => modalInputEnabled() && inputMode() === "insert",
+        run: () => {
+          modalInput.clearPending()
+          modalInput.enterNormal()
+        },
+      },
     ],
   }))
 
@@ -172,7 +236,10 @@ export function DialogPrompt(props: DialogPromptProps) {
           textColor={props.busy ? theme.text.formfield.disabled : theme.text.formfield.base}
           focusedTextColor={props.busy ? theme.text.formfield.disabled : theme.text.formfield.base}
           cursorColor={props.busy ? theme.background.formfield.disabled : theme.text.base}
-          cursorStyle={config.cursor}
+          cursorStyle={cursorStyle()}
+          onKeyDown={(event: ModalInputKeyEvent) => {
+            if (modalInputEnabled() && !props.busy && modalInput.handleKey(event)) return
+          }}
         />
         <Show when={props.busy}>
           <Spinner color={theme.text.muted}>{props.busyText ?? "Working…"}</Spinner>

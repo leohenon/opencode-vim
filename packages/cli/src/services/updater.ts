@@ -1,7 +1,7 @@
 import { Global } from "@opencode/util/global"
 import { AppProcess } from "@opencode/util/process"
 import { EffectFlock } from "@opencode/util/effect-flock"
-import { OPENCODE_ARTIFACT, OPENCODE_CHANNEL, OPENCODE_LOCAL, OPENCODE_VERSION } from "../version"
+import { OPENCODE_ARTIFACT, OPENCODE_CHANNEL, OPENCODE_CLI_NAME, OPENCODE_LOCAL, OPENCODE_VERSION } from "../version"
 import { Context, Duration, Effect, FileSystem, Layer, Option, Ref, Schema } from "effect"
 import { ChildProcess } from "effect/process"
 import { parse, type ParseError } from "jsonc-parser"
@@ -13,9 +13,12 @@ import { errorMessage } from "../util/error"
 
 export const methods = ["curl", "npm", "pnpm", "bun", "yarn", "vp", "brew", "winget"] as const
 
-// ocv: the fork ships its own releases, npm package and installer.
+// ocv: the fork ships its own releases, npm package and installer. The
+// divergence only applies to the fork's own binary; other artifacts (the
+// node distribution) keep the upstream release flow.
 const OCV_REPO = "leohenon/opencode-vim"
 const OCV_NPM_PACKAGE = "@leohenon/ocv"
+const OCV_BREW_FORMULA = "leohenon/tap/ocv"
 const OCV_INSTALLER = `https://raw.githubusercontent.com/${OCV_REPO}/ocv/install.sh`
 
 export type Method = (typeof methods)[number]
@@ -141,6 +144,8 @@ export function decodePolicy(text: string): Policy | undefined {
   if (input.autoupdate === true) return "auto"
 }
 
+const isOcv = OPENCODE_CLI_NAME === "ocv"
+
 const make = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem
   const global = yield* Global.Service
@@ -155,7 +160,10 @@ const make = Effect.gen(function* () {
       .readFileString(path.join(directory, "package.json"))
       .pipe(Effect.flatMap((text) => Effect.try(() => JSON.parse(text))))
     // Source invocations run inside Bun or Node, which may themselves be npm packages.
-    if (!/^@opencode(?:-ai)?\/cli(?:-node)?$/.test(manifest.name)) return
+    if (!/^@opencode(?:-ai)?\/cli(?:-node)?$/.test(manifest.name)) {
+      // ocv: the fork publishes under its own npm package.
+      if (!isOcv || manifest.name !== OCV_NPM_PACKAGE) return
+    }
     if (Object.values(manifest.bin ?? {}).some((bin) => path.resolve(directory, bin) === executable))
       return manifest.name
   }).pipe(Effect.orElseSucceed(() => undefined))
@@ -196,13 +204,12 @@ const make = Effect.gen(function* () {
       )
   })
 
-  // ocv: the fork installs to ~/.ocv/bin/ocv through its own installer, and
-  // publishes under a different npm package and release repository.
+  // ocv: the fork installs to ~/.ocv/bin/ocv through its own installer.
   const curlPath = path.resolve(
     global.home,
-    ".ocv",
+    isOcv ? ".ocv" : ".opencode",
     "bin",
-    process.platform === "win32" ? "ocv.exe" : "ocv",
+    process.platform === "win32" ? (isOcv ? "ocv.exe" : "opencode.exe") : isOcv ? "ocv" : "opencode",
   )
   const curlBinary = yield* fs.realPath(curlPath).pipe(Effect.orElseSucceed(() => curlPath))
 
@@ -289,7 +296,7 @@ const make = Effect.gen(function* () {
     const core = method === "brew" && installedFormula === "opencode"
     // ocv: the fork publishes its own releases, so the opencode.ai update
     // service does not describe them.
-    if (!core) {
+    if (!core && isOcv) {
       const response = yield* Effect.tryPromise({
         try: (signal) =>
           fetch(`https://api.github.com/repos/${OCV_REPO}/releases/latest`, {
@@ -331,7 +338,7 @@ const make = Effect.gen(function* () {
         detail: "The GitHub release API returned incomplete release information.",
         retry: "Try again in a few minutes.",
       }))
-      return { package: OCV_NPM_PACKAGE, version }
+      return { package: method === "brew" ? OCV_BREW_FORMULA : OCV_NPM_PACKAGE, version }
     }
     const response = yield* Effect.tryPromise({
       try: (signal) =>
@@ -537,21 +544,23 @@ const make = Effect.gen(function* () {
           const installer = path.join(directory, "install")
           yield* runUpgrade({
             method,
-            command: ["curl", "-fsSL", "-o", installer, OCV_INSTALLER],
-            displayCommand: ["curl", "-fsSL", OCV_INSTALLER],
-            title: "Could not download the ocv installer",
-            retry: "Check your network, then run ocv update again.",
+            command: ["curl", "-fsSL", "-o", installer, isOcv ? OCV_INSTALLER : "https://opencode.ai/v2/install"],
+            displayCommand: ["curl", "-fsSL", isOcv ? OCV_INSTALLER : "https://opencode.ai/v2/install"],
+            title: isOcv ? "Could not download the ocv installer" : "Could not download the OpenCode installer",
+            retry: isOcv
+              ? "Check your network, then run ocv update again."
+              : "Check your network, then run opencode upgrade again.",
           })
           return yield* retaining(
             method,
             runUpgrade({
               method,
-              // ocv: the fork installer takes the version through OCV_VERSION and
-              // installs next to the running binary.
-              command: [bash, installer],
-              displayCommand: ["ocv", "update"],
-              title: "The ocv installer failed",
-              env: { OCV_VERSION: version },
+              // ocv: the fork installer takes the version through OCV_VERSION;
+              // the upstream installer takes it as an argument.
+              command: isOcv ? [bash, installer] : [bash, installer, "--version", version, "--no-modify-path"],
+              displayCommand: isOcv ? ["ocv", "update"] : ["opencode", "upgrade", version, "--method", "curl"],
+              title: isOcv ? "The ocv installer failed" : "The OpenCode installer failed",
+              ...(isOcv ? { env: { OCV_VERSION: version } } : {}),
             }),
           )
         }

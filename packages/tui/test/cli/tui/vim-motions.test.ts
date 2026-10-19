@@ -8707,7 +8707,7 @@ describe("copy mode", () => {
       type: "part",
       ref: { messageID, partID: partIDs[index]! },
     }))
-    return { message, transcript, partIDs }
+    return { message, transcript }
   }
 
   const clipboardStub: ClipboardService = {
@@ -8728,6 +8728,7 @@ describe("copy mode", () => {
     return {
       scroll: () => options.scroll,
       transcript: () => session().transcript,
+      // Every part renders as its own row, so no row carries a message boundary.
       boundaries: () => [],
       messages: () => [session().message],
       thinking: () => options.thinking ?? false,
@@ -9327,7 +9328,8 @@ describe("copy mode", () => {
     await new Promise((resolve) => setTimeout(resolve, 80))
 
     expect(toggles).toBe(1)
-    // The cursor stays on the toggled tool row.
+    // The cursor stays on the toggled tool row: the row is restored by identity,
+    // so it lands on the first line of the tool instead of the label line.
     expect(cm.row()?.id).toBe(copyRowID("part"))
     expect(cm.prompt.text().trim()).toBe("# Shell")
     expect(cm.action()).toMatchObject({ kind: "tool-toggle", text: "# Shell" })
@@ -9865,7 +9867,12 @@ describe("copy mode", () => {
 
     cm.prompt.searchStart("forward")
     expect(cm.prompt.searchAppend("error")).toBe(true)
-    expect(cm.highlights().get(TEXT_ROW_ID)?.map((highlight) => highlight.text)).toEqual(["error", "Error"])
+    expect(
+      cm
+        .highlights()
+        .get(TEXT_ROW_ID)
+        ?.map((highlight) => highlight.text),
+    ).toEqual(["error", "Error"])
 
     cm.prompt.searchCancel()
     cm.prompt.searchStart("forward")
@@ -10505,9 +10512,7 @@ describe("copy mode", () => {
     cm.prompt.move("down")
     expect(cm.prompt.yankLine()).toEqual({ text: "Name\tValue", linewise: false })
 
-    expect(cm.highlights().get(TEXT_ROW_ID)).toEqual([
-      { line: 1, left: 7, right: 20, text: " Name    Value" },
-    ])
+    expect(cm.highlights().get(TEXT_ROW_ID)).toEqual([{ line: 1, left: 7, right: 20, text: " Name    Value" }])
   })
 
   test("table cursor movement uses rendered cell geometry", () => {

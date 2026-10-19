@@ -53,6 +53,8 @@ function fixture(
               const url = input instanceof Request ? input.url : input.toString()
               requests.push(url)
               if (new URL(url).hostname === "formulae.brew.sh") return Response.json({ versions: { stable: "2.0.21" } })
+              // ocv: the fork reads its own releases from GitHub.
+              if (new URL(url).hostname === "api.github.com") return Response.json({ tag_name: "v2.3.4" })
               return Response.json({ version: "2.3.4", metadata: { package: releasePackage } })
             },
             { preconnect: fetch.preconnect },
@@ -594,6 +596,41 @@ if (typeof OPENCODE_CLI_NAME === "string" && OPENCODE_CLI_NAME === "opencode2-no
         ["pnpm", "add", "--global", "--allow-build=@opencode/cli-node", "@opencode/cli-node@2.3.4"],
         ["vp", "update", "-g", "@opencode/cli-node@2.3.4"],
       ])
+    }),
+  )
+}
+
+test("ocv distribution reads the fork release feed", async () => {
+  const child = Bun.spawn(
+    [
+      process.execPath,
+      "test",
+      import.meta.path,
+      "--define",
+      'OPENCODE_CLI_NAME="ocv"',
+      "--test-name-pattern",
+      "^ocv distribution resolves the fork release$",
+    ],
+    {
+      cwd: path.join(import.meta.dir, ".."),
+      stdout: "ignore",
+      stderr: "pipe",
+      env: { ...process.env, BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0" },
+    },
+  )
+  const [code, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()])
+  expect(code, stderr).toBe(0)
+  expect(stderr).toContain("1 pass")
+})
+
+if (typeof OPENCODE_CLI_NAME === "string" && OPENCODE_CLI_NAME === "ocv") {
+  it.live("ocv distribution resolves the fork release", () =>
+    Effect.gen(function* () {
+      const test = yield* fixture(() => ({}), "@leohenon/ocv")
+      expect(yield* test.updater.latest("npm")).toBe("2.3.4")
+      expect(test.requests).toEqual(["https://api.github.com/repos/leohenon/opencode-vim/releases/latest"])
+      yield* test.updater.upgrade("npm", "v2.3.4")
+      expect(test.commands).toEqual([["npm", "install", "--global", "--force", "@leohenon/ocv@2.3.4"]])
     }),
   )
 }

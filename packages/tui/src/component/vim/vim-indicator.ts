@@ -25,6 +25,8 @@ export function useVimIndicator(input: {
     if (input.state.isReplace()) return "-- REPLACE --"
     if (input.state.isVisualLine()) return "-- VISUAL LINE --"
     if (input.state.isVisual()) return "-- VISUAL --"
-    return undefined
+    // ocv: normal mode is shown too. Without it there is no cue that the
+    // prompt is waiting for a vim command instead of text.
+    return "-- NORMAL --"
   })
 }

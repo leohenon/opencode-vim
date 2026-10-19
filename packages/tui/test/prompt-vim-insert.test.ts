@@ -8,16 +8,25 @@ const fixture = () =>
     config: { animations: false, vim: { enabled: true } } as any,
   })
 
+/** Renders until the frame carries the text, since a keystroke paints on the next frame. */
+async function frameHas(setup: Awaited<ReturnType<typeof fixture>>, text: string) {
+  for (let attempt = 0; attempt < 50; attempt++) {
+    await setup.renderOnce()
+    if (setup.captureCharFrame().includes(text)) return true
+    await new Promise((resolve) => setTimeout(resolve, 20))
+  }
+  return false
+}
+
 test("prompt inserts spaces in vim insert mode", async () => {
   await using setup = await fixture()
   try {
     await setup.ready
-    await setup.waitForFrame((frame) => frame.includes("-- INSERT --"))
+    expect(await frameHas(setup, "-- INSERT --")).toBe(true)
     setup.mockInput.pressKey("a")
     setup.mockInput.pressKey(" ")
     setup.mockInput.pressKey("b")
-    await setup.renderOnce()
-    expect(setup.captureCharFrame()).toContain("a b")
+    expect(await frameHas(setup, "a b")).toBe(true)
   } finally {
     setup.renderer.destroy()
   }
@@ -27,26 +36,22 @@ test("prompt shows the vim mode and inserts spaces after re-entering insert mode
   await using setup = await fixture()
   try {
     await setup.ready
-    await setup.waitForFrame((frame) => frame.includes("-- INSERT --"))
+    expect(await frameHas(setup, "-- INSERT --")).toBe(true)
     setup.mockInput.pressKey("a")
-    await setup.renderOnce()
-    expect(setup.captureCharFrame()).toContain("a")
+    expect(await frameHas(setup, "a")).toBe(true)
 
     // Normal mode is announced, so the prompt never looks like a text field
     // that silently drops keys.
     setup.mockInput.pressEscape()
-    await setup.renderOnce()
-    expect(setup.captureCharFrame()).toContain("-- NORMAL --")
+    expect(await frameHas(setup, "-- NORMAL --")).toBe(true)
     expect(setup.captureCharFrame()).not.toContain("-- INSERT --")
 
     setup.mockInput.pressKey("i")
-    await setup.renderOnce()
-    expect(setup.captureCharFrame()).toContain("-- INSERT --")
+    expect(await frameHas(setup, "-- INSERT --")).toBe(true)
 
     setup.mockInput.pressKey(" ")
     setup.mockInput.pressKey("b")
-    await setup.renderOnce()
-    expect(setup.captureCharFrame()).toContain("a b")
+    expect(await frameHas(setup, "a b")).toBe(true)
   } finally {
     setup.renderer.destroy()
   }

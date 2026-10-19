@@ -407,16 +407,19 @@ You can customize various aspects of the TUI view using the command palette (`ct
 ## Vim mode
 
 Optional Vim-style prompt mode for the TUI. Disabled by default.
-Enable it from the command palette or in your config.
+Enable it from the command palette or in your CLI config.
 
-```json title="opencode.json"
+```json title="cli.json"
 {
   "$schema": "https://opencode.ai/config.json",
-  "tui": {
-    "vim": true
+  "vim": {
+    "enabled": true
   }
 }
 ```
+
+Vim mode adds a normal/insert modal editing mode to the prompt, plus a copy mode
+for selecting text in the session transcript.
 
 **Supported keys:**
 
@@ -427,6 +430,8 @@ Enable it from the command palette or in your config.
 **Navigation:** `gg`, `G`
 
 **Scrolling:** `Ctrl+e`, `Ctrl+y`; `Ctrl+d`, `Ctrl+u`; `Ctrl+f`, `Ctrl+b`
+
+**Copy mode:** `<leader>v` (or `Ctrl+w k`) enters copy mode; `q` or `<leader>v` leaves it.
 
 ---
 

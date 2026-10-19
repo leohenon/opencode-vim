@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { $ } from "bun"
-import { createOpencode } from "@opencode-ai/sdk/v2"
+import { OpenCode } from "@opencode-ai/client"
 import { parseArgs } from "util"
 import { Script } from "@opencode-ai/script"
 
@@ -53,7 +53,7 @@ export async function getCommits(from: string, to: string): Promise<Commit[]> {
 
   // Get commits that touch the relevant packages
   const log =
-    await $`git log ${fromRef}..${toRef} --oneline --format="%H" -- packages/opencode packages/sdk packages/plugin packages/desktop packages/app sdks/vscode packages/extensions github`.text()
+    await $`git log ${fromRef}..${toRef} --oneline --format="%H" -- packages/cli packages/sdk packages/plugin packages/desktop packages/app sdks/vscode packages/extensions github`.text()
   const hashes = log.split("\n").filter(Boolean)
 
   const commits: Commit[] = []
@@ -68,8 +68,8 @@ export async function getCommits(from: string, to: string): Promise<Commit[]> {
     const areas = new Set<string>()
 
     for (const file of files.split("\n").filter(Boolean)) {
-      if (file.startsWith("packages/opencode/src/cli/cmd/")) areas.add("tui")
-      else if (file.startsWith("packages/opencode/")) areas.add("core")
+      if (file.startsWith("packages/cli/src/commands/handlers/")) areas.add("tui")
+      else if (file.startsWith("packages/cli/")) areas.add("core")
       else if (file.startsWith("packages/desktop/src-tauri/")) areas.add("tauri")
       else if (file.startsWith("packages/desktop/")) areas.add("app")
       else if (file.startsWith("packages/app/")) areas.add("app")
@@ -136,7 +136,7 @@ function getSection(areas: Set<string>): string {
   return "Core"
 }
 
-async function summarizeCommit(opencode: Awaited<ReturnType<typeof createOpencode>>, message: string): Promise<string> {
+async function summarizeCommit(opencode: ReturnType<typeof OpenCode.make>, message: string): Promise<string> {
   console.log("summarizing commit:", message)
   const session = await opencode.client.session.create()
   const result = await opencode.client.session
@@ -164,7 +164,7 @@ Commit: ${message}`,
   return result.trim()
 }
 
-export async function generateChangelog(commits: Commit[], opencode: Awaited<ReturnType<typeof createOpencode>>) {
+export async function generateChangelog(commits: Commit[], opencode: ReturnType<typeof OpenCode.make>) {
   // Summarize commits in parallel with max 10 concurrent requests
   const BATCH_SIZE = 10
   const summaries: string[] = []
@@ -227,7 +227,7 @@ export async function buildNotes(from: string, to: string) {
 
   console.log("generating changelog since " + from)
 
-  const opencode = await createOpencode({ port: 0 })
+  const opencode = OpenCode.make({ baseUrl: "http://localhost:4096" })
   const notes: string[] = []
 
   try {

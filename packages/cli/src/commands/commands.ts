@@ -59,7 +59,6 @@ const Root = Spec.make(typeof OPENCODE_CLI_NAME === "string" ? OPENCODE_CLI_NAME
   commands: [
     Spec.make("upgrade", {
       description: "Upgrade OpenCode to the latest or a specific version",
-      aliases: ["update"],
       params: {
         target: Argument.String("target").pipe(
           Argument.withDescription("Version to upgrade to (with or without a leading v)"),
@@ -71,6 +70,12 @@ const Root = Spec.make(typeof OPENCODE_CLI_NAME === "string" ? OPENCODE_CLI_NAME
           Flag.optional,
         ),
       },
+    }),
+    // ocv: `update` replaces the running ocv binary with the latest ocv
+    // release. It is separate from `upgrade`, which talks to the opencode.ai
+    // update service and does not publish ocv builds.
+    Spec.make("update", {
+      description: "Update ocv to the latest version",
     }),
     Spec.make("uninstall", {
       description: "Uninstall OpenCode, keeping session data, configuration, and state",

@@ -13,6 +13,11 @@ import { errorMessage } from "../util/error"
 
 export const methods = ["curl", "npm", "pnpm", "bun", "yarn", "vp", "brew", "winget"] as const
 
+// ocv: the fork ships its own releases, npm package and installer.
+const OCV_REPO = "leohenon/opencode-vim"
+const OCV_NPM_PACKAGE = "@leohenon/ocv"
+const OCV_INSTALLER = `https://raw.githubusercontent.com/${OCV_REPO}/ocv/install.sh`
+
 export type Method = (typeof methods)[number]
 export type RunResult = { readonly type: "available" | "installed"; readonly version: string }
 export type CheckResult = RunResult | { readonly type: "unavailable"; readonly message: string }
@@ -171,9 +176,13 @@ const make = Effect.gen(function* () {
     return values.findLast((value) => value !== undefined) ?? "notify"
   })
 
-  const exec = Effect.fnUntraced(function* (command: string[], timeout: Duration.Input = "30 seconds") {
+  const exec = Effect.fnUntraced(function* (
+    command: string[],
+    timeout: Duration.Input = "30 seconds",
+    env?: Record<string, string>,
+  ) {
     return yield* appProcess
-      .run(ChildProcess.make(command[0], command.slice(1)), {
+      .run(ChildProcess.make(command[0], command.slice(1), env ? { env } : undefined), {
         timeout,
         maxOutputBytes: 100_000,
         maxErrorBytes: 100_000,
@@ -187,11 +196,13 @@ const make = Effect.gen(function* () {
       )
   })
 
+  // ocv: the fork installs to ~/.ocv/bin/ocv through its own installer, and
+  // publishes under a different npm package and release repository.
   const curlPath = path.resolve(
     global.home,
-    ".opencode",
+    ".ocv",
     "bin",
-    process.platform === "win32" ? "opencode.exe" : "opencode",
+    process.platform === "win32" ? "ocv.exe" : "ocv",
   )
   const curlBinary = yield* fs.realPath(curlPath).pipe(Effect.orElseSucceed(() => curlPath))
 
@@ -276,6 +287,52 @@ const make = Effect.gen(function* () {
     const distribution = method === "brew" ? "homebrew" : "npm"
     // Homebrew Core builds its formula on its own schedule, so the tap release does not describe it.
     const core = method === "brew" && installedFormula === "opencode"
+    // ocv: the fork publishes its own releases, so the opencode.ai update
+    // service does not describe them.
+    if (!core) {
+      const response = yield* Effect.tryPromise({
+        try: (signal) =>
+          fetch(`https://api.github.com/repos/${OCV_REPO}/releases/latest`, {
+            signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
+          }),
+        catch: (cause) =>
+          new UpgradeError(
+            {
+              title: "Could not check for ocv updates",
+              detail: errorDetail(cause),
+              retry: "Check your network, then run ocv update again.",
+            },
+            { cause },
+          ),
+      })
+      if (!response.ok)
+        return yield* Effect.fail(
+          new UpgradeError({
+            title: "Could not check for ocv updates",
+            detail: `The GitHub release API returned HTTP ${response.status}.`,
+            retry: "Try again in a few minutes.",
+          }),
+        )
+      const data = (yield* Effect.tryPromise({
+        try: () => response.json(),
+        catch: (cause) =>
+          new UpgradeError(
+            {
+              title: "Could not read the ocv release information",
+              detail: errorDetail(cause),
+              retry: "Check your network, then run ocv update again.",
+            },
+            { cause },
+          ),
+      })) as { tag_name?: string }
+      const version = data.tag_name?.replace(/^v/, "")
+      if (!version) return yield* Effect.fail(new UpgradeError({
+        title: "Could not read the ocv release information",
+        detail: "The GitHub release API returned incomplete release information.",
+        retry: "Try again in a few minutes.",
+      }))
+      return { package: OCV_NPM_PACKAGE, version }
+    }
     const response = yield* Effect.tryPromise({
       try: (signal) =>
         fetch(
@@ -394,6 +451,7 @@ const make = Effect.gen(function* () {
     readonly displayCommand?: string[]
     readonly title?: string
     readonly retry?: string
+    readonly env?: Record<string, string>
   }) => {
     const failure = (detail: string, cause?: unknown) =>
       new UpgradeError(
@@ -405,7 +463,7 @@ const make = Effect.gen(function* () {
         },
         cause === undefined ? undefined : { cause },
       )
-    return exec(input.command, "5 minutes").pipe(
+    return exec(input.command, "5 minutes", input.env).pipe(
       Effect.flatMap((result) =>
         result.code === 0 ? Effect.succeed(result) : Effect.fail(failure(resultDetail(result))),
       ),
@@ -479,18 +537,21 @@ const make = Effect.gen(function* () {
           const installer = path.join(directory, "install")
           yield* runUpgrade({
             method,
-            command: ["curl", "-fsSL", "-o", installer, "https://opencode.ai/v2/install"],
-            displayCommand: ["curl", "-fsSL", "https://opencode.ai/v2/install"],
-            title: "Could not download the OpenCode installer",
-            retry: "Check your network, then run opencode upgrade again.",
+            command: ["curl", "-fsSL", "-o", installer, OCV_INSTALLER],
+            displayCommand: ["curl", "-fsSL", OCV_INSTALLER],
+            title: "Could not download the ocv installer",
+            retry: "Check your network, then run ocv update again.",
           })
           return yield* retaining(
             method,
             runUpgrade({
               method,
-              command: [bash, installer, "--version", version, "--no-modify-path"],
-              displayCommand: ["opencode", "upgrade", version, "--method", "curl"],
-              title: "The OpenCode installer failed",
+              // ocv: the fork installer takes the version through OCV_VERSION and
+              // installs next to the running binary.
+              command: [bash, installer],
+              displayCommand: ["ocv", "update"],
+              title: "The ocv installer failed",
+              env: { OCV_VERSION: version },
             }),
           )
         }

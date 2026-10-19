@@ -280,20 +280,20 @@ jobs:
           git push origin HEAD:${{ github.ref_name }}
 
       - name: Build CLI
-        run: bun run packages/opencode/script/build.ts --single=false
+        run: bun run packages/cli/script/build.ts
         env:
           OPENCODE_VERSION: ${{ inputs.version }}
 
       - name: Package binaries
         shell: bash
         run: |
-          DIST="packages/opencode/dist"
+          DIST="packages/cli/dist"
           mkdir -p "$DIST/release"
 
-          for dir in $DIST/opencode-*/; do
+          for dir in $DIST/cli-*/; do
             [ -d "$dir" ] || continue
             name=$(basename "$dir")
-            target="${name/opencode/ocv}"
+            target="ocv-${name#cli-}"
             bin="$dir/bin/opencode"
             if [ ! -f "$bin" ]; then
               bin="$dir/bin/opencode.exe"
@@ -360,7 +360,7 @@ jobs:
         shell: bash
         run: |
           VERSION="${{ inputs.version }}"
-          DIST="packages/opencode/dist/release"
+          DIST="packages/cli/dist/release"
           NOTES_FILE="${{ steps.notes.outputs.file }}"
           if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "v$VERSION" --repo "$GITHUB_REPOSITORY" --clobber "$DIST"/*
@@ -381,7 +381,7 @@ jobs:
         id: sum
         shell: bash
         run: |
-          DIST="packages/opencode/dist/release"
+          DIST="packages/cli/dist/release"
           echo "darwin_arm64=$(shasum -a 256 "$DIST/ocv-darwin-arm64.zip" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
           echo "darwin_x64=$(shasum -a 256 "$DIST/ocv-darwin-x64.zip" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
           echo "linux_arm64=$(shasum -a 256 "$DIST/ocv-linux-arm64.tar.gz" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
@@ -504,7 +504,7 @@ jobs:
       - name: Publish npm package
         id: npm_publish
         continue-on-error: true
-        run: bun run packages/opencode/script/publish-ocv-npm.ts
+        run: bun run packages/cli/script/publish-ocv-npm.ts
         env:
           OPENCODE_VERSION: ${{ inputs.version }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

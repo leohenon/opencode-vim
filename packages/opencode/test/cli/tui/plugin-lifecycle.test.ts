@@ -8,6 +8,38 @@ import { mockTuiRuntime } from "../../fixture/tui-runtime"
 
 const { TuiPluginRuntime } = await import("../../../src/plugin/tui/runtime")
 
+test("plugins can read the current copy selection through the scoped host", async () => {
+  await using tmp = await tmpdir({
+    init: async (dir) => {
+      const file = path.join(dir, "selection-plugin.ts")
+      const marker = path.join(dir, "selection.json")
+      await Bun.write(
+        file,
+        `export default { id: "demo.selection", tui: async (api, options) => {
+        await Bun.write(options.marker, JSON.stringify(api.copy?.selection() ?? null))
+      } }`,
+      )
+      return { spec: pathToFileURL(file).href, marker }
+    },
+  })
+  const selection = {
+    sessionID: "session",
+    text: "selected excerpt",
+    mode: "line" as const,
+    references: [{ messageID: "message", partID: "part", role: "assistant" as const }],
+  }
+  const { config, restore } = mockTuiRuntime(tmp.path, [[tmp.extra.spec, { marker: tmp.extra.marker }]])
+  const api = createTuiPluginApi()
+  api.copy = { selection: () => selection }
+  try {
+    await TuiPluginRuntime.init({ api, config })
+    expect(await Bun.file(tmp.extra.marker).json()).toEqual(selection)
+  } finally {
+    await TuiPluginRuntime.dispose()
+    restore()
+  }
+})
+
 test("runs onDispose callbacks with aborted signal and is idempotent", async () => {
   await using tmp = await tmpdir({
     init: async (dir) => {

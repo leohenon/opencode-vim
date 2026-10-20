@@ -580,6 +580,16 @@ export type TuiWorkspace = {
 }
 
 export type TuiPluginApi = {
+  copy: {
+    /**
+     * Read a snapshot of the active Vim copy-mode visual selection.
+     * Returns undefined outside copy mode, without a visual selection, or for
+     * whitespace-only selections. Does not yank, exit copy mode, or edit the prompt.
+     * Plugins choose their own commands and bindings via keymap.registerLayer;
+     * no shortcut or editor integration is installed by this API.
+     */
+    selection: () => TuiCopySelection | undefined
+  }
   app: TuiApp
   attention: TuiAttention
   /**
@@ -624,6 +634,14 @@ export type TuiPluginApi = {
     install: (spec: string, options?: TuiPluginInstallOptions) => Promise<TuiPluginInstallResult>
   }
   lifecycle: TuiLifecycle
+}
+
+export type TuiCopySelection = {
+  sessionID: string
+  text: string
+  mode: "char" | "line" | "block"
+  /** Unique message/part references in selection order, limited to selectable copy-mode rows. */
+  references: { messageID: string; partID?: string; role: "user" | "assistant" }[]
 }
 
 export type TuiPlugin = (api: TuiPluginApi, options: PluginOptions | undefined, meta: TuiPluginMeta) => Promise<void>

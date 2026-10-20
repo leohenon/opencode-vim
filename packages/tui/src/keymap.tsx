@@ -34,6 +34,7 @@ export const COMMAND_PALETTE_COMMAND = "command.palette.show"
 
 const OPENCODE_MODE_KEY = "opencode.mode"
 export const OPENCODE_VIM_MODE_KEY = "opencode.vim.mode"
+export const OPENCODE_COPY_SELECTION_KEY = "opencode.copy.selection"
 
 export const OpencodeKeymapProvider = KeymapProvider
 export const useOpencodeKeymap = useKeymap

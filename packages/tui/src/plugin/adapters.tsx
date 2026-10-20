@@ -1,4 +1,4 @@
-import type { TuiDialogSelectOption, TuiPluginApi, TuiSlotProps } from "@opencode-ai/plugin/tui"
+import type { TuiCopySelection, TuiDialogSelectOption, TuiPluginApi, TuiSlotProps } from "@opencode-ai/plugin/tui"
 import type { TuiConfig } from "../config"
 import type { useEvent } from "../context/event"
 import type { useRoute } from "../context/route"
@@ -172,6 +172,14 @@ function appApi(version: string): TuiPluginApi["app"] {
 
 export function createTuiApiAdapters(input: Input): Omit<TuiPluginApi, "lifecycle"> {
   return {
+    copy: {
+      selection() {
+        const read = input.keymap.getData(Keymap.OPENCODE_COPY_SELECTION_KEY) as
+          | (() => TuiCopySelection | undefined)
+          | undefined
+        return read?.()
+      },
+    },
     app: appApi(input.version),
     attention: input.attention,
     // Keep deprecated `api.command` working for v1 plugins; remove in v2.

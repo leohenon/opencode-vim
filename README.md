@@ -378,6 +378,10 @@ vim.g.opencode_opts = {
 }
 ```
 
+### Custom integrations
+
+TUI plugins can access copy-mode selections with `api.copy.selection()`. See the [API types](https://github.com/leohenon/opencode-vim/blob/ocv/packages/plugin/src/tui.ts).
+
 ## Thanks to all contributors!
 
 <a href="https://github.com/reobin"><img src="./assets/contributors/reobin.png" alt="@reobin" width="40" height="40" /></a> <a href="https://github.com/BrettKulp"><img src="./assets/contributors/BrettKulp.png" alt="@BrettKulp" width="40" height="40" /></a> <a href="https://github.com/lamiphil"><img src="./assets/contributors/lamiphil.png" alt="@lamiphil" width="40" height="40" /></a> <a href="https://github.com/XPhyro"><img src="./assets/contributors/XPhyro.png" alt="@XPhyro" width="40" height="40" /></a> <a href="https://github.com/shaheislam"><img src="./assets/contributors/shaheislam.png" alt="@shaheislam" width="40" height="40" /></a> <a href="https://github.com/semi710"><img src="./assets/contributors/semi710.png" alt="@semi710" width="40" height="40" /></a> <a href="https://github.com/bjschafer"><img src="./assets/contributors/bjschafer.png" alt="@bjschafer" width="40" height="40" /></a> <a href="https://github.com/devkev"><img src="./assets/contributors/devkev.png" alt="@devkev" width="40" height="40" /></a>

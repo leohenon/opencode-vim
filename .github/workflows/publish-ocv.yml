@@ -275,7 +275,7 @@ jobs:
             exit 0
           fi
 
-          git add README.md assets/contributors
+          git add README.md
           git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -m "chore(release): update contributors"
           git push origin HEAD:${{ github.ref_name }}
 

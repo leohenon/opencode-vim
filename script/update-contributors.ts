@@ -1,7 +1,6 @@
 #!/usr/bin/env bun
 
 import { $ } from "bun"
-import { mkdir } from "node:fs/promises"
 import { parseArgs } from "util"
 
 type Pull = {
@@ -79,23 +78,8 @@ if (missing.length === 0) {
   process.exit(0)
 }
 
-await saveAvatars(missing)
 await Bun.write(values.readme!, addContributors(readme, missing))
 console.log(`Added contributors: ${missing.map((login) => `@${login}`).join(", ")}`)
-
-async function saveAvatars(logins: string[]) {
-  const directory = "assets/contributors"
-  await mkdir(directory, { recursive: true })
-
-  await Promise.all(
-    logins.map(async (login) => {
-      const url = `https://images.weserv.nl/?url=github.com/${login}.png&w=80&h=80&fit=cover&mask=circle&output=png`
-      const response = await fetch(url)
-      if (!response.ok) throw new Error(`Failed to generate avatar for @${login}: ${response.status}`)
-      await Bun.write(`${directory}/${login}.png`, await response.arrayBuffer())
-    }),
-  )
-}
 
 function addContributors(readme: string, logins: string[]) {
   const heading = "## Thanks to all contributors!"
@@ -117,7 +101,7 @@ function addContributors(readme: string, logins: string[]) {
   const current = readme.slice(start, end).trim()
   const avatars = logins.map(
     (login) =>
-      `<a href="https://github.com/${login}"><img src="./assets/contributors/${login}.png" alt="@${login}" width="40" height="40" /></a>`,
+      `<a href="https://github.com/${login}"><img src="https://images.weserv.nl/?url=github.com/${login}.png&amp;w=80&amp;h=80&amp;fit=cover&amp;mask=circle&amp;output=png" alt="@${login}" width="40" height="40" /></a>`,
   )
   const next = current ? `${current} ${avatars.join(" ")}` : avatars.join(" ")
   return readme.slice(0, start) + next + (suffix ? `\n\n${suffix}` : readme.endsWith("\n") ? "\n" : "")

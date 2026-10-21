@@ -6,6 +6,7 @@ import type { UpdateState } from "../context/update-notification"
 import { DialogHeader, DialogLayout, useDialog } from "../ui/dialog"
 import { errorMessage } from "../util/error"
 import { Spinner } from "./spinner"
+import { DISPLAY_NAME } from "@opencode/util/identity"
 
 export function DialogUpdate(props: {
   check?: (signal: AbortSignal) => Promise<string | undefined>
@@ -92,7 +93,7 @@ export function DialogUpdate(props: {
         <DialogHeader
           title={
             state().type === "installing"
-              ? "Updating OpenCode"
+              ? `Updating ${DISPLAY_NAME}`
               : state().type === "available" || state().type === "failed"
                 ? "Update available"
                 : "Update"
@@ -137,12 +138,12 @@ export function DialogUpdate(props: {
             </Match>
             <Match when={current.type === "available"}>
               <text fg={theme.text.muted}>
-                An update is available. After installing, you'll be prompted to restart OpenCode.
+                An update is available. After installing, you'll be prompted to restart {DISPLAY_NAME}.
               </text>
             </Match>
             <Match when={current.type === "installing"}>
               <Spinner shimmer={theme.text.base}>
-                {current.type === "installing" ? `Installing OpenCode ${current.version}…` : ""}
+                {current.type === "installing" ? `Installing ${DISPLAY_NAME} ${current.version}…` : ""}
               </Spinner>
             </Match>
             <Match when={current.type === "installed"}>
@@ -151,7 +152,7 @@ export function DialogUpdate(props: {
               </text>
             </Match>
             <Match when={current.type === "current"}>
-              <text fg={theme.text.muted}>OpenCode is already up to date.</text>
+              <text fg={theme.text.muted}>{DISPLAY_NAME} is already up to date.</text>
             </Match>
             <Match when={current.type === "unavailable"}>
               <text fg={theme.text.muted} wrapMode="word">

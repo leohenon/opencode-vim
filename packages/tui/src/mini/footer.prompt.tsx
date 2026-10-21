@@ -25,6 +25,7 @@ import type { ClipboardService } from "../context/clipboard"
 import fuzzysort from "fuzzysort"
 import path from "path"
 import { pathToFileURL } from "node:url"
+import { DISPLAY_NAME } from "@opencode/util/identity"
 import {
   For,
   Show,
@@ -528,7 +529,7 @@ export function createPromptState(input: PromptInput): PromptState {
         description: "compact older session context to free space",
       } satisfies SlashOption,
       ...EXIT_COMMANDS.map(
-        (name) => ({ kind: "slash", name, display: `/${name}`, description: "close OpenCode" }) satisfies SlashOption,
+        (name) => ({ kind: "slash", name, display: `/${name}`, description: `close ${DISPLAY_NAME}` }) satisfies SlashOption,
       ),
     ]
     const hidden = new Set(builtins.map((item) => item.name))

@@ -1466,6 +1466,7 @@ test.skipIf(process.platform === "win32").each(["manual", "select"] as const)(
           config: {
             get: async () => ({
               animations: false,
+              vim: false,
               terminal: { copy },
             }),
             update: async () => ({}),

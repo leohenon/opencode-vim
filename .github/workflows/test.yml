@@ -22,6 +22,7 @@ env:
 
 jobs:
   affected:
+    if: github.repository == 'anomalyco/opencode'
     name: affected packages
     runs-on: blacksmith-4vcpu-ubuntu-2404
     outputs:
@@ -54,6 +55,7 @@ jobs:
           bun -e 'const result = await Bun.file("affected.json").json(); console.log(`app=${result.packages.count > 0}`)' >> "$GITHUB_OUTPUT"
 
   unit:
+    if: github.repository == 'anomalyco/opencode'
     name: unit (${{ matrix.settings.name }})
     strategy:
       fail-fast: false
@@ -139,6 +141,7 @@ jobs:
         run: bun run check:generated
 
   build:
+    if: github.repository == 'anomalyco/opencode'
     name: build (${{ matrix.settings.name }})
     strategy:
       fail-fast: false
@@ -207,7 +210,7 @@ jobs:
   e2e-suite:
     name: e2e (${{ matrix.settings.name }}, ${{ matrix.suite.id }})
     needs: affected
-    if: needs.affected.outputs.e2e == 'true'
+    if: github.repository == 'anomalyco/opencode' && (needs.affected.outputs.e2e == 'true')
     strategy:
       fail-fast: false
       matrix:
@@ -318,7 +321,7 @@ jobs:
   e2e:
     name: e2e (${{ matrix.os }})
     needs: [affected, e2e-suite]
-    if: ${{ !cancelled() }}
+    if: ${{ github.repository == 'anomalyco/opencode' && (!cancelled()) }}
     strategy:
       fail-fast: false
       matrix:

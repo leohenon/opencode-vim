@@ -15,6 +15,10 @@ export interface Interface {
   readonly path: string
   readonly get: () => Effect.Effect<Info>
   readonly update: (update: (draft: Draft<Info>) => void) => Effect.Effect<Info, Error>
+  readonly importV1: (input: {
+    readonly config: string
+    readonly state: string
+  }) => Effect.Effect<{ readonly info: Info; readonly sources: string[] } | undefined, Error>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/cli/config/Config") {}
@@ -91,7 +95,7 @@ export const layer = Layer.effect(
           if (!edits.length) return current
           const text = yield* fs
             .readFileString(file)
-            .pipe(Effect.orElseSucceed(() => JSON.stringify({ $schema: SchemaURL }, null, 2)))
+            .pipe(Effect.orElseSucceed(() => JSON.stringify(SchemaURL ? { $schema: SchemaURL } : {}, null, 2)))
           const updated = edits.reduce(
             (text, edit) =>
               applyEdits(
@@ -109,7 +113,17 @@ export const layer = Layer.effect(
       ).pipe(Effect.mapError((cause) => new Error("Failed to update CLI config", { cause }))),
     )
 
-    return Service.of({ path: file, get, update })
+    const importV1 = Effect.fn("cli.config.import-v1")(function* (input: {
+      readonly config: string
+      readonly state: string
+    }) {
+      const imported = yield* ConfigMigration.readV1(input).pipe(Effect.provideService(FileSystem.FileSystem, fs))
+      if (!imported) return
+      const info = yield* update((draft) => ConfigMigration.mergeV1(draft, imported.info))
+      return { info, sources: imported.sources }
+    })
+
+    return Service.of({ path: file, get, update, importV1 })
   }),
 )
 

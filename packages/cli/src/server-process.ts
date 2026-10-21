@@ -18,6 +18,7 @@ import { ServiceRegistration } from "./services/service-registration"
 import { RemoteTunnel } from "./services/remote-tunnel"
 import { WebUi } from "./services/web-ui"
 import { databasePath } from "./database-path"
+import { CLI_NAME } from "@opencode/util/identity"
 
 export type Mode = "default" | "service" | "stdio"
 
@@ -177,7 +178,7 @@ const processEffect = Effect.fnUntraced(function* (options: Options) {
             return yield* Effect.fail(
               new Error(
                 `Managed service port ${port} on ${hostname} is already in use by another process. ` +
-                  "Configure another port with `opencode service set port <port>` and start the service again.",
+                  `Configure another port with \`${CLI_NAME} service set port <port>\` and start the service again.`,
                 { cause: error },
               ),
             )

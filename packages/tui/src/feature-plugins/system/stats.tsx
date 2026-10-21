@@ -1,6 +1,7 @@
 import type { SessionStatsInfo } from "@opencode/client"
 import { Plugin } from "@opencode/plugin/tui"
 import { activityCalendar } from "@opencode/util/activity-calendar"
+import { CLI_NAME } from "@opencode/util/identity"
 import { TextAttributes } from "@opentui/core"
 import { useTerminalDimensions } from "@opentui/solid"
 import { createMemo, createResource, createSignal, For, Show } from "solid-js"
@@ -62,7 +63,7 @@ export function StatsPoster(props: { stats: SessionStatsInfo }) {
     <box width={width()} flexDirection="column" alignItems="center" flexShrink={0} gap={compact() ? 1 : 2}>
       <box width="100%" flexDirection={width() < 44 ? "column" : "row"} justifyContent="space-between">
         <text fg={theme.text.base} attributes={TextAttributes.BOLD}>
-          opencode / stats
+          {CLI_NAME} / stats
         </text>
         <text fg={theme.text.muted}>{dates()}</text>
       </box>

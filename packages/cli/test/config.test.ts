@@ -136,6 +136,47 @@ test("reads the legacy tabs toggle without rewriting it", async () => {
   expect(await Bun.file(file).json()).toEqual({ tabs: { enabled: false }, animations: false })
 })
 
+test("explicitly imports only supported V1 TUI settings from separate XDG roots", async () => {
+  await using directory = await tmpdir()
+  const sourceConfig = path.join(directory.path, "xdg-config", "opencode")
+  const sourceState = path.join(directory.path, "xdg-state", "opencode")
+  const target = path.join(directory.path, "xdg-config", "ocv")
+  await Bun.write(
+    path.join(sourceConfig, "tui.jsonc"),
+    `{
+      // OCV imports this supported TUI setting only when requested.
+      "vim": true,
+      "theme": "legacy",
+      "keybinds": { "prompt_copy_selection": "ctrl+y" },
+      "credentials": { "token": "do-not-import" }
+    }`,
+  )
+  await Bun.write(path.join(sourceState, "kv.json"), JSON.stringify({ animations_enabled: false, session: "ignore" }))
+  await Bun.write(path.join(sourceConfig, "auth.json"), JSON.stringify({ token: "secret" }))
+  await Bun.write(path.join(sourceState, "session.db"), "private session data")
+  await Bun.write(path.join(target, "cli.json"), JSON.stringify({ mouse: false, theme: { mode: "dark" } }))
+
+  const imported = await run(
+    target,
+    Effect.gen(function* () {
+      const service = yield* Config.Service
+      return yield* service.importV1({ config: sourceConfig, state: sourceState })
+    }),
+  )
+
+  expect(imported?.info).toMatchObject({
+    vim: true,
+    animations: false,
+    mouse: false,
+    theme: { name: "legacy", mode: "dark" },
+    keybinds: { "prompt.copy_selection": "ctrl+y" },
+  })
+  expect(imported?.info).not.toHaveProperty("credentials")
+  expect(imported?.info).not.toHaveProperty("session.db")
+  expect(await Bun.file(path.join(sourceConfig, "auth.json")).json()).toEqual({ token: "secret" })
+  expect(await Bun.file(path.join(sourceState, "session.db")).text()).toBe("private session data")
+})
+
 test("migrates tui and kv config into cli.json", async () => {
   await using directory = await tmpdir()
   await Bun.write(
@@ -154,6 +195,7 @@ test("migrates tui and kv config into cli.json", async () => {
       scroll_speed: 2,
       scroll_acceleration: { enabled: true },
       diff_style: "stacked",
+      diff_viewer: { command: ["git", "difftool", "HEAD"] },
       mouse: false,
     }),
   )
@@ -201,7 +243,7 @@ test("migrates tui and kv config into cli.json", async () => {
     leader: { timeout: 500 },
     scroll: { speed: 2, acceleration: true },
     attention: { sound_pack: "custom.pack" },
-    diffs: { wrap: "none", tree: false, single: true, view: "split" },
+    diffs: { command: ["git", "difftool", "HEAD"], wrap: "none", tree: false, single: true, view: "split" },
     terminal: { title: false },
     prompt: { editor: false, paste: "full" },
     session: { sidebar: "hide", scrollbar: true, thinking: "show", grouping: "none" },
@@ -221,6 +263,69 @@ test("migrates tui and kv config into cli.json", async () => {
   expect(await Bun.file(path.join(directory.path, "cli.json")).exists()).toBe(true)
   expect(await Bun.file(path.join(directory.path, "tui.json")).exists()).toBe(true)
   expect(await Bun.file(path.join(directory.path, "kv.json")).exists()).toBe(true)
+})
+
+test("migrates OCV Vim, prompt, and scoped keybind settings into cli.json", async () => {
+  await using directory = await tmpdir()
+  const legacy = {
+    vim: false,
+    vim_modal_input: false,
+    vim_enter_submit: true,
+    vim_insert_after_submit: true,
+    vim_initial_mode: "normal",
+    vim_system_clipboard_register: true,
+    vim_langmap: { д: "l" },
+    vim_line_motions: "display",
+    vim_showbreak: true,
+    vim_escape_sequence: "jk",
+    prompt_max_height: 24,
+    prompt_scrollbar: false,
+    keybinds: {
+      "vim.normal": {
+        leader: "space",
+        input_move_down: "j",
+        input_move_up: [{ key: "k", preventDefault: false }],
+      },
+    },
+  } as const
+  await Bun.write(path.join(directory.path, "tui.json"), JSON.stringify(legacy))
+
+  const config = await run(
+    directory.path,
+    Effect.gen(function* () {
+      const service = yield* Config.Service
+      return yield* service.get()
+    }),
+  )
+
+  expect(config).toEqual({
+    $schema: "https://opencode.ai/v2/cli.json",
+    ...legacy,
+    keybinds: {
+      "vim.normal": {
+        leader: "space",
+        "input.move.down": "j",
+        "input.move.up": [{ key: "k", preventDefault: false }],
+      },
+    },
+  })
+  expect(await Bun.file(path.join(directory.path, "cli.json")).json()).toEqual(config)
+})
+
+test("migrates the legacy nested prompt height", async () => {
+  await using directory = await tmpdir()
+  await Bun.write(path.join(directory.path, "tui.json"), JSON.stringify({ prompt: { max_height: 80 } }))
+
+  const config = await run(
+    directory.path,
+    Effect.gen(function* () {
+      const service = yield* Config.Service
+      return yield* service.get()
+    }),
+  )
+
+  expect(config.prompt_max_height).toBe(50)
+  expect((await Bun.file(path.join(directory.path, "cli.json")).json()).prompt_max_height).toBe(50)
 })
 
 test("migrates before the first update and does not remigrate afterward", async () => {

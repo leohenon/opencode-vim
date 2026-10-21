@@ -3,12 +3,13 @@ import { createMemo, Match, Show, Switch } from "solid-js"
 import { useTerminalDimensions } from "@opentui/solid"
 import { usePlugin } from "../../plugin/context"
 import { Slot } from "../../plugin/render"
+import { useMinimalUI } from "../../context/ui-state"
 
-export function homeFooterVisibility(width: number) {
+export function homeFooterVisibility(width: number, minimal = false) {
   return {
     mcpCommand: width >= 64,
     pluginCommand: width >= 80,
-    version: width >= 64,
+    version: !minimal && width >= 64,
   }
 }
 
@@ -76,7 +77,8 @@ function Plugins(props: { context: Plugin.Context }) {
 
 function View(props: { context: Plugin.Context }) {
   const dimensions = useTerminalDimensions()
-  const visibility = createMemo(() => homeFooterVisibility(dimensions().width))
+  const minimal = useMinimalUI()
+  const visibility = createMemo(() => homeFooterVisibility(dimensions().width, minimal()))
 
   return (
     <Show when={dimensions().height >= 14 && dimensions().width >= 44}>
@@ -92,7 +94,7 @@ function View(props: { context: Plugin.Context }) {
       >
         <Mcp context={props.context} />
         <Plugins context={props.context} />
-        <Slot path="home.footer.status" />
+        <Slot path="home.footer.status" input={{}} />
         <box flexGrow={1} />
         <Show when={visibility().version}>
           <box flexShrink={0}>

@@ -9,6 +9,7 @@ import { ACP } from "../../acp/agent"
 import { Commands } from "../commands"
 import { Runtime } from "../../framework/runtime"
 import { Standalone } from "../../services/standalone"
+import { CLI_NAME } from "@opencode/util/identity"
 
 export default Runtime.handler(
   Commands.commands.acp,
@@ -54,7 +55,7 @@ export default Runtime.handler(
     )
     // Exit directly: closing the scope would wait on the server's graceful shutdown, and its lease pipe ends it anyway.
     yield* Effect.sync(() => {
-      if (failure) process.stderr.write(`opencode acp: ${failure}\n`)
+      if (failure) process.stderr.write(`${CLI_NAME} acp: ${failure}\n`)
       process.exit(failure ? 1 : 0)
     })
   }),

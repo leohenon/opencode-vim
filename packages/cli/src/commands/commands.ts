@@ -2,6 +2,7 @@ import { Argument, Flag, GlobalFlag } from "effect/cli"
 import { Schema } from "effect"
 import { Spec } from "../framework/spec"
 import { Updater } from "../services/updater"
+import { CLI_NAME, DISPLAY_NAME } from "@opencode/util/identity"
 
 export const PrintLogs = GlobalFlag.Setting("print-logs")({
   flag: Flag.Boolean("print-logs").pipe(
@@ -9,8 +10,6 @@ export const PrintLogs = GlobalFlag.Setting("print-logs")({
     Flag.withDefault(false),
   ),
 })
-
-declare const OPENCODE_CLI_NAME: string | undefined
 
 const ServerParams = {
   standalone: Flag.Boolean("standalone").pipe(
@@ -35,13 +34,13 @@ const PermissionParams = {
   ),
 }
 
-const Root = Spec.make(typeof OPENCODE_CLI_NAME === "string" ? OPENCODE_CLI_NAME : "opencode", {
-  description: "OpenCode command line interface",
+const Root = Spec.make(CLI_NAME, {
+  description: `${DISPLAY_NAME} command line interface`,
   params: {
     ...ServerParams,
     ...PermissionParams,
     directory: Argument.String("directory").pipe(
-      Argument.withDescription("Directory to start OpenCode in"),
+      Argument.withDescription(`Directory to start ${DISPLAY_NAME} in`),
       Argument.optional,
     ),
     continue: Flag.Boolean("continue").pipe(
@@ -58,7 +57,7 @@ const Root = Spec.make(typeof OPENCODE_CLI_NAME === "string" ? OPENCODE_CLI_NAME
   },
   commands: [
     Spec.make("upgrade", {
-      description: "Upgrade OpenCode to the latest or a specific version",
+      description: `Upgrade ${DISPLAY_NAME} to the latest or a specific version`,
       aliases: ["update"],
       params: {
         target: Argument.String("target").pipe(
@@ -72,8 +71,11 @@ const Root = Spec.make(typeof OPENCODE_CLI_NAME === "string" ? OPENCODE_CLI_NAME
         ),
       },
     }),
+    Spec.make("import-v1-settings", {
+      description: "Import supported TUI settings from an existing OpenCode V1 installation",
+    }),
     Spec.make("uninstall", {
-      description: "Uninstall OpenCode, keeping session data, configuration, and state",
+      description: `Uninstall ${DISPLAY_NAME}, keeping session data, configuration, and state`,
       params: {
         dryRun: Flag.Boolean("dry-run").pipe(
           Flag.withDescription("Show what would be removed without removing"),
@@ -374,7 +376,7 @@ const Root = Spec.make(typeof OPENCODE_CLI_NAME === "string" ? OPENCODE_CLI_NAME
       },
     }),
     Spec.make("run", {
-      description: "Run OpenCode with a message",
+      description: `Run ${DISPLAY_NAME} with a message`,
       params: {
         ...ServerParams,
         message: Argument.String("message").pipe(

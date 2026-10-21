@@ -8,6 +8,7 @@ import { Commands } from "../commands"
 import { Runtime } from "../../framework/runtime"
 import { RemoteTunnel } from "../../services/remote-tunnel"
 import { ServiceConfig } from "../../services/service-config"
+import { CLI_NAME } from "@opencode/util/identity"
 
 export default Runtime.handler(
   Commands.commands.pair,
@@ -15,7 +16,7 @@ export default Runtime.handler(
     const config = yield* ServiceConfig.read()
     if (config.disabled === true)
       return yield* Effect.fail(
-        new Error("Pairing requires the background service; run `opencode service unset disabled` first"),
+        new Error(`Pairing requires the background service; run \`${CLI_NAME} service unset disabled\` first`),
       )
     if (input.remote && Option.isSome(input.url))
       return yield* Effect.fail(new Error("--remote cannot be combined with --url"))
@@ -62,7 +63,7 @@ export default Runtime.handler(
         `  ssh -L ${url.port}:${url.hostname}:${url.port} <host>`,
         `  If port ${url.port} is busy locally, forward another port and use it in the link.`,
         "",
-        "  To connect from other devices, run `opencode service set hostname 0.0.0.0`.",
+        `  To connect from other devices, run \`${CLI_NAME} service set hostname 0.0.0.0\`.`,
         "",
       ].join(EOL) + EOL,
     )
@@ -139,7 +140,7 @@ const remoteURL = Effect.fnUntraced(function* (client: ReturnType<typeof OpenCod
     Effect.timeoutOrElse({
       duration: "3 minutes",
       orElse: () =>
-        Effect.fail(new Error("Timed out waiting for the remote tunnel; run `opencode pair --remote` again to retry")),
+        Effect.fail(new Error(`Timed out waiting for the remote tunnel; run \`${CLI_NAME} pair --remote\` again to retry`)),
     }),
   )
 })

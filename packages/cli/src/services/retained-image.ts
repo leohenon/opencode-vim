@@ -3,13 +3,14 @@ export * as RetainedImage from "./retained-image"
 import { Effect, FileSystem } from "effect"
 import { randomBytes } from "node:crypto"
 import path from "node:path"
+import { CLI_NAME, PRODUCT_NAME } from "@opencode/util/identity"
 
 // Windows refuses to delete the last hard link of a running executable, and bun 1.4 spins
 // forever when its package replacement meets one. Any other link to the image can be removed,
 // so a process that must survive an installer keeps a second link to its own image while it
 // runs. Windows reuses process IDs quickly, so names carry a random suffix and only links of
 // processes that no longer exist are swept.
-const pattern = /^opencode-(?:service|upgrade)-(\d+)-[0-9a-f]+\.exe$/
+const pattern = new RegExp(`^${PRODUCT_NAME}-(?:service|upgrade)-(\\d+)-[0-9a-f]+\\.exe$`)
 
 /** Hold a second link to the running image in `directory` for the lifetime of the scope. */
 export const retain = Effect.fnUntraced(function* (directory: string, role: "service" | "upgrade") {
@@ -25,7 +26,7 @@ export const retain = Effect.fnUntraced(function* (directory: string, role: "ser
           yield* fs.remove(path.join(directory, name)).pipe(Effect.ignore)
         }),
       )
-      const target = path.join(directory, `opencode-${role}-${process.pid}-${randomBytes(4).toString("hex")}.exe`)
+      const target = path.join(directory, `${PRODUCT_NAME}-${role}-${process.pid}-${randomBytes(4).toString("hex")}.exe`)
       const executable = yield* fs.realPath(process.execPath).pipe(Effect.orElseSucceed(() => process.execPath))
       return yield* fs.link(executable, target).pipe(
         Effect.as(target),
@@ -61,7 +62,7 @@ export function installed(home: string) {
   return (
     executable.split(path.sep).includes("node_modules") ||
     /[\\/]winget[\\/]packages[\\/]/i.test(executable) ||
-    executable === path.resolve(home, ".opencode", "bin", "opencode.exe")
+    executable === path.resolve(home, `.${PRODUCT_NAME}`, "bin", `${CLI_NAME}.exe`)
   )
 }
 

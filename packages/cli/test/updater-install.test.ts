@@ -14,6 +14,7 @@ import { testEffect } from "../../core/test/lib/effect"
 const it = testEffect(NodeServices.layer)
 
 declare const OPENCODE_CLI_NAME: string | undefined
+declare const OPENCODE_PRODUCT_NAME: string | undefined
 
 function fixture(
   respond: (command: ChildProcess.StandardCommand) => Partial<AppProcess.RunResult> & {
@@ -23,7 +24,10 @@ function fixture(
   failCleanup = false,
   releasePackage = name,
   formula?: string,
-  executableOverride?: (root: string, home: string) => Effect.Effect<string, PlatformError.PlatformError, FileSystem.FileSystem>,
+  executableOverride?: (
+    root: string,
+    home: string,
+  ) => Effect.Effect<string, PlatformError.PlatformError, FileSystem.FileSystem>,
 ) {
   return Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem
@@ -132,6 +136,35 @@ function fixture(
     )
     return { updater, commands, requests, global, fs, executable, bash }
   })
+}
+
+function nativeFixture(name: string, binary = "bin/opencode", method: Updater.Method = "npm") {
+  return fixture(
+    (command) => ({
+      stdout: Buffer.from(
+        command.command === method
+          ? method === "vp"
+            ? JSON.stringify([{ name: "@leohenon/ocv" }])
+            : "@leohenon/ocv@2.3.4"
+          : command.command === "vp"
+            ? "[]"
+            : "",
+      ),
+    }),
+    name,
+    false,
+    "@leohenon/ocv",
+    undefined,
+    (root) =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const directory = path.join(root, "node_modules", ...name.split("/"))
+        yield* fs.makeDirectory(directory, { recursive: true })
+        // Published native dependencies have no bin field; only the wrapper exposes ocv.
+        yield* fs.writeFileString(path.join(directory, "package.json"), JSON.stringify({ name }))
+        return path.join(directory, binary)
+      }),
+  )
 }
 
 const windows = process.platform === "win32" ? it.live : it.live.skip
@@ -547,6 +580,195 @@ unix("other platforms never link the running binary", () =>
   }),
 )
 
+it.live("official OpenCode does not claim OCV native dependencies", () =>
+  Effect.gen(function* () {
+    const test = yield* nativeFixture("@leohenon/ocv-cli-darwin-arm64", "bin/opencode")
+    expect(yield* test.updater.method()).toBeUndefined()
+    expect(test.updater.removal("npm")).toBeUndefined()
+    expect(test.commands).toEqual([])
+  }),
+)
+
+test("OCV installed distributions use their owning package or formula", async () => {
+  const child = Bun.spawn(
+    [
+      process.execPath,
+      "test",
+      import.meta.path,
+      "--define",
+      'OPENCODE_CLI_NAME="ocv"',
+      "--define",
+      'OPENCODE_PRODUCT_NAME="ocv"',
+      "--test-name-pattern",
+      "^OCV (tapped formula behavior|rejects a brew upgrade when the tap remains behind|native .*)$",
+    ],
+    {
+      cwd: path.join(import.meta.dir, ".."),
+      stdout: "ignore",
+      stderr: "pipe",
+      env: { ...process.env, BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0" },
+    },
+  )
+  const [code, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()])
+  expect(code, stderr).toBe(0)
+  expect(stderr).toContain("9 pass")
+})
+
+if (typeof OPENCODE_PRODUCT_NAME === "string" && OPENCODE_PRODUCT_NAME === "ocv") {
+  it.live("OCV native layouts recognize every published platform variant", () =>
+    Effect.gen(function* () {
+      for (const target of [
+        "darwin-arm64",
+        "darwin-x64",
+        "darwin-x64-baseline",
+        "linux-arm64",
+        "linux-arm64-musl",
+        "linux-x64",
+        "linux-x64-baseline",
+        "linux-x64-musl",
+        "linux-x64-baseline-musl",
+        "windows-arm64",
+        "windows-x64",
+        "windows-x64-baseline",
+      ]) {
+        const name = `@leohenon/ocv-cli-${target}`
+        expect(Updater.ownsPackage(name)).toBe(false)
+        const test = yield* nativeFixture(name, target.startsWith("windows-") ? "bin/opencode.exe" : "bin/opencode")
+        expect(yield* test.updater.method()).toBe("npm")
+        expect(test.updater.removal("npm")?.command).toEqual(["npm", "uninstall", "--global", "@leohenon/ocv"])
+      }
+    }),
+  )
+  ;(
+    [
+      { method: "npm", remove: ["npm", "uninstall", "--global"] },
+      { method: "pnpm", remove: ["pnpm", "remove", "--global"] },
+      { method: "bun", remove: ["bun", "remove", "--global"] },
+      { method: "yarn", remove: ["yarn", "global", "remove"] },
+      { method: "vp", remove: ["vp", "uninstall", "-g"] },
+    ] as const
+  ).forEach(({ method, remove }) => {
+    it.live(`OCV native ${method} queries, upgrades, and removes the root wrapper`, () =>
+      Effect.gen(function* () {
+        const test = yield* nativeFixture("@leohenon/ocv-cli-linux-x64-baseline-musl", "bin/opencode", method)
+        expect(yield* test.updater.method()).toBe(method)
+        expect(test.commands).toEqual([
+          ["npm", "list", "-g", "--depth=0", "@leohenon/ocv"],
+          ["pnpm", "list", "-g", "--depth=0", "@leohenon/ocv"],
+          ["bun", "pm", "ls", "-g"],
+          ["yarn", "global", "list"],
+          ["vp", "list", "-g", "--json", "@leohenon/ocv"],
+        ])
+        yield* test.updater.upgrade(method, "2.3.4")
+        expect(test.commands[5]?.at(-1)).toBe("@leohenon/ocv@2.3.4")
+        const removal = test.updater.removal(method)
+        if (!removal) return yield* Effect.die("Expected native wrapper removal")
+        expect(removal.command).toEqual([...remove, "@leohenon/ocv"])
+        yield* removal.run
+        expect(test.commands[6]).toEqual([...remove, "@leohenon/ocv"])
+      }),
+    )
+  })
+
+  it.live("OCV native recognition rejects unrelated packages and executable paths", () =>
+    Effect.gen(function* () {
+      for (const [name, binary] of [
+        ["@opencode/cli", "bin/opencode"],
+        ["@opencode/cli-darwin-arm64", "bin/opencode"],
+        ["opencode-darwin-arm64", "bin/opencode"],
+        ["bun", "bin/opencode"],
+        ["@other/ocv-cli-darwin-arm64", "bin/opencode"],
+        ["@leohenon/ocv-cli-freebsd-x64", "bin/opencode"],
+        ["@leohenon/ocv-cli-linux-arm", "bin/opencode"],
+        ["@leohenon/ocv-cli-linux-arm64-baseline", "bin/opencode"],
+        ["@leohenon/ocv-cli-darwin-x64-musl", "bin/opencode"],
+        ["@leohenon/ocv-cli-linux-x64-extra", "bin/opencode"],
+        ["@leohenon/ocv-cli-darwin-arm64", "bin/bun"],
+        ["@leohenon/ocv-cli-darwin-arm64", "bin/opencode.exe"],
+        ["@leohenon/ocv-cli-windows-x64", "bin/opencode"],
+        ["@leohenon/ocv-cli-linux-x64", "other/opencode"],
+        ["@leohenon/ocv", "bin/opencode"],
+      ]) {
+        const test = yield* nativeFixture(name, binary)
+        expect(yield* test.updater.method()).toBeUndefined()
+        for (const method of ["npm", "pnpm", "bun", "yarn", "vp"] as const)
+          expect(test.updater.removal(method)).toBeUndefined()
+        expect(test.commands).toEqual([])
+      }
+    }),
+  )
+
+  it.live("OCV tapped formula behavior", () =>
+    Effect.gen(function* () {
+      let installed = "2.0.25-ocv.4.12"
+      const test = yield* fixture(
+        (command) => {
+          if (command.command === "brew" && command.args[0] === "upgrade") installed = "2.0.25-ocv.4.13"
+          if (command.command === "brew" && command.args[0] === "info")
+            return {
+              stdout: Buffer.from(
+                JSON.stringify({
+                  formulae: [
+                    {
+                      name: "ocv-v2",
+                      full_name: "leohenon/tap/ocv-v2",
+                      versions: { stable: "2.0.25-ocv.4.13" },
+                      installed: [{ version: installed }],
+                    },
+                  ],
+                }),
+              ),
+            }
+          return {}
+        },
+        "@leohenon/ocv",
+        false,
+        "@leohenon/ocv",
+        "ocv-v2",
+      )
+      expect(yield* test.updater.method()).toBe("brew")
+      expect(yield* test.updater.latest()).toBe("2.0.25-ocv.4.13")
+      yield* test.updater.upgrade("brew", "2.0.25-ocv.4.13")
+      expect(test.commands).toEqual([
+        ["brew", "info", "--json=v2", "leohenon/tap/ocv-v2"],
+        ["brew", "upgrade", "leohenon/tap/ocv-v2"],
+        ["brew", "info", "--json=v2", "leohenon/tap/ocv-v2"],
+      ])
+      expect(test.requests).toEqual([])
+    }),
+  )
+
+  it.live("OCV rejects a brew upgrade when the tap remains behind", () =>
+    Effect.gen(function* () {
+      const test = yield* fixture(
+        (command) =>
+          command.command === "brew" && command.args[0] === "info"
+            ? {
+                stdout: Buffer.from(
+                  JSON.stringify({
+                    formulae: [
+                      {
+                        name: "ocv-v2",
+                        full_name: "leohenon/tap/ocv-v2",
+                        versions: { stable: "2.0.25-ocv.4.12" },
+                        installed: [{ version: "2.0.25-ocv.4.12" }],
+                      },
+                    ],
+                  }),
+                ),
+              }
+            : {},
+        "@leohenon/ocv",
+        false,
+        "@leohenon/ocv",
+        "ocv-v2",
+      )
+      const error = yield* test.updater.upgrade("brew", "2.0.25-ocv.4.13").pipe(Effect.flip)
+      expect(error.message).toContain("installed leohenon/tap/ocv-v2 formula is 2.0.25-ocv.4.12")
+    }),
+  )
+}
+
 test("Node distribution honors the compile-time CLI name", async () => {
   const child = Bun.spawn(
     [
@@ -594,6 +816,47 @@ if (typeof OPENCODE_CLI_NAME === "string" && OPENCODE_CLI_NAME === "opencode2-no
         ["pnpm", "add", "--global", "--allow-build=@opencode/cli-node", "@opencode/cli-node@2.3.4"],
         ["vp", "update", "-g", "@opencode/cli-node@2.3.4"],
       ])
+    }),
+  )
+}
+
+test("OCV does not update or uninstall the official WinGet distribution", async () => {
+  const child = Bun.spawn(
+    [
+      process.execPath,
+      "test",
+      import.meta.path,
+      "--define",
+      'OPENCODE_CLI_NAME="ocv"',
+      "--define",
+      'OPENCODE_PRODUCT_NAME="ocv"',
+      "--test-name-pattern",
+      "^OCV refuses official WinGet distributions$",
+    ],
+    {
+      cwd: path.join(import.meta.dir, ".."),
+      stdout: "ignore",
+      stderr: "pipe",
+      env: { ...process.env, BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0" },
+    },
+  )
+  const [code, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()])
+  expect(code, stderr).toBe(0)
+  expect(stderr).toContain("1 pass")
+})
+
+if (typeof OPENCODE_PRODUCT_NAME === "string" && OPENCODE_PRODUCT_NAME === "ocv") {
+  it.live("OCV refuses official WinGet distributions", () =>
+    Effect.gen(function* () {
+      const test = yield* winget({ stdout: Buffer.from("OpenCode Anomaly.OpenCode 2.0.28") })
+      expect(yield* test.updater.method()).toBeUndefined()
+      expect(test.updater.removal("winget")).toBeUndefined()
+      const check = yield* test.updater.latest("winget").pipe(Effect.flip)
+      const upgrade = yield* test.updater.upgrade("winget", "2.0.28").pipe(Effect.flip)
+      expect(check.message).toContain("OCV is not distributed through WinGet")
+      expect(upgrade.message).toContain("OCV is not distributed through WinGet")
+      expect(test.commands).toEqual([])
+      expect(test.requests).toEqual([])
     }),
   )
 }

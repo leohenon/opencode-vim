@@ -10,11 +10,13 @@ import { RetainedImage } from "../../services/retained-image"
 import { Updater } from "../../services/updater"
 import { handlePromptErrors, prompt, requireInteractive } from "../../ui/prompt"
 import { errorMessage } from "../../util/error"
+import { DISPLAY_NAME, PRODUCT_NAME } from "@opencode/util/identity"
+import { cleanShellConfig } from "../../util/shell-config"
 
 export default Runtime.handler(
   Commands.commands.uninstall,
   Effect.fn("cli.uninstall")(function* (input) {
-    intro("Uninstall OpenCode")
+    intro(`Uninstall ${DISPLAY_NAME}`)
     const fs = yield* FileSystem.FileSystem
     const global = yield* Global.Service
     const updater = yield* Updater.Service
@@ -29,7 +31,7 @@ export default Runtime.handler(
     const shell = method === "curl" ? yield* shellConfigs(global.home) : []
 
     log.info(`Installation method: ${method ?? "unknown"}`)
-    log.message("The following global files will be removed (shared by OpenCode versions and channels):")
+    log.message(`The following global files will be removed (shared only by ${DISPLAY_NAME} versions and channels):`)
     if (yield* fs.exists(global.cache)) log.info(`  Cache: ${global.cache}`)
     services.forEach((name) =>
       log.info(`  Stop background service and persistent terminals: ${path.join(global.state, name)}`),
@@ -70,7 +72,7 @@ export default Runtime.handler(
       )
     }
 
-    // Links that keep an older OpenCode replaceable may still run; move them so the cache can go.
+    // Links that keep an older installed image replaceable may still run; move them so the cache can go.
     if (process.platform === "win32") yield* RetainedImage.relocate(global.cache, global.tmp)
     const errors: string[] = []
     progress.start("Removing Cache...")
@@ -91,7 +93,16 @@ export default Runtime.handler(
     )
     yield* Effect.forEach(shell, (file) =>
       fs.readFileString(file).pipe(
-        Effect.flatMap((content) => fs.writeFileString(file, cleanShellConfig(content))),
+        Effect.flatMap((content) =>
+          fs.writeFileString(
+            file,
+            cleanShellConfig(content, {
+              home: global.home,
+              bins: [path.dirname(process.execPath), path.join(global.home, `.${PRODUCT_NAME}`, "bin")],
+              product: PRODUCT_NAME,
+            }),
+          ),
+        ),
         Effect.catch((error) => Effect.sync(() => errors.push(`Shell config ${file}: ${errorMessage(error)}`))),
       ),
     )
@@ -145,17 +156,15 @@ const shellConfigs = Effect.fnUntraced(function* (home: string) {
   const files = [...new Set(candidates[path.basename(process.env.SHELL || "bash")] ?? candidates.bash)]
   return yield* Effect.filter(files, (file) =>
     fs.readFileString(file).pipe(
-      Effect.map((content) => cleanShellConfig(content) !== content),
+      Effect.map(
+        (content) =>
+          cleanShellConfig(content, {
+            home,
+            bins: [bin, path.join(home, `.${PRODUCT_NAME}`, "bin")],
+            product: PRODUCT_NAME,
+          }) !== content,
+      ),
       Effect.orElseSucceed(() => false),
     ),
   )
 })
-
-function cleanShellConfig(content: string) {
-  const lines = content.split("\n")
-  const entry = (line: string) =>
-    /^(?:export PATH=|fish_add_path\s)/.test(line.trim()) && line.includes(".opencode/bin")
-  return lines
-    .filter((line, index) => !entry(line) && !(line.trim() === "# opencode" && entry(lines[index + 1] ?? "")))
-    .join("\n")
-}

@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test"
+import { TextareaRenderable } from "@opentui/core"
+import type { Config } from "../src/config"
 import { createAppFixture } from "./fixture/app"
 import { json } from "./fixture/tui-client"
 
@@ -20,14 +22,14 @@ function sessionInfo(record: SessionInput) {
   }
 }
 
-async function launch(options: { failCreates?: number } = {}) {
+async function launch(options: { failCreates?: number; config?: Config.Info } = {}) {
   const attempts: (string | undefined)[] = []
   const created: SessionInput[] = []
   const prompts: string[] = []
   let failures = options.failCreates ?? 0
   const setup = await createAppFixture({
     args: { newSessionID: "ses_chosen" },
-    config: { animations: false, keybinds: { "session.new": "f6" } },
+    config: { animations: false, keybinds: { "session.new": "f6" }, ...options.config },
     fetch: async (url, request) => {
       if (url.pathname === "/api/agent")
         return json({ location, data: [{ id: "build", mode: "primary", hidden: false, permissions: [] }] })
@@ -99,4 +101,29 @@ test("a failed first create keeps the launch session ID for the retry", async ()
   setup.mockInput.pressEnter()
   await setup.waitForFrame(() => run.created.length === 1)
   expect(run.attempts).toEqual(["ses_chosen", "ses_chosen"])
+})
+
+test.each([false, true])("Vim submits a real prompt with vim_enter_submit=%s", async (enterSubmit) => {
+  const run = await launch({ config: { vim: true, vim_enter_submit: enterSubmit } })
+  await using setup = run.setup
+  await setup.ready
+  await setup.waitForFrame((frame) => frame.includes("Demo Model"))
+  await setup.waitFor(() => setup.renderer.currentFocusedEditor instanceof TextareaRenderable)
+  const textarea = setup.renderer.currentFocusedEditor
+  if (!(textarea instanceof TextareaRenderable)) throw new Error("Expected focused composer")
+  // The fork retains the last mode across prompts; establish insert mode explicitly.
+  setup.mockInput.pressEscape()
+  setup.mockInput.pressKey("i")
+  await setup.mockInput.typeText("hello from Vim")
+  setup.mockInput.pressEnter()
+  if (!enterSubmit) {
+    await setup.renderOnce()
+    expect(run.prompts).toEqual([])
+    expect(textarea.plainText).toBe("hello from Vim\n")
+    setup.mockInput.pressEscape()
+    setup.mockInput.pressEnter()
+  }
+  await setup.waitFor(() => run.prompts.length === 1)
+  expect(run.created).toHaveLength(1)
+  expect(run.prompts).toEqual(["ses_chosen"])
 })

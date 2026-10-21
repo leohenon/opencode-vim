@@ -118,6 +118,11 @@ function migrateMode(theme: Theme, mode: Mode): ThemeDefinition {
     text: {
       base: text,
       muted: textMuted,
+      selection: {
+        base: hex(selectedForeground(theme, theme.secondary)),
+        search: hex(selectedForeground(theme, theme.textMuted)),
+        current: selected,
+      },
       action: {
         primary: {
           base: "$text.base",
@@ -145,6 +150,7 @@ function migrateMode(theme: Theme, mode: Mode): ThemeDefinition {
     },
     background: {
       base: background,
+      selection: { base: color("secondary"), search: color("textMuted"), current: color("primary") },
       raised: {
         base: backgroundPanel,
         high: backgroundMenu,

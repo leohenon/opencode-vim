@@ -27,6 +27,8 @@ export const context = createContext<{
   thinkingMode: () => ThinkingMode
   markdownMode: () => "source" | "rendered"
   groupExploration: () => boolean
+  copyActive?: () => boolean
+  registerCopyToggle?: (id: string, toggle: () => void) => () => void
   diffWrapMode: () => "word" | "none"
   models: () => ModelInfo[]
   messageIndex: (messageID: string) => number | undefined

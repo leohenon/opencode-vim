@@ -15,7 +15,14 @@ import { resolveOpencodePty } from "./opencode-pty"
 import { NativeArch } from "../../../script/native-arch"
 
 const dir = path.resolve(import.meta.dirname, "..")
+// Keep the upstream artifact layout and embedded source binary name. Distribution
+// wrappers rename the executable to `ocv` at install/package boundaries.
 const binary = "opencode"
+const cliName = "ocv"
+const productName = "ocv"
+const releaseChannel = "ocv"
+const packagePrefix = "@leohenon/ocv-"
+const repository = "git+https://github.com/leohenon/opencode-vim.git"
 const outdir = path.resolve(
   dir,
   process.argv.find((arg) => arg.startsWith("--outdir="))?.slice("--outdir=".length) ?? "dist",
@@ -180,7 +187,7 @@ export default { path: file, version: ${JSON.stringify(opencodePty.version)}, sh
       outfile: path.join(outdir, name, "bin", binary),
       execArgv: [
         "--smol",
-        `--user-agent=opencode/${Script.channel}/${Script.version}/cli`,
+        `--user-agent=ocv/${releaseChannel}/${Script.version}/cli`,
         "--use-system-ca",
         "--no-warnings",
         "--",
@@ -189,8 +196,9 @@ export default { path: file, version: ${JSON.stringify(opencodePty.version)}, sh
     },
     define: {
       OPENCODE_VERSION: `'${Script.version}'`,
-      OPENCODE_CLI_NAME: "'opencode'",
-      OPENCODE_CHANNEL: `'${Script.channel}'`,
+      OPENCODE_CLI_NAME: `'${cliName}'`,
+      OPENCODE_PRODUCT_NAME: `'${productName}'`,
+      OPENCODE_CHANNEL: `'${releaseChannel}'`,
       OPENCODE_ARTIFACT: `'cli'`,
       ...(highlights ? { OPENCODE_RELEASE_HIGHLIGHTS: JSON.stringify(highlights) } : {}),
       OPENCODE_LIBC: item.os === "linux" ? `'${item.abi ?? "glibc"}'` : "undefined",
@@ -211,10 +219,10 @@ export default { path: file, version: ${JSON.stringify(opencodePty.version)}, sh
     path.join(outdir, name, "package.json"),
     JSON.stringify(
       {
-        name: `@opencode/${name}`,
+        name: `${packagePrefix}${name}`,
         version: Script.version,
         license: "MIT",
-        repository: { type: "git", url: "git+https://github.com/anomalyco/opencode.git" },
+        repository: { type: "git", url: repository },
         os: [item.os],
         cpu: [item.arch],
       },

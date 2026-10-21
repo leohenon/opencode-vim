@@ -1,4 +1,4 @@
-import { createMemo, createSignal, For, Match, Show, Switch } from "solid-js"
+import { createEffect, createMemo, createSignal, For, Match, onCleanup, Show, Switch } from "solid-js"
 import { RGBA, type Renderable } from "@opentui/core"
 import { useRenderer, type JSX } from "@opentui/solid"
 import type { SessionMessageAssistantTool, SessionMessageInfo } from "@opencode/client"
@@ -8,12 +8,19 @@ import { SplitBorder } from "../../ui/border"
 import { Locale } from "../../util/locale"
 import { EntryAnchor, GroupAnchor, visitEntries } from "./anchor-view"
 import { groupID } from "./anchors"
-import { instructionPaths, type PartRef, type SessionEntry, type SessionGroup, type SessionNode } from "./grouping/session"
+import {
+  instructionPaths,
+  type PartRef,
+  type SessionEntry,
+  type SessionGroup,
+  type SessionNode,
+} from "./grouping/session"
 import { summarizeActivity } from "./activity-summary"
 import { InlineToolRow, reasoningContent, toolDisplay } from "./message-parts"
 import { use } from "./render-context"
 import { resolvePart } from "./rows"
 import { generateThinkingSyntax } from "./thinking-syntax"
+import { copyTarget, identifyCopyHeader, identifyCopyNode } from "./copy-geometry"
 
 type Renderers = {
   message: (messageID: string) => SessionMessageInfo | undefined
@@ -141,18 +148,20 @@ function GroupContent(props: GroupProps) {
         fallback={
           <Show when={grouped()} fallback={children("normal")}>
             <Show when={tools().length > 0}>
-              <InlineToolRow
-                icon={completed() ? "→" : "✱"}
-                color={hover() ? theme.text.base : theme.text.muted}
-                complete={completed()}
-                pending={label()}
-                spinner={!completed()}
-                onMouseOver={() => setHover(true)}
-                onMouseOut={() => setHover(false)}
-                onMouseUp={toggle}
-              >
-                {label()}
-              </InlineToolRow>
+              <CopyDisclosure disclosure={disclosure}>
+                <InlineToolRow
+                  icon={completed() ? "→" : "✱"}
+                  color={hover() ? theme.text.base : theme.text.muted}
+                  complete={completed()}
+                  pending={label()}
+                  spinner={!completed()}
+                  onMouseOver={() => setHover(true)}
+                  onMouseOut={() => setHover(false)}
+                  onMouseUp={toggle}
+                >
+                  {label()}
+                </InlineToolRow>
+              </CopyDisclosure>
             </Show>
             <Show when={expanded() && tools().length > 0}>{children("tool")}</Show>
             <Show when={!props.imagesOutside}>{props.images(tools())}</Show>
@@ -161,32 +170,34 @@ function GroupContent(props: GroupProps) {
       >
         <Show when={thoughts().length > 0}>
           <Show when={grouped()} fallback={children("normal")}>
-            <InlineToolRow
-              icon={expanded() ? "-" : "+"}
-              color={
-                !props.completed
-                  ? theme.text.base
-                  : hover() || expanded()
-                    ? theme.text.feedback.warning.base
-                    : RGBA.fromValues(
-                        theme.text.feedback.warning.base.r,
-                        theme.text.feedback.warning.base.g,
-                        theme.text.feedback.warning.base.b,
-                        0.6,
-                      )
-              }
-              complete={props.completed}
-              pending={latest() ? `Thinking: ${latest()}` : "Thinking"}
-              spinner={!props.completed}
-              onMouseOver={() => setHover(true)}
-              onMouseOut={() => setHover(false)}
-              onMouseUp={toggle}
-            >
-              {props.completed ? "Thought" : latest() ? `Thinking: ${latest()}` : "Thinking"}
-              <Show when={props.completed && !expanded() && latest()}>: {latest()}</Show>
-              <Show when={props.completed && thoughts().length > 1}> · {thoughts().length} steps</Show>
-              <Show when={props.completed && duration()}> · {Locale.duration(duration())}</Show>
-            </InlineToolRow>
+            <CopyDisclosure disclosure={disclosure}>
+              <InlineToolRow
+                icon={expanded() ? "-" : "+"}
+                color={
+                  !props.completed
+                    ? theme.text.base
+                    : hover() || expanded()
+                      ? theme.text.feedback.warning.base
+                      : RGBA.fromValues(
+                          theme.text.feedback.warning.base.r,
+                          theme.text.feedback.warning.base.g,
+                          theme.text.feedback.warning.base.b,
+                          0.6,
+                        )
+                }
+                complete={props.completed}
+                pending={latest() ? `Thinking: ${latest()}` : "Thinking"}
+                spinner={!props.completed}
+                onMouseOver={() => setHover(true)}
+                onMouseOut={() => setHover(false)}
+                onMouseUp={toggle}
+              >
+                {props.completed ? "Thought" : latest() ? `Thinking: ${latest()}` : "Thinking"}
+                <Show when={props.completed && !expanded() && latest()}>: {latest()}</Show>
+                <Show when={props.completed && thoughts().length > 1}> · {thoughts().length} steps</Show>
+                <Show when={props.completed && duration()}> · {Locale.duration(duration())}</Show>
+              </InlineToolRow>
+            </CopyDisclosure>
             <Show when={expanded()}>
               <box paddingLeft={3}>{children("thought")}</box>
             </Show>
@@ -208,18 +219,20 @@ function ActivityGroup(props: GroupProps) {
   return (
     <GroupAnchor groupID={disclosure.id()} active={summary().label !== ""}>
       <Show when={summary().label}>
-        <InlineToolRow
-          icon={disclosure.expanded() ? "−" : "+"}
-          color={hover() ? theme.text.base : theme.text.muted}
-          complete={true}
-          pending={summary().label}
-          spinner={!disclosure.expanded() && summary().active}
-          onMouseOver={() => setHover(true)}
-          onMouseOut={() => setHover(false)}
-          onMouseUp={(event) => disclosure.toggle(event.currentTarget)}
-        >
-          {summary().label}
-        </InlineToolRow>
+        <CopyDisclosure disclosure={disclosure}>
+          <InlineToolRow
+            icon={disclosure.expanded() ? "−" : "+"}
+            color={hover() ? theme.text.base : theme.text.muted}
+            complete={true}
+            pending={summary().label}
+            spinner={!disclosure.expanded() && summary().active}
+            onMouseOver={() => setHover(true)}
+            onMouseOut={() => setHover(false)}
+            onMouseUp={(event) => disclosure.toggle(event.currentTarget)}
+          >
+            {summary().label}
+          </InlineToolRow>
+        </CopyDisclosure>
         <Show when={disclosure.expanded()}>
           <box flexDirection="column" gap={1} marginTop={1}>
             <Children {...props} nodes={props.node.children} mode="normal" />
@@ -246,21 +259,40 @@ function InstructionsGroup(props: GroupProps) {
   )
   return (
     <GroupAnchor groupID={disclosure.id()} active={files() > 0}>
-      <InlineToolRow
-        icon="◈"
-        color={hover() ? theme.text.base : theme.text.muted}
-        complete={true}
-        pending=""
-        onMouseOver={() => setHover(true)}
-        onMouseOut={() => setHover(false)}
-        onMouseUp={() => disclosure.toggle()}
-      >
-        Instructions: {files()} {files() === 1 ? "file" : "files"}
-      </InlineToolRow>
+      <CopyDisclosure disclosure={disclosure}>
+        <InlineToolRow
+          icon="◈"
+          color={hover() ? theme.text.base : theme.text.muted}
+          complete={true}
+          pending=""
+          onMouseOver={() => setHover(true)}
+          onMouseOut={() => setHover(false)}
+          onMouseUp={() => disclosure.toggle()}
+        >
+          Instructions: {files()} {files() === 1 ? "file" : "files"}
+        </InlineToolRow>
+      </CopyDisclosure>
       <Show when={disclosure.expanded()}>
         <Children {...props} nodes={props.node.children} mode="normal" />
       </Show>
     </GroupAnchor>
+  )
+}
+
+function CopyDisclosure(props: { disclosure: ReturnType<typeof useDisclosure>; children: JSX.Element }) {
+  const ctx = use()
+  const [node, setNode] = createSignal<Renderable>()
+  createEffect(() => {
+    const id = props.disclosure.id()
+    const target = node()
+    if (!id || !target) return
+    identifyCopyHeader(target, () => props.disclosure.id())
+    onCleanup(ctx.registerCopyToggle?.(id, () => props.disclosure.toggle(target)) ?? (() => {}))
+  })
+  return (
+    <box ref={setNode} flexShrink={0}>
+      {props.children}
+    </box>
   )
 }
 
@@ -382,6 +414,7 @@ function ThoughtEntry(props: { entry: SessionEntry; message: Renderers["message"
     <Show when={content()}>
       <EntryAnchor entry={props.entry} marginTop={1}>
         <box
+          ref={(node) => identifyCopyNode(node, () => copyTarget(props.entry, props.message))}
           border={["left"]}
           customBorderChars={SplitBorder.customBorderChars}
           borderColor={theme.decrease(theme.background.raised.base)}

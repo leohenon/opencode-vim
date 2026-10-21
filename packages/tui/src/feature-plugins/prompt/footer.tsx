@@ -5,6 +5,7 @@ import { useTerminalDimensions } from "@opentui/solid"
 import { TextAttributes } from "@opentui/core"
 import { useInteractivity } from "../../context/interactivity"
 import { stringWidth } from "../../util/string-width"
+import { useMinimalUI } from "../../context/ui-state"
 
 const money = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -16,6 +17,7 @@ export function PromptFooter(props: {
   sessionID?: string
   mode: "normal" | "shell"
   showDetails: boolean
+  minimal: boolean
 }) {
   const dimensions = useTerminalDimensions()
   const [liveHovered, setLiveHovered] = createSignal(false)
@@ -62,7 +64,7 @@ export function PromptFooter(props: {
     })
   })
 
-  return (
+  const content = (
     <Switch>
       <Match when={props.mode === "normal"}>
         <Switch>
@@ -129,6 +131,12 @@ export function PromptFooter(props: {
       </Match>
     </Switch>
   )
+  return <Show when={!props.minimal}>{content}</Show>
+}
+
+function View(props: Omit<Parameters<typeof PromptFooter>[0], "minimal">) {
+  const minimal = useMinimalUI()
+  return <PromptFooter {...props} minimal={minimal()} />
 }
 
 export default Plugin.define({
@@ -137,7 +145,7 @@ export default Plugin.define({
     context.ui.slot({
       append: "prompt.footer",
       render: (props) => (
-        <PromptFooter context={context} sessionID={props.sessionID} mode={props.mode} showDetails={props.showDetails} />
+        <View context={context} sessionID={props.sessionID} mode={props.mode} showDetails={props.showDetails} />
       ),
     })
   },

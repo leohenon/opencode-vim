@@ -1,7 +1,9 @@
 import { Config } from "@opencode/tui/config"
+import { PRODUCT_NAME } from "@opencode/util/identity"
 import { Schema } from "effect"
 
-export const SchemaURL = "https://opencode.ai/v2/cli.json"
+// The upstream schema does not describe OCV-only Vim and copy-mode settings.
+export const SchemaURL = PRODUCT_NAME === "ocv" ? undefined : "https://opencode.ai/v2/cli.json"
 
 export const Info = Schema.Struct({
   $schema: Schema.optional(Schema.String).annotate({ description: "JSON Schema for CLI configuration" }),

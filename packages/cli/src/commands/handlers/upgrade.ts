@@ -6,6 +6,7 @@ import { Updater } from "../../services/updater"
 import { handlePromptErrors } from "../../ui/prompt"
 import { OPENCODE_VERSION } from "../../version"
 import { stripVTControlCharacters } from "node:util"
+import { DISPLAY_NAME } from "@opencode/util/identity"
 
 export default Runtime.handler(
   Commands.commands.upgrade,
@@ -16,14 +17,14 @@ export default Runtime.handler(
       const method = Option.getOrUndefined(input.method) ?? (yield* updater.method())
       if (!method)
         return yield* Effect.fail(
-          new Error("Could not detect the installation method. Pass --method to choose how to upgrade OpenCode."),
+          new Error(`Could not detect the installation method. Pass --method to choose how to upgrade ${DISPLAY_NAME}.`),
         )
 
       log.info(`Using method: ${method}`)
       const target = Option.getOrUndefined(input.target) ?? (yield* updater.latest(method))
       const version = target.trim().replace(/^v/, "")
       if (version === OPENCODE_VERSION) {
-        log.warn(`OpenCode upgrade skipped: ${version} is already installed`)
+        log.warn(`${DISPLAY_NAME} upgrade skipped: ${version} is already installed`)
         outro("Done")
         return
       }

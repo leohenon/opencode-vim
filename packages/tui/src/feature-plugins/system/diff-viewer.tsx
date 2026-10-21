@@ -28,6 +28,7 @@ import { type DiffSource, useConfig } from "../../config"
 import { locationKey } from "../../context/data"
 import { useTheme, useThemes } from "../../context/theme"
 import { PatchDiff, type PatchDiffRef } from "../../component/patch-diff"
+import { openExternalDiffViewer } from "./external-diff-viewer"
 import {
   allExpandedFileTreeDirectories,
   buildFileTree,
@@ -1310,6 +1311,77 @@ function DiffViewerHelpDialog(props: { context: Plugin.Context; single: boolean;
 
 function Commands(props: { context: Plugin.Context }) {
   const config = useConfig()
+  const routeContext = () => {
+    const route = props.context.ui.router.current()
+    const returnRoute: Route =
+      route.type === "home"
+        ? { type: "home" }
+        : route.type === "session"
+          ? { type: "session", sessionID: route.sessionID }
+          : {
+              type: "plugin",
+              id: route.id,
+              name: route.name,
+              ...(route.data ? { data: { ...route.data } } : {}),
+            }
+    const sessionID =
+      route.type === "session"
+        ? route.sessionID
+        : route.type === "plugin" && typeof route.data?.sessionID === "string"
+          ? route.data.sessionID
+          : undefined
+    return { route, returnRoute, sessionID }
+  }
+  const openBuiltin = (input = routeContext()) => {
+    props.context.ui.dialog.clear()
+    const current = props.context.ui.panel.current()
+    if (input.route.type === "session" && current && current.sessionID === input.sessionID && current.name === ROUTE) {
+      props.context.ui.panel.close()
+      return
+    }
+    if (
+      props.context.ui.panel.open(ROUTE, {
+        presentation: config.data.diffs?.fullscreen === true ? "fullscreen" : "panel",
+      })
+    )
+      return
+    props.context.ui.router.navigate({
+      type: "plugin",
+      name: ROUTE,
+      data: {
+        sessionID: input.sessionID,
+        returnRoute: input.returnRoute,
+      },
+    })
+  }
+  let externalViewerOpen = false
+  const openConfigured = () => {
+    const input = routeContext()
+    const command = config.data.diffs?.command
+    if (!command) return openBuiltin(input)
+    if (externalViewerOpen) return
+
+    const directory =
+      (input.sessionID ? props.context.data.session.get(input.sessionID)?.location.directory : undefined) ??
+      props.context.location?.directory ??
+      props.context.data.location.default().directory
+    props.context.ui.dialog.clear()
+    externalViewerOpen = true
+    void openExternalDiffViewer({ command, directory, renderer: props.context.renderer })
+      .catch((error) => {
+        const reason = error instanceof Error ? error.message : String(error)
+        props.context.ui.toast.show({
+          variant: "warning",
+          title: "External diff viewer failed",
+          message: `${reason}. Opening the built-in diff viewer.`,
+        })
+        openBuiltin(input)
+      })
+      .finally(() => {
+        externalViewerOpen = false
+      })
+  }
+
   props.context.keymap.layer(() => ({
     mode: "global",
     commands: [
@@ -1319,41 +1391,7 @@ function Commands(props: { context: Plugin.Context }) {
         slash: { name: "diff" },
         group: "VCS",
         palette: true,
-        run() {
-          const route = props.context.ui.router.current()
-          props.context.ui.dialog.clear()
-          const current = props.context.ui.panel.current()
-          if (route.type === "session" && current?.sessionID === route.sessionID && current.name === ROUTE) {
-            props.context.ui.panel.close()
-            return
-          }
-          // Outside a session there is no panel slot, so /diff falls back to the full-screen route.
-          if (
-            props.context.ui.panel.open(ROUTE, {
-              presentation: config.data.diffs?.fullscreen === true ? "fullscreen" : "panel",
-            })
-          )
-            return
-          const returnRoute: Route =
-            route.type === "home"
-              ? { type: "home" }
-              : route.type === "session"
-                ? { type: "session", sessionID: route.sessionID }
-                : {
-                    type: "plugin",
-                    id: route.id,
-                    name: route.name,
-                    ...(route.data ? { data: { ...route.data } } : {}),
-                  }
-          props.context.ui.router.navigate({
-            type: "plugin",
-            name: ROUTE,
-            data: {
-              sessionID: route.type === "session" ? route.sessionID : undefined,
-              returnRoute,
-            },
-          })
-        },
+        run: openConfigured,
       },
     ],
   }))

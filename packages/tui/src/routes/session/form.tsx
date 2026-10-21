@@ -34,6 +34,13 @@ import {
   isFormAnswerField,
 } from "../../util/form"
 import type { FormAnswerField } from "../../util/form"
+import { useVimEnabled } from "../../component/vim"
+import {
+  createModalInputControls,
+  type ModalInputKeyEvent,
+  type ModalInputMode,
+} from "../../component/vim/modal-input-controls"
+import { vimCursorStyle } from "../../component/vim/cursor-style"
 
 export const FORM_MODE = "form"
 
@@ -65,6 +72,10 @@ export function FormPrompt(props: { form: FormWithLocation }) {
   const enabled = useInteractivity()
   const active = () => enabled() && keymap.mode.current() === FORM_MODE
   const config = useConfig().data
+  const vimEnabled = useVimEnabled()
+  const [inputMode, setInputMode] = createSignal<ModalInputMode>("insert")
+  const [cancelledText, setCancelledText] = createSignal<{ key: string; text: string }>()
+  const modalInputEnabled = createMemo(() => vimEnabled() && config.vim_modal_input)
   const clipboard = useClipboard()
   const toast = useToast()
   const configuredFields = props.form.fields.filter(isFormAnswerField)
@@ -89,6 +100,53 @@ export function FormPrompt(props: { form: FormWithLocation }) {
   let textarea: TextareaRenderable | undefined
   const [inputTarget, setInputTarget] = createSignal<TextareaRenderable>()
   let review: ScrollBoxRenderable | undefined
+
+  const answerInput = createModalInputControls({
+    mode: inputMode,
+    setMode: setInputMode,
+    focus: () => textarea?.focus(),
+    text: () => (textarea && !textarea.isDestroyed ? textarea.plainText : ""),
+    cursor: () => textarea?.cursorOffset ?? 0,
+    setCursor: (offset) => {
+      if (textarea && !textarea.isDestroyed) textarea.cursorOffset = offset
+    },
+    setText: (text) => {
+      if (textarea && !textarea.isDestroyed) textarea.setText(text)
+    },
+    langmap: () => config.vim_langmap,
+    vimEscapeSequence: () => config.vim_escape_sequence,
+  })
+  const answerCursorStyle = createMemo(() =>
+    vimCursorStyle(modalInputEnabled() ? inputMode() : undefined, config.cursor),
+  )
+  onCleanup(keymap.vim.register(() => (modalInputEnabled() ? inputMode() : undefined), active))
+  onCleanup(() => answerInput.clearPending())
+
+  function setEditing(editing: boolean) {
+    answerInput.clearPending()
+    setStore("editing", editing)
+    if (editing) setInputMode("insert")
+  }
+
+  function handleAnswerKey(event: ModalInputKeyEvent) {
+    if (active() && modalInputEnabled()) answerInput.handleKey(event)
+  }
+
+  function closeAnswerEdit() {
+    answerInput.clearPending()
+    if (modalInputEnabled() && inputMode() === "insert") {
+      answerInput.enterNormal()
+      return
+    }
+    if (textual()) {
+      cancel()
+      return
+    }
+    const current = answerField()
+    const text = textarea?.plainText ?? ""
+    if (modalInputEnabled() && current && text) setCancelledText({ key: current.key, text })
+    setEditing(false)
+  }
 
   const message = createMemo(() => {
     const value = props.form.metadata?.["message"]
@@ -244,12 +302,20 @@ export function FormPrompt(props: { form: FormWithLocation }) {
     keymap.intercept("key", ({ event, consume }) => {
       if (!active()) return
       if (textual() || !other() || (store.editing && renderer.currentFocusedEditor === textarea)) return
+      if (modalInputEnabled() && store.editing && inputMode() === "normal") return
+      if (
+        modalInputEnabled() &&
+        !store.editing &&
+        event.sequence === "u" &&
+        cancelledText()?.key === answerField()?.key
+      )
+        return
       if (event.ctrl || event.meta || event.option || event.super || event.hyper) return
       if ((!store.editing && event.sequence === " ") || !/^[^\p{C}\p{Zl}\p{Zp}]$/u.test(event.sequence)) return
       const current = answerField()
       if (!current) return
       updateCustom(current, input() + event.sequence)
-      if (!store.editing) setStore("editing", true)
+      if (!store.editing) setEditing(true)
       consume()
     }),
   )
@@ -312,6 +378,8 @@ export function FormPrompt(props: { form: FormWithLocation }) {
   }
 
   function selectTab(index: number) {
+    answerInput.clearPending()
+    setInputMode("insert")
     const next = fields()[index]
     setStore("tab", index)
     setStore("selected", next && isFormAnswerField(next) ? formSelected(next, store.answers[next.key]) : 0)
@@ -322,7 +390,7 @@ export function FormPrompt(props: { form: FormWithLocation }) {
   function selectOption() {
     if (other()) {
       if (!multi()) {
-        setStore("editing", true)
+        setEditing(true)
         return
       }
       const value = input()
@@ -330,7 +398,7 @@ export function FormPrompt(props: { form: FormWithLocation }) {
         toggle(value)
         return
       }
-      setStore("editing", true)
+      setEditing(true)
       return
     }
     const row = rows()[store.selected]
@@ -347,7 +415,7 @@ export function FormPrompt(props: { form: FormWithLocation }) {
     if (!current || textual() || !custom() || confirm()) return false
     setStore("selected", rows().length)
     updateCustom(current, input() + value)
-    setStore("editing", true)
+    setEditing(true)
     return true
   }
 
@@ -376,6 +444,11 @@ export function FormPrompt(props: { form: FormWithLocation }) {
         pasteCustom(value)
       })
       .catch(toast.error)
+  }
+
+  function readInput() {
+    answerInput.clearPending()
+    return textarea?.plainText?.trim() ?? ""
   }
 
   function commitInput(text: string) {
@@ -457,7 +530,7 @@ export function FormPrompt(props: { form: FormWithLocation }) {
       move()
       return
     }
-    if (!commitInput(textarea?.plainText?.trim() ?? "")) {
+    if (!commitInput(readInput())) {
       if (targetIndex() < store.tab) move()
       return
     }
@@ -554,7 +627,7 @@ export function FormPrompt(props: { form: FormWithLocation }) {
 
   Keymap.createLayer(() => ({
     mode: FORM_MODE,
-    priority: 1,
+    priority: modalInputEnabled() && inputMode() === "insert" ? 2 : 1,
     enabled: (store.editing || textual()) && !confirm(),
     commands: [
       {
@@ -562,6 +635,7 @@ export function FormPrompt(props: { form: FormWithLocation }) {
         title: "Clear answer edit",
         group: "Form",
         run() {
+          answerInput.clearPending()
           const text = textarea?.plainText ?? ""
           if (!text) {
             if (textual()) {
@@ -576,23 +650,21 @@ export function FormPrompt(props: { form: FormWithLocation }) {
       },
       {
         bind: "escape",
-        title: textual() ? "Dismiss form" : "Close answer edit",
+        title:
+          modalInputEnabled() && inputMode() === "insert"
+            ? "Enter normal mode"
+            : textual()
+              ? "Dismiss form"
+              : "Close answer edit",
         group: "Form",
-        run: () => {
-          if (textual()) {
-            cancel()
-            return
-          }
-          setStore("editing", false)
-        },
+        run: closeAnswerEdit,
       },
       {
         bind: "tab",
         title: "Next field",
         group: "Form",
         run: () => {
-          const text = textarea?.plainText?.trim() ?? ""
-          submitInput(text)
+          submitInput(readInput())
         },
       },
       {
@@ -600,8 +672,7 @@ export function FormPrompt(props: { form: FormWithLocation }) {
         title: "Previous field",
         group: "Form",
         run: () => {
-          const text = textarea?.plainText?.trim() ?? ""
-          submitInput(text, -1)
+          submitInput(readInput(), -1)
         },
       },
       {
@@ -611,7 +682,7 @@ export function FormPrompt(props: { form: FormWithLocation }) {
         run: () => {
           if (textual() || !textarea || textarea.isDestroyed || store.selected === 0) return false
           if (textarea.scrollY + textarea.visualCursor.visualRow > 0) return false
-          setStore("editing", false)
+          setEditing(false)
           setStore("selected", store.selected - 1)
         },
       },
@@ -620,7 +691,7 @@ export function FormPrompt(props: { form: FormWithLocation }) {
         title: "Submit answer edit",
         group: "Form",
         run: () => {
-          const text = textarea?.plainText?.trim() ?? ""
+          const text = readInput()
           const current = answerField()
           if (!current) return
           if (textual()) {
@@ -750,6 +821,24 @@ export function FormPrompt(props: { form: FormWithLocation }) {
                   run: () => setStore("selected", (store.selected + 1) % total),
                 },
                 { bind: "return", title: "Select answer", group: "Form", run: () => selectOption() },
+                ...(modalInputEnabled() && cancelledText()?.key === answerField()?.key
+                  ? [
+                      {
+                        bind: "u",
+                        title: "Undo cancelled answer edit",
+                        group: "Form",
+                        run: () => {
+                          const stash = cancelledText()
+                          const current = answerField()
+                          if (!stash || !current || stash.key !== current.key) return
+                          setStore("selected", rows().length)
+                          updateCustom(current, stash.text)
+                          setCancelledText(undefined)
+                          setEditing(true)
+                        },
+                      },
+                    ]
+                  : []),
                 ...(multi()
                   ? [{ bind: "space", title: "Toggle answer", group: "Form", run: () => selectOption() }]
                   : []),
@@ -798,11 +887,7 @@ export function FormPrompt(props: { form: FormWithLocation }) {
               {(item, index) => {
                 const isTab = () => index() === store.tab
                 const color = () =>
-                  isTab()
-                    ? theme.text.base
-                    : tabHover() === index()
-                      ? theme.text.formfield.focused
-                      : theme.text.muted
+                  isTab() ? theme.text.base : tabHover() === index() ? theme.text.formfield.focused : theme.text.muted
                 return (
                   <box
                     paddingRight={2}
@@ -864,9 +949,7 @@ export function FormPrompt(props: { form: FormWithLocation }) {
               >
                 {external().url}
               </text>
-              <text
-                fg={store.answers[external().key] === true ? theme.text.feedback.success.base : theme.text.muted}
-              >
+              <text fg={store.answers[external().key] === true ? theme.text.feedback.success.base : theme.text.muted}>
                 {store.answers[external().key] === true
                   ? "✓ Acknowledged"
                   : store.externalReady[external().key]
@@ -885,7 +968,8 @@ export function FormPrompt(props: { form: FormWithLocation }) {
             <Show when={textual() ? answerField()!.key : undefined} keyed>
               <box paddingLeft={1}>
                 <textarea
-                  cursorStyle={config.cursor}
+                  cursorStyle={answerCursorStyle()}
+                  onKeyDown={handleAnswerKey}
                   ref={(val: TextareaRenderable) => {
                     textarea = val
                     val.traits = { status: "ANSWER" }
@@ -928,18 +1012,10 @@ export function FormPrompt(props: { form: FormWithLocation }) {
                         }}
                       >
                         <box flexDirection="row">
-                          <box
-                            backgroundColor={theme.background.raised.base}
-                            paddingRight={1}
-                          >
-                            <text
-                              fg={active() ? theme.text.formfield.focused : theme.text.muted}
-                            >{`${i() + 1}.`}</text>
+                          <box backgroundColor={theme.background.raised.base} paddingRight={1}>
+                            <text fg={active() ? theme.text.formfield.focused : theme.text.muted}>{`${i() + 1}.`}</text>
                           </box>
-                          <box
-                            backgroundColor={theme.background.raised.base}
-                            flexDirection="row"
-                          >
+                          <box backgroundColor={theme.background.raised.base} flexDirection="row">
                             <Show when={multi()}>
                               <text
                                 width={4}
@@ -982,19 +1058,12 @@ export function FormPrompt(props: { form: FormWithLocation }) {
                     }}
                   >
                     <box flexDirection="row">
-                      <box
-                        backgroundColor={theme.background.raised.base}
-                        paddingRight={1}
-                      >
+                      <box backgroundColor={theme.background.raised.base} paddingRight={1}>
                         <text fg={other() ? theme.text.formfield.focused : theme.text.muted}>
                           {`${rows().length + 1}.`}
                         </text>
                       </box>
-                      <box
-                        flexDirection="row"
-                        flexGrow={1}
-                        backgroundColor={theme.background.raised.base}
-                      >
+                      <box flexDirection="row" flexGrow={1} backgroundColor={theme.background.raised.base}>
                         <Show when={multi()}>
                           <text
                             width={4}
@@ -1025,7 +1094,8 @@ export function FormPrompt(props: { form: FormWithLocation }) {
                         >
                           <textarea
                             flexGrow={1}
-                            cursorStyle={config.cursor}
+                            cursorStyle={answerCursorStyle()}
+                            onKeyDown={handleAnswerKey}
                             ref={(val: TextareaRenderable) => {
                               textarea = val
                               val.traits = { status: "ANSWER" }
@@ -1082,9 +1152,7 @@ export function FormPrompt(props: { form: FormWithLocation }) {
                           <span style={{ fg: theme.text.muted }}>{truncate(formLabel(item), 40)}:</span>{" "}
                           <span
                             style={{
-                              fg: acknowledged()
-                                ? theme.text.feedback.success.base
-                                : theme.text.feedback.error.base,
+                              fg: acknowledged() ? theme.text.feedback.success.base : theme.text.feedback.error.base,
                             }}
                           >
                             {acknowledged() ? "Acknowledged" : "(acknowledgement required)"}

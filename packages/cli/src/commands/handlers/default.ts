@@ -15,6 +15,7 @@ import { Service } from "@opencode/client/effect/service"
 import { OpenCode } from "@opencode/client/promise"
 import { findSession } from "../../session-target"
 import { errorMessage } from "../../util/error"
+import { DISPLAY_NAME } from "@opencode/util/identity"
 
 export default Runtime.handler(Commands, (input) =>
   Effect.gen(function* () {
@@ -47,7 +48,7 @@ export default Runtime.handler(Commands, (input) =>
       },
     }).pipe(
       Effect.tapError(() =>
-        Effect.promise(() => preflight.fail("OpenCode update could not start the new background service")),
+        Effect.promise(() => preflight.fail(`${DISPLAY_NAME} update could not start the new background service`)),
       ),
     )
     const session = Option.getOrUndefined(input.session)

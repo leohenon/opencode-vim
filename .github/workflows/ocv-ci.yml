@@ -1,0 +1,41 @@
+name: OCV V2 CI
+
+on:
+  pull_request:
+    branches: [ocv]
+  push:
+    branches: [ocv]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    if: github.repository == 'leohenon/opencode-vim'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile
+      - run: bun run check
+      - run: bun test --timeout 30000 --only-failures
+        working-directory: packages/cli
+      - run: bun run test
+        working-directory: packages/tui
+        env:
+          BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0"
+      - name: Build and smoke-test OCV identity
+        env:
+          OPENCODE_CHANNEL: ocv
+        run: |
+          set -euo pipefail
+          BASE=$(jq -r '.version' packages/core/package.json)
+          TRACK=$(tr -d '[:space:]' < .github/ocv-track)
+          [[ "$BASE" =~ ^2\.[0-9]+\.[0-9]+$ ]]
+          [[ "$TRACK" =~ ^[0-9]+\.[0-9]+$ ]]
+          export OPENCODE_VERSION="$BASE-ocv.$TRACK"
+          bun run --cwd packages/cli build -- --single --skip-web-ui
+          packages/cli/dist/cli-linux-x64/bin/opencode --version | grep -Fx "ocv v$OPENCODE_VERSION"
+          packages/cli/dist/cli-linux-x64/bin/opencode --help | grep -F ocv

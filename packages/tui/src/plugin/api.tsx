@@ -150,6 +150,7 @@ export function createPluginContext(input: {
     active?.forEach((dispose) => dispose())
   })
   context = {
+    copy: { selection: () => host.keymap.copy.selection() },
     options: input.options ?? {},
     get location() {
       return host.location.current

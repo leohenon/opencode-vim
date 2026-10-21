@@ -50,6 +50,10 @@ export const run: Run = Effect.fn("Tui.vite")(function* (input: Parameters<Run>[
         appType: "custom",
         clearScreen: false,
         logLevel: "error",
+        define: {
+          OPENCODE_CLI_NAME: JSON.stringify("ocv"),
+          OPENCODE_PRODUCT_NAME: JSON.stringify("ocv"),
+        },
         server: { middlewareMode: true, ws: false },
         resolve: {
           alias: [
@@ -117,7 +121,7 @@ export const run: Run = Effect.fn("Tui.vite")(function* (input: Parameters<Run>[
                 "@opentui/core",
                 "@opentui/core/testing",
                 "effect",
-                "@opencode/cli/vite-host",
+                "@leohenon/ocv/vite-host",
                 "@opencode/client",
                 "@opencode/client/effect/service",
                 "@opencode/client/promise",

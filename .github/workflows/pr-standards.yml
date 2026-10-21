@@ -2,10 +2,12 @@ name: pr-standards
 
 on:
   pull_request_target:
+    branches: [ocv, ocv1]
     types: [opened, edited, synchronize]
 
 jobs:
   check-standards:
+    if: github.repository == 'leohenon/opencode-vim'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -26,13 +28,13 @@ jobs:
               return;
             }
 
-            // Check if author is a team member or bot
-            if (login === 'opencode-agent[bot]') return;
+            // Check if author is a repository member, team member, or bot
+            if (['OWNER', 'MEMBER', 'COLLABORATOR'].includes(pr.author_association) || login === 'opencode-agent[bot]') return;
             const { data: file } = await github.rest.repos.getContent({
               owner: context.repo.owner,
               repo: context.repo.repo,
               path: '.github/TEAM_MEMBERS',
-              ref: 'dev'
+              ref: pr.base.ref
             });
             const members = Buffer.from(file.content, 'base64').toString().split('\n').map(l => l.trim()).filter(Boolean);
             if (members.includes(login)) {
@@ -102,7 +104,7 @@ jobs:
 
             Where \`scope\` is the package name (e.g., \`app\`, \`desktop\`, \`opencode\`).
 
-            See [CONTRIBUTING.md](../blob/dev/CONTRIBUTING.md#pr-titles) for details.`);
+            See [CONTRIBUTING.md](../blob/${pr.base.ref}/CONTRIBUTING.md) for details.`);
               return;
             }
 
@@ -136,7 +138,7 @@ jobs:
             const linkedIssues = result.repository.pullRequest.closingIssuesReferences.totalCount;
 
             // GitHub only populates closingIssuesReferences when a PR targets the repository's
-            // default branch (dev). PRs targeting other branches like v2 always return totalCount 0.
+            // default branch. PRs targeting other branches (such as ocv1) return totalCount 0.
             // Fall back to checking the PR description for closing keywords (e.g. Closes #123).
             const body = pr.body || '';
             const issueMatch = body.match(/### Issue for this PR\s*\n([\s\S]*?)(?=###|$)/);
@@ -154,7 +156,7 @@ jobs:
             1. Open an issue describing the bug/feature (if one doesn't exist)
             2. Add \`Fixes #<number>\` or \`Closes #<number>\` to this PR description
 
-            See [CONTRIBUTING.md](../blob/dev/CONTRIBUTING.md#issue-first-policy) for details.`);
+            See [CONTRIBUTING.md](../blob/${pr.base.ref}/CONTRIBUTING.md) for details.`);
               return;
             }
 
@@ -162,6 +164,7 @@ jobs:
             console.log('PR meets all standards');
 
   check-compliance:
+    if: github.repository == 'leohenon/opencode-vim'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -182,13 +185,13 @@ jobs:
               return;
             }
 
-            // Check if author is a team member or bot
-            if (login === 'opencode-agent[bot]') return;
+            // Check if author is a repository member, team member, or bot
+            if (['OWNER', 'MEMBER', 'COLLABORATOR'].includes(pr.author_association) || login === 'opencode-agent[bot]') return;
             const { data: file } = await github.rest.repos.getContent({
               owner: context.repo.owner,
               repo: context.repo.repo,
               path: '.github/TEAM_MEMBERS',
-              ref: 'dev'
+              ref: pr.base.ref
             });
             const members = Buffer.from(file.content, 'base64').toString().split('\n').map(l => l.trim()).filter(Boolean);
             if (members.includes(login)) {
@@ -210,7 +213,7 @@ jobs:
             const hasIssueSection = /### Issue for this PR/.test(body);
 
             if (!hasWhatSection || !hasTypeSection || !hasVerifySection || !hasChecklistSection || !hasIssueSection) {
-              issues.push('PR description is missing required template sections. Please use the [PR template](../blob/dev/.github/pull_request_template.md).');
+              issues.push(`PR description is missing required template sections. Please use the [PR template](../blob/${pr.base.ref}/.github/pull_request_template.md).`);
             }
 
             // Check: "What does this PR do?" has real content (not just placeholder text)
@@ -302,12 +305,12 @@ jobs:
               const existing = comments.find(c => c.body.includes(marker));
 
               const body_text = `${marker}
-            This PR doesn't fully meet our [contributing guidelines](../blob/dev/CONTRIBUTING.md) and [PR template](../blob/dev/.github/pull_request_template.md).
+            This PR doesn't fully meet our [contributing guidelines](../blob/${pr.base.ref}/CONTRIBUTING.md) and [PR template](../blob/${pr.base.ref}/.github/pull_request_template.md).
 
             **What needs to be fixed:**
             ${issues.map(i => `- ${i}`).join('\n')}
 
-            Please edit this PR description to address the above within **72 hours**, or it will be automatically closed.
+            Please edit this PR description to address the above.
 
             If you believe this was flagged incorrectly, please let a maintainer know.`;
 

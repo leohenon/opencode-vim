@@ -1,0 +1,209 @@
+name: Release OCV V2
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version (for example 2.1.2-ocv.4.13)"
+        required: true
+        type: string
+      sha:
+        description: "Synced ocv commit to release (defaults to the dispatched commit)"
+        required: false
+        type: string
+      dry_run:
+        description: "Build and pack without publishing"
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-ocv-v2
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.repository == 'leohenon/opencode-vim' && github.ref == 'refs/heads/ocv'
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha || github.sha }}
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Validate OCV V2 version and release ref
+        shell: bash
+        run: |
+          set -euo pipefail
+          [ "$GITHUB_REF" = "refs/heads/ocv" ]
+          TRACK=$(tr -d '[:space:]' < .github/ocv-track)
+          BASE=$(jq -r '.version' packages/core/package.json)
+          [[ "$VERSION" =~ ^2\.[0-9]+\.[0-9]+-ocv\.[0-9]+\.[0-9]+$ ]]
+          [ "$VERSION" = "$BASE-ocv.$TRACK" ]
+          git merge-base --is-ancestor HEAD origin/ocv
+          if git rev-parse -q --verify "refs/tags/v$VERSION^{commit}" >/dev/null; then
+            [ "$(git rev-parse "refs/tags/v$VERSION^{commit}")" = "$(git rev-parse HEAD)" ] || {
+              echo "Tag v$VERSION belongs to a different commit" >&2
+              exit 1
+            }
+          fi
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 --json tagName,isDraft > "$RUNNER_TEMP/releases.json"
+          if jq -e --arg tag "v$VERSION" '.[] | select(.tagName == $tag and .isDraft)' "$RUNNER_TEMP/releases.json" >/dev/null; then
+            target=$(gh release view "v$VERSION" --json targetCommitish --jq '.targetCommitish')
+            [ "$target" = "$(git rev-parse HEAD)" ] || { echo "Draft belongs to a different commit" >&2; exit 1; }
+          fi
+          if jq -e --arg tag "v$VERSION" '.[] | select(.tagName == $tag and .isDraft == false)' "$RUNNER_TEMP/releases.json" >/dev/null; then
+            echo "Version v$VERSION is already released; use a new version" >&2
+            exit 1
+          fi
+
+      - name: Require Homebrew tap credentials before publishing
+        if: inputs.dry_run == false
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        shell: bash
+        run: |
+          if [ -z "$HOMEBREW_TAP_TOKEN" ]; then
+            echo "Set HOMEBREW_TAP_TOKEN with Contents read/write access to leohenon/homebrew-tap before publishing." >&2
+            exit 1
+          fi
+
+      - run: bun install --frozen-lockfile
+      - run: bun run check
+      - run: bun run --cwd packages/cli test
+      - run: bun run --cwd packages/tui test
+        env:
+          BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: https://registry.npmjs.org
+
+      - name: Build every V2 CLI target with OCV identity
+        env:
+          OPENCODE_VERSION: ${{ inputs.version }}
+          OPENCODE_CHANNEL: ocv
+        run: bun run --cwd packages/cli build
+
+      - name: Pack npm distributions
+        env:
+          OPENCODE_VERSION: ${{ inputs.version }}
+          OPENCODE_CHANNEL: ocv
+        run: bun run packages/cli/script/publish.ts --dry-run
+
+      - name: Package GitHub release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          DIST=packages/cli/dist
+          mkdir -p "$DIST/release"
+          for dir in "$DIST"/cli-*/; do
+            name=$(basename "$dir")
+            target="ocv-${name#cli-}"
+            source="$dir/bin/opencode"
+            [ -f "$source" ] || source="$dir/bin/opencode.exe"
+            if [[ "$target" == ocv-windows-* ]]; then
+              (cd "$dir/bin" && zip -q "$OLDPWD/$DIST/release/$target.zip" opencode.exe)
+            elif [[ "$target" == ocv-linux-* ]]; then
+              tar -czf "$DIST/release/$target.tar.gz" -C "$dir/bin" opencode
+            else
+              (cd "$dir/bin" && zip -q "$OLDPWD/$DIST/release/$target.zip" opencode)
+            fi
+          done
+
+      - name: Generate Homebrew formula
+        env:
+          OPENCODE_VERSION: ${{ inputs.version }}
+          OPENCODE_CHANNEL: ocv
+        run: bun run packages/cli/script/publish-homebrew.ts
+
+      - name: Upload dry-run artifacts
+        if: inputs.dry_run
+        uses: actions/upload-artifact@v4
+        with:
+          name: ocv-v2-${{ inputs.version }}
+          path: |
+            packages/cli/dist/release/*
+            packages/cli/dist/**/*.tgz
+          if-no-files-found: error
+
+      - name: Stage or resume draft prerelease
+        if: inputs.dry_run == false
+        shell: bash
+        run: |
+          set -euo pipefail
+          if jq -e --arg tag "v$VERSION" '.[] | select(.tagName == $tag and .isDraft)' "$RUNNER_TEMP/releases.json" >/dev/null; then
+            gh release upload "v$VERSION" packages/cli/dist/release/* --clobber
+          else
+            gh release create "v$VERSION" packages/cli/dist/release/* --target "$(git rev-parse HEAD)" --title "v$VERSION" --draft --prerelease --latest=false --generate-notes
+          fi
+
+      - name: Publish npm packages to ocv-v2 only
+        if: inputs.dry_run == false
+        env:
+          OPENCODE_VERSION: ${{ inputs.version }}
+          OPENCODE_CHANNEL: ocv
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: bun run packages/cli/script/publish.ts
+
+      - name: Publish GitHub prerelease after npm succeeds
+        if: inputs.dry_run == false
+        run: gh release edit "v$VERSION" --draft=false --prerelease --latest=false
+
+  # Separate from publication so a failed tap push can be retried without
+  # trying to publish the already-released npm/GitHub version again.
+  homebrew:
+    needs: release
+    if: inputs.dry_run == false && github.repository == 'leohenon/opencode-vim' && github.ref == 'refs/heads/ocv'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ inputs.version }}
+    steps:
+      - name: Download the published V2 formula
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$VERSION" =~ ^2\.[0-9]+\.[0-9]+-ocv\.[0-9]+\.[0-9]+$ ]]
+          draft=$(gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft')
+          [ "$draft" = false ] || { echo "Refusing to update Homebrew from a draft release" >&2; exit 1; }
+          gh release download "v$VERSION" --repo "$GITHUB_REPOSITORY" --pattern ocv-v2.rb --dir "$RUNNER_TEMP/homebrew-formula"
+          ruby -c "$RUNNER_TEMP/homebrew-formula/ocv-v2.rb"
+          grep -Fqx "class OcvV2 < Formula" "$RUNNER_TEMP/homebrew-formula/ocv-v2.rb"
+          grep -Fqx "  version \"$VERSION\"" "$RUNNER_TEMP/homebrew-formula/ocv-v2.rb"
+
+      - uses: actions/checkout@v4
+        with:
+          repository: leohenon/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+
+      - name: Update only the V2 formula
+        working-directory: tap
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p Formula
+          install -m 644 "$RUNNER_TEMP/homebrew-formula/ocv-v2.rb" Formula/ocv-v2.rb
+          git add -- Formula/ocv-v2.rb
+          if git diff --cached --quiet; then
+            echo "Homebrew ocv-v2 already matches $VERSION"
+            exit 0
+          fi
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m "chore(homebrew): update ocv-v2 to $VERSION"
+          git push origin HEAD

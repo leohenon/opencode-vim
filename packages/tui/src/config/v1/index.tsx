@@ -30,6 +30,11 @@ export const ScrollAcceleration = Schema.Struct({
 export const DiffStyle = Schema.Literals(["auto", "stacked"]).annotate({
   description: "Control diff rendering style: 'auto' adapts to terminal width, 'stacked' always shows single column",
 })
+export const DiffViewer = Schema.Struct({
+  command: Schema.Array(Schema.String).check(Schema.isMinLength(1)),
+}).annotate({
+  description: "External diff viewer command; the first item is the executable and the rest are arguments",
+})
 
 export const AttentionSounds = Schema.Record(AttentionSoundName, Schema.optionalKey(Schema.String))
 export type AttentionSoundPaths = Schema.Schema.Type<typeof AttentionSounds>
@@ -52,6 +57,14 @@ export const Cursor = Schema.Struct({
 }).annotate({ description: "Terminal cursor settings" })
 
 const PromptSize = Schema.Int.check(Schema.isGreaterThan(0))
+const VimLangmapCharacter = Schema.String.check(Schema.isPattern(/^.$/u))
+const VimLangmap = Schema.Record(Schema.String, VimLangmapCharacter).check(
+  Schema.makeFilter((value) => Object.keys(value).every((key) => /^.$/u.test(key)), {
+    message: "Expected Vim langmap keys to be single characters",
+  }),
+)
+const VimInitialMode = Schema.Literals(["normal", "insert"])
+const VimLineMotions = Schema.Literals(["logical", "display_vertical", "display"])
 export const Prompt = Schema.Struct({
   max_height: Schema.optional(PromptSize).annotate({ description: "Prompt textarea max height" }),
   max_width: Schema.optional(Schema.Union([PromptSize, Schema.Literal("auto")])).annotate({
@@ -71,8 +84,21 @@ export const Info = Schema.Struct({
   scroll_speed: Schema.optional(ScrollSpeed).annotate({ description: "TUI scroll speed" }),
   scroll_acceleration: Schema.optional(ScrollAcceleration),
   diff_style: Schema.optional(DiffStyle),
+  diff_viewer: Schema.optional(DiffViewer),
   mouse: Schema.optional(Schema.Boolean).annotate({ description: "Enable or disable mouse capture (default: true)" }),
   cursor: Schema.optional(Cursor),
+  vim: Schema.optional(Schema.Boolean),
+  vim_modal_input: Schema.optional(Schema.Boolean),
+  vim_enter_submit: Schema.optional(Schema.Boolean),
+  vim_insert_after_submit: Schema.optional(Schema.Boolean),
+  vim_initial_mode: Schema.optional(VimInitialMode),
+  vim_system_clipboard_register: Schema.optional(Schema.Boolean),
+  vim_langmap: Schema.optional(VimLangmap),
+  vim_line_motions: Schema.optional(VimLineMotions),
+  vim_showbreak: Schema.optional(Schema.Boolean),
+  vim_escape_sequence: Schema.optional(Schema.String.check(Schema.isPattern(/^.{2}$/u))),
+  prompt_max_height: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(50))),
+  prompt_scrollbar: Schema.optional(Schema.Boolean),
 })
 export type Info = Schema.Schema.Type<typeof Info>
 

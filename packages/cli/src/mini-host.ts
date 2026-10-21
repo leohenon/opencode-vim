@@ -5,8 +5,9 @@ import { readFile } from "node:fs/promises"
 import path from "node:path"
 import { ReadStream } from "node:tty"
 import { OPENCODE_VERSION } from "./version"
+import { CLI_NAME } from "@opencode/util/identity"
 
-export const INTERACTIVE_INPUT_ERROR = "opencode mini requires a controlling terminal for input"
+export const INTERACTIVE_INPUT_ERROR = `${CLI_NAME} mini requires a controlling terminal for input`
 
 export type InteractiveStdin = {
   stdin: NodeJS.ReadStream

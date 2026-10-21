@@ -10,6 +10,7 @@ import { handlePromptErrors, prompt, requireInteractive } from "../../../ui/prom
 import { answerForm } from "../auth/form"
 import { oauthLogin } from "../auth/login"
 import { loadIntegrations, request } from "../auth/shared"
+import { CLI_NAME } from "@opencode/util/identity"
 
 const location = { directory: process.cwd() }
 
@@ -29,7 +30,7 @@ const authenticate = Effect.fn("cli.mcp.auth.run")(function* (name?: string) {
   if (!name && choices.length === 0) {
     log.warn("No OAuth-capable MCP servers configured")
     log.info(
-      `Remote MCP servers support OAuth by default. Add one with \`opencode mcp add\` or in opencode.json:\n${exampleConfig}`,
+      `Remote MCP servers support OAuth by default. Add one with \`${CLI_NAME} mcp add\` or in opencode.json:\n${exampleConfig}`,
     )
     outro("Done")
     return

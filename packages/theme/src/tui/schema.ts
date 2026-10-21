@@ -71,6 +71,13 @@ export type StatefulColorDefinition = Schema.Schema.Type<typeof StatefulColorDef
 
 export type FormfieldColorDefinition = StatefulColorDefinition
 
+const SelectionColorDefinition = Schema.Struct({
+  base: Schema.optional(ColorValue),
+  search: Schema.optional(ColorValue),
+  current: Schema.optional(ColorValue),
+})
+export type SelectionColorDefinition = Schema.Schema.Type<typeof SelectionColorDefinition>
+
 const ActionColorDefinition = Schema.Struct({
   primary: Schema.optional(StatefulColorDefinition),
   secondary: Schema.optional(StatefulColorDefinition),
@@ -90,6 +97,7 @@ const TextDefinition = Schema.Struct({
   base: Schema.optional(ColorValue),
   muted: Schema.optional(ColorValue),
   faint: Schema.optional(ColorValue),
+  selection: Schema.optional(SelectionColorDefinition),
   action: Schema.optional(ActionColorDefinition),
   formfield: Schema.optional(StatefulColorDefinition),
   feedback: Schema.optional(
@@ -112,6 +120,7 @@ const BackgroundDefinition = Schema.Struct({
       max: Schema.optional(ColorValue),
     }),
   ),
+  selection: Schema.optional(SelectionColorDefinition),
   action: Schema.optional(ActionColorDefinition),
   formfield: Schema.optional(StatefulColorDefinition),
   feedback: Schema.optional(
@@ -224,6 +233,7 @@ const CompleteThemeTokensDefinition = Schema.Struct({
     base: ColorValue,
     muted: ColorValue,
     faint: Schema.optional(ColorValue),
+    selection: Schema.optional(SelectionColorDefinition),
     action: CompleteActionColorDefinition,
     formfield: CompleteStatefulColorDefinition,
     feedback: Schema.Struct({
@@ -236,6 +246,7 @@ const CompleteThemeTokensDefinition = Schema.Struct({
   background: Schema.Struct({
     base: ColorValue,
     raised: Schema.Struct({ base: ColorValue, high: ColorValue, max: ColorValue }),
+    selection: Schema.optional(SelectionColorDefinition),
     action: CompleteActionColorDefinition,
     formfield: CompleteStatefulColorDefinition,
     feedback: Schema.Struct({

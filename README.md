@@ -1,125 +1,395 @@
-<p align="center">
-  <a href="https://opencode.ai">
-    <picture>
-      <source srcset="packages/console/app/src/asset/logo-ornate-dark.svg" media="(prefers-color-scheme: dark)">
-      <source srcset="packages/console/app/src/asset/logo-ornate-light.svg" media="(prefers-color-scheme: light)">
-      <img src="packages/console/app/src/asset/logo-ornate-light.svg" alt="OpenCode logo">
-    </picture>
-  </a>
-</p>
-<p align="center">The open source AI coding agent.</p>
-<p align="center">
-  <a href="https://opencode.ai/discord"><img alt="Discord" src="https://img.shields.io/discord/1391832426048651334?style=flat-square&label=discord" /></a>
-  <a href="https://www.npmjs.com/package/@opencode/cli"><img alt="npm" src="https://img.shields.io/npm/v/@opencode/cli?style=flat-square" /></a>
-  <a href="https://github.com/anomalyco/opencode/actions/workflows/publish.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/anomalyco/opencode/publish.yml?style=flat-square&branch=dev" /></a>
-</p>
+<div align="center">
 
-<p align="center">
-  <a href="README.md">English</a> |
-  <a href="README.zh.md">简体中文</a> |
-  <a href="README.zht.md">繁體中文</a> |
-  <a href="README.ko.md">한국어</a> |
-  <a href="README.de.md">Deutsch</a> |
-  <a href="README.es.md">Español</a> |
-  <a href="README.fr.md">Français</a> |
-  <a href="README.it.md">Italiano</a> |
-  <a href="README.da.md">Dansk</a> |
-  <a href="README.ja.md">日本語</a> |
-  <a href="README.pl.md">Polski</a> |
-  <a href="README.ru.md">Русский</a> |
-  <a href="README.bs.md">Bosanski</a> |
-  <a href="README.ar.md">العربية</a> |
-  <a href="README.no.md">Norsk</a> |
-  <a href="README.br.md">Português (Brasil)</a> |
-  <a href="README.th.md">ไทย</a> |
-  <a href="README.tr.md">Türkçe</a> |
-  <a href="README.uk.md">Українська</a> |
-  <a href="README.bn.md">বাংলা</a> |
-  <a href="README.gr.md">Ελληνικά</a> |
-  <a href="README.vi.md">Tiếng Việt</a>
-</p>
+# OpenCode Vim
 
-[![OpenCode Terminal UI](packages/web/src/assets/lander/screenshot.png)](https://opencode.ai)
+[![v2 version](https://img.shields.io/npm/v/@leohenon/ocv/ocv-v2?style=flat-square&logo=npm&logoColor=white&label=v2)](https://www.npmjs.com/package/@leohenon/ocv) [![v1 version](https://img.shields.io/npm/v/@leohenon/ocv/latest?style=flat-square&logo=npm&logoColor=white&label=v1)](https://www.npmjs.com/package/@leohenon/ocv) [![CI](https://img.shields.io/github/actions/workflow/status/leohenon/opencode-vim/ocv-ci.yml?branch=ocv&style=flat-square&logo=github&logoColor=white&label=CI)](https://github.com/leohenon/opencode-vim/actions/workflows/ocv-ci.yml) [![Upstream sync](https://img.shields.io/github/actions/workflow/status/leohenon/opencode-vim/sync-upstream.yml?branch=ocv&style=flat-square&logo=github&logoColor=white&label=upstream%20sync)](https://github.com/leohenon/opencode-vim/actions/workflows/sync-upstream.yml) [![Website](https://img.shields.io/badge/website-opencode--vim-7fa6a3?style=flat-square)](https://leohenon.github.io/opencode-vim/) [![Bun](https://img.shields.io/badge/runtime-Bun-f9f1e1?style=flat-square&logo=bun&logoColor=white)](https://bun.sh)
 
----
+Keyboard-first OpenCode with Vim controls across the TUI, kept in sync with upstream releases.
 
-### Installation
+</div>
+
+## Installation
+
+### OpenCode v2 (beta)
 
 ```bash
-# YOLO
-curl -fsSL https://opencode.ai/v2/install | bash
+# curl
+curl -fsSL https://raw.githubusercontent.com/leohenon/opencode-vim/ocv/install.sh | sh
 
 # Package managers
-npm i -g @opencode/cli@latest      # or bun/pnpm/yarn
-brew install anomalyco/tap/opencode-v2 # macOS and Linux (recommended, always up to date)
-brew install opencode              # macOS and Linux (official brew formula, updated less)
-sudo pacman -S opencode            # Arch Linux (Stable)
-paru -S opencode-beta              # Arch Linux (Latest from AUR)
-mise use -g opencode               # Any OS
-nix run github:anomalyco/opencode  # Nix
+npm i -g @leohenon/ocv@ocv-v2
+brew install leohenon/tap/ocv-v2
 ```
+
+### OpenCode v1
+
+```bash
+# curl
+curl -fsSL https://raw.githubusercontent.com/leohenon/opencode-vim/ocv1/install.sh | sh
+
+# Package managers
+npm i -g @leohenon/ocv@latest
+brew install leohenon/tap/ocv
+
+# Arch Linux AUR (V1 only, community-maintained)
+yay -S opencode-vim-bin
+```
+
+For V1 usage and configuration, see [v1](https://github.com/leohenon/opencode-vim/blob/ocv1/README.md).
+
+Curl installs to `~/.ocv/bin`. Set `OCV_INSTALL_DIR` to install elsewhere.
+
+## Usage
+
+```bash
+ocv
+```
+
+## Update
+
+```bash
+# built-in updater
+ocv update
+
+# Package managers (V2 beta)
+npm i -g @leohenon/ocv@ocv-v2
+brew upgrade leohenon/tap/ocv-v2
+```
+
+## Prefer a plugin?
+
+The prompt Vim mode is also available as a plugin for official OpenCode V2 (2.0.25 or newer), prompt editing only (no copy mode or session navigation):
+
+```bash
+opencode plugin add @leohenon/opencode-vim-plugin@beta
+```
+
+See [opencode-vim-plugin](https://github.com/leohenon/opencode-vim-plugin).
+
+## Features
+
+### Prompt controls
+
+Toggle via command palette > `Toggle vim mode`.
+
+> Unicode word boundaries are not supported.
+
+| Category                       | Keys                                                                                                    |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------- |
+| Character / word               | `h`, `j`, `k`, `l`, `w`, `b`, `e`, `W`, `B`, `E`                                                        |
+| Line / buffer                  | `0`, `^`, `_`, `$`, `gg`, `G`                                                                           |
+| Display line                   | `gj`, `gk`, `g<Down>`, `g<Up>`, `g0`, `g^`, `g$`                                                        |
+| Matching / paragraph           | `%`, `{`, `}`                                                                                           |
+| Find / till                    | `f`, `F`, `t`, `T`, `;`, `,`                                                                            |
+| Scroll                         | `Ctrl+e`, `Ctrl+y`, `Ctrl+d`, `Ctrl+u`, `Ctrl+f`, `Ctrl+b`                                              |
+| Insert / replace               | `i`, `I`, `a`, `A`, `o`, `O`, `R`                                                                       |
+| Character / line edit          | `r`, `x`, `~`, `s`, `S`, `J`, `C`, `D`, `dd`, `cc`                                                      |
+| Word changes                   | `cw`, `cb`, `ce`, `cW`, `cE`, `ciw`, `caw`, `ciW`, `caW`                                                |
+| Word deletes                   | `dw`, `db`, `de`, `dW`, `dE`, `diw`, `daw`, `diW`, `daW`                                                |
+| Quote changes                  | `ci"`, `ca"`, `ci'`, `ca'`, ``ci` ``, ``ca` ``                                                          |
+| Quote deletes                  | `di"`, `da"`, `di'`, `da'`, ``di` ``, ``da` ``                                                          |
+| Bracket changes                | `ci(`, `ca(`, `ci[`, `ca[`, `ci{`, `ca{`, `ci<`, `ca<`                                                  |
+| Bracket deletes                | `di(`, `da(`, `di[`, `da[`, `di{`, `da{`, `di<`, `da<`                                                  |
+| Find / till operators          | `cf`, `cF`, `ct`, `cT`, `df`, `dF`, `dt`, `dT`                                                          |
+| Matching / paragraph operators | `c%`, `d%`, `c}`, `c{`, `d}`, `d{`                                                                      |
+| Line boundary operators        | `c0`, `c^`, `c$`, `d0`, `d^`, `d$`, `y0`, `y^`, `y$`                                                    |
+| Display line operators         | `cgj`, `cgk`, `cg0`, `cg^`, `cg$`, `dgj`, `dgk`, `dg0`, `dg^`, `dg$`, `ygj`, `ygk`, `yg0`, `yg^`, `yg$` |
+| Line / word yanks              | `yy`, `yw`, `ye`, `yW`, `yE`, `yiw`, `yaw`, `yiW`, `yaW`                                                |
+| Quote yanks                    | `yi"`, `ya"`, `yi'`, `ya'`, ``yi` ``, ``ya` ``                                                          |
+| Bracket yanks                  | `yi(`, `ya(`, `yi[`, `ya[`, `yi{`, `ya{`, `yi<`, `ya<`                                                  |
+| Matching / paragraph yanks     | `y%`, `y}`, `y{`                                                                                        |
+| Put / undo / repeat            | `p`, `P`, `u`, `Ctrl+r`, `.`                                                                            |
+| Visual selection               | `v`, `V`                                                                                                |
+| Chat history search            | `/`, `?`                                                                                                |
+| Commands                       | `:`, `:q`                                                                                               |
+
+Numeric count prefixes are supported for motions and common operators.
+
+> [!NOTE]
+> `<leader>y` copies the prompt selection when present; configure it with `keybinds["prompt.copy_selection"]`.
+> For clipboard sync, see [System clipboard register](#system-clipboard-register).
+
+### Copy mode
+
+Text selection from the chat session view.
+
+> Copy mode collapses code diffs into a single column for easy copying.
+
+| Keys                           | Action                                                                                        |
+| ------------------------------ | --------------------------------------------------------------------------------------------- |
+| `<leader>v`, `Ctrl+W k`        | Enter copy mode                                                                               |
+| `h`, `j`, `k`, `l`, arrow keys | Navigate                                                                                      |
+| `v`, `V`, `Ctrl+V`             | Start character-wise, line-wise, or block selection                                           |
+| `y`, `yy`                      | Yank to the vim register                                                                      |
+| `Enter`                        | Copy to the system clipboard, toggle expandable tool output, or open a selected subagent task |
+| `Y`                            | Yank to the vim register and scroll to the bottom                                             |
+| `Shift+Enter`                  | Copy to the system clipboard and scroll to the bottom                                         |
+| `Escape`                       | Exit visual mode                                                                              |
+| `q`                            | Exit copy mode and scroll to the bottom                                                       |
+| `Ctrl+W j`                     | Exit copy mode without scrolling                                                              |
+| `Ctrl+W w`                     | Toggle copy mode                                                                              |
+| `i`                            | Focus the prompt input in insert mode without scrolling                                       |
+| `z`, `zt`, `zz`, `zb`          | Adjust copy-mode scroll positioning                                                           |
+| `H`, `M`, `L`                  | Jump to the top, middle, or bottom of the viewport                                            |
+| `/`, `?`                       | Search forward or backward in chat history                                                    |
+| `n`, `N`                       | Repeat search in the same or opposite direction                                               |
+
+When in search mode, `Enter` submits the search, and `Escape` clears search highlights before exiting copy mode.
+
+> Search uses smartcase, lowercase queries are case-insensitive, and queries containing uppercase letters are case-sensitive.
 
 > [!TIP]
-> Remove versions older than 0.1.x before installing.
+> Configure the copy mode entry key with `keybinds["session.copy_mode"]`.
 
-### Desktop App (BETA)
+### Dialog controls
 
-OpenCode is also available as a desktop application. Download it from [opencode.ai/download](https://opencode.ai/download).
+Searchable dialogs, prompt dialogs, and custom question answer inputs use modal controls.
 
-| Platform              | Download                           |
-| --------------------- | ---------------------------------- |
-| macOS (Apple Silicon) | `opencode-desktop-mac-arm64.dmg`   |
-| macOS (Intel)         | `opencode-desktop-mac-x64.dmg`     |
-| Windows               | `opencode-desktop-win-x64.exe`     |
-| Linux                 | `.deb`, `.rpm`, or `.AppImage`     |
+| Area               | Controls                                                                |
+| ------------------ | ----------------------------------------------------------------------- |
+| Input mode         | `Escape` enters normal mode; `i`, `a`, `/`, `I`, `A` return to insert   |
+| Input editing      | `h`, `l`, `w`, `b`, `e`, `0`, `$` move within the input; `dd` clears it |
+| Searchable dialogs | `j`, `k`, `gg`, `G` move through dialog items                           |
+| Question dialogs   | `j`, `k` move through answers; `h`, `l` move between questions          |
+
+> [!TIP]
+> Disable modal dialog inputs with `vim_modal_input: false`.
+
+### Minimal UI
+
+Hides extra UI hints and tips.
+
+Toggle via command palette > `Toggle minimal ui`.
+
+## Configuration
+
+V2 TUI settings belong in `~/.config/ocv/cli.json`, rather than V1's `tui.json`. `XDG_CONFIG_HOME` and `OPENCODE_CONFIG_DIR` can override the config location. The JSON examples below use V2 settings and command names.
+
+### Migrating V1 settings
+
+Import supported TUI settings from an existing OpenCode V1 installation:
 
 ```bash
-# macOS (Homebrew)
-brew install --cask opencode-desktop
+ocv import-v1-settings
 ```
 
-#### Installation Directory
+The import leaves V1 files untouched, but overwrites overlapping settings in the V2 config. It does not import credentials, databases, or sessions. Legacy keybind names in `cli.json` are also normalized automatically to V2 command names.
 
-The install script respects the following priority order for the installation path:
+### Options
 
-1. `$OPENCODE_INSTALL_DIR` - Custom installation directory
-2. `$XDG_BIN_DIR` - XDG Base Directory Specification compliant path
-3. `$HOME/bin` - Standard user binary directory (if it exists or can be created)
-4. `$HOME/.opencode/bin` - Default fallback
+| Option                          | Purpose                                  |
+| ------------------------------- | ---------------------------------------- |
+| `prompt_max_height`             | Set max prompt input height              |
+| `prompt_scrollbar`              | Show the prompt scrollbar                |
+| `diffs.command`                 | Run an external viewer for `/diff`       |
+| `vim_initial_mode`              | Start in `insert` (default) or `normal`  |
+| `vim_enter_submit`              | Submit with Enter from insert mode       |
+| `vim_insert_after_submit`       | Return to insert mode after submit       |
+| `vim_system_clipboard_register` | Use the system clipboard as Vim register |
+| `vim_modal_input`               | Enable Vim controls in dialogs           |
+| `vim_langmap`                   | Map non-English keys or simple aliases   |
+| `vim_line_motions`              | Use wrapped display-line motions         |
+| `vim_showbreak`                 | Mark wrapped prompt rows                 |
+| `vim_escape_sequence`           | Use a two-key escape sequence like `jk`  |
 
-```bash
-# Examples
-OPENCODE_INSTALL_DIR=/usr/local/bin curl -fsSL https://opencode.ai/v2/install | bash
-XDG_BIN_DIR=$HOME/.local/bin curl -fsSL https://opencode.ai/v2/install | bash
+### Initial mode
+
+Vim mode starts in insert mode by default. To start in normal mode instead:
+
+```json
+{
+  "vim_initial_mode": "normal"
+}
 ```
 
-### Agents
+### Mode-scoped keybinds
 
-OpenCode includes two built-in agents you can switch between with the `Tab` key.
+Bind existing commands only in normal mode by nesting overrides under `vim.normal`.
 
-- **build** - Default, full-access agent for development work
-- **plan** - Read-only agent for analysis and code exploration
-  - Denies file edits by default
-  - Asks permission before running bash commands
-  - Ideal for exploring unfamiliar codebases or planning changes
+For example, use `<space>` as the leader:
 
-Also included is a **general** subagent for complex searches and multistep tasks.
-This is used internally and can be invoked using `@general` in messages.
+```json
+{
+  "keybinds": {
+    "vim.normal": {
+      "leader": "space",
+      "session.list": "<leader>s"
+    }
+  }
+}
+```
 
-Learn more about [agents](https://opencode.ai/docs/agents).
+When `vim.normal.leader` is set without a top-level `leader`, it replaces the implicit default global leader (`Ctrl+X`). Configure both to keep both leaders.
 
-### Documentation
+### Prompt input height
 
-For more info on how to configure OpenCode, [**head over to our docs**](https://opencode.ai/docs).
+Configure prompt input height in `cli.json`:
 
-### Contributing
+```json
+{
+  "prompt_max_height": 35,
+  "prompt_scrollbar": true
+}
+```
 
-If you're interested in contributing to OpenCode, please read our [contributing docs](./CONTRIBUTING.md) before submitting a pull request.
+> `prompt_max_height` above `40` is not recommended.
 
-### Building on OpenCode
+### Submit behavior
 
-If you are working on a project that's related to OpenCode and is using "opencode" as part of its name, for example "opencode-dashboard" or "opencode-mobile", please add a note to your README to clarify that it is not built by the OpenCode team and is not affiliated with us in any way.
+By default, insert mode uses `Enter` for newlines and normal mode uses `Enter` to submit.
 
----
+To submit from insert mode too:
 
-**Join our community** [Discord](https://discord.gg/opencode) | [X.com](https://x.com/opencode)
+```json
+{
+  "vim_enter_submit": true
+}
+```
+
+To always default to insert mode after a prompt submission:
+
+```json
+{
+  "vim_insert_after_submit": true
+}
+```
+
+To keep newline available:
+
+```json
+{
+  "keybinds": {
+    "input.newline": "alt+return"
+  }
+}
+```
+
+Or configure a separate direct-submit key:
+
+```json
+{
+  "keybinds": {
+    "prompt.submit": "alt+return"
+  }
+}
+```
+
+`prompt.submit` is unbound by default.
+
+### System clipboard register
+
+Use the system clipboard as Vim's register:
+
+```json
+{
+  "vim_system_clipboard_register": true
+}
+```
+
+Yank and delete operations sync to the system clipboard, `p` / `P` paste from it.
+
+### Modal dialog inputs
+
+Disable modal controls in searchable dialogs, prompt dialogs, and custom question answer inputs:
+
+```json
+{
+  "vim_modal_input": false
+}
+```
+
+> [!NOTE]
+> Terminal/OS clipboard shortcuts don’t preserve Vim linewise register state. External clipboard text is pasted as characterwise text.
+
+### Vim langmap
+
+Map non-English keyboard layout characters to Vim command keys.
+
+> Keys and values should be single characters.
+
+```json
+{
+  "vim_langmap": {
+    "р": "h",
+    "о": "j",
+    "л": "k",
+    "д": "l"
+  }
+}
+```
+
+Or or for simple aliases:
+
+```json
+{
+  "vim_langmap": {
+    "H": "^",
+    "L": "$"
+  }
+}
+```
+
+### Vim line motions
+
+Choose how motions handle wrapped lines in the prompt:
+
+```json
+{
+  "vim_line_motions": "logical"
+}
+```
+
+Values:
+
+| Value              | Behavior                                                    |
+| ------------------ | ----------------------------------------------------------- |
+| `logical`          | Vertical and boundary motions use logical lines             |
+| `display_vertical` | Vertical motions use display lines; boundaries stay logical |
+| `display`          | Vertical and boundary motions use display lines             |
+
+### Vim showbreak
+
+Set a marker for wrapped rows in the prompt:
+
+```json
+{
+  "vim_showbreak": true
+}
+```
+
+Shows `↪ ` marker in the prompt's left padding.
+
+### Vim escape sequence
+
+Set a two-character sequence to leave insert mode without pressing `Escape`:
+
+```json
+{
+  "vim_escape_sequence": "jk"
+}
+```
+
+### External diff viewer
+
+Open `/diff` with an external viewer, such as [Diffview.nvim](https://github.com/sindrets/diffview.nvim):
+
+```json
+{
+  "diffs": {
+    "command": ["nvim", "-c", "DiffviewOpen"]
+  },
+  "keybinds": {
+    "vim.normal": {
+      "diff.open": "<leader>d"
+    }
+  }
+}
+```
+
+### Custom integrations
+
+TUI plugins can access copy-mode selections with `context.copy.selection()`. See the [V2 API types](./packages/plugin/src/tui/context.ts).
+
+## Thanks to all contributors!
+
+<a href="https://github.com/reobin"><img src="https://images.weserv.nl/?url=github.com/reobin.png&amp;w=80&amp;h=80&amp;fit=cover&amp;mask=circle&amp;output=png" alt="@reobin" width="40" height="40" /></a> <a href="https://github.com/BrettKulp"><img src="https://images.weserv.nl/?url=github.com/BrettKulp.png&amp;w=80&amp;h=80&amp;fit=cover&amp;mask=circle&amp;output=png" alt="@BrettKulp" width="40" height="40" /></a> <a href="https://github.com/lamiphil"><img src="https://images.weserv.nl/?url=github.com/lamiphil.png&amp;w=80&amp;h=80&amp;fit=cover&amp;mask=circle&amp;output=png" alt="@lamiphil" width="40" height="40" /></a> <a href="https://github.com/XPhyro"><img src="https://images.weserv.nl/?url=github.com/XPhyro.png&amp;w=80&amp;h=80&amp;fit=cover&amp;mask=circle&amp;output=png" alt="@XPhyro" width="40" height="40" /></a> <a href="https://github.com/shaheislam"><img src="https://images.weserv.nl/?url=github.com/shaheislam.png&amp;w=80&amp;h=80&amp;fit=cover&amp;mask=circle&amp;output=png" alt="@shaheislam" width="40" height="40" /></a> <a href="https://github.com/semi710"><img src="https://images.weserv.nl/?url=github.com/semi710.png&amp;w=80&amp;h=80&amp;fit=cover&amp;mask=circle&amp;output=png" alt="@semi710" width="40" height="40" /></a> <a href="https://github.com/bjschafer"><img src="https://images.weserv.nl/?url=github.com/bjschafer.png&amp;w=80&amp;h=80&amp;fit=cover&amp;mask=circle&amp;output=png" alt="@bjschafer" width="40" height="40" /></a> <a href="https://github.com/devkev"><img src="https://images.weserv.nl/?url=github.com/devkev.png&amp;w=80&amp;h=80&amp;fit=cover&amp;mask=circle&amp;output=png" alt="@devkev" width="40" height="40" /></a>

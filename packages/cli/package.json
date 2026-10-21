@@ -1,12 +1,11 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
-  "name": "@opencode/cli",
+  "name": "@leohenon/ocv",
   "version": "2.1.2",
   "type": "module",
   "license": "MIT",
   "bin": {
-    "opencode": "./bin/opencode.cjs",
-    "opencode2": "./bin/opencode2.cjs"
+    "ocv": "./bin/ocv.cjs"
   },
   "files": [
     "bin"
@@ -19,7 +18,7 @@
   "scripts": {
     "build": "bun run script/build.ts",
     "build:node": "bun run script/build-node.ts",
-    "dev": "bun run src/index.ts",
+    "dev": "BUN_RUNTIME_TRANSPILER_CACHE_PATH=0 bun run --define 'OPENCODE_CLI_NAME=\"ocv\"' --define 'OPENCODE_PRODUCT_NAME=\"ocv\"' src/index.ts",
     "test": "bun test --timeout 30000 --only-failures",
     "typecheck": "tsc -b"
   },

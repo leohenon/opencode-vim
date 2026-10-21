@@ -1,6 +1,6 @@
 import path from "node:path"
 import { readFile } from "node:fs/promises"
-import { createRequire } from "node:module"
+import { builtinModules, createRequire } from "node:module"
 import { defineConfig, type Plugin, type UserConfig } from "vite"
 import solid from "vite-plugin-solid"
 import { nodeExecArgv, nodeTarget, type NodeTarget, photonWasmAsset, shellParserWasmAssets } from "./src/node/target"
@@ -105,7 +105,10 @@ ${code.slice(start)}`
   }
 }
 
+// Bun also reports ws/undici and bun:* as built-ins; Node SEA must bundle those npm packages.
+const nodeBuiltins = builtinModules.filter((id) => id !== "ws" && id !== "undici" && id !== "bun" && !id.startsWith("bun:"))
 const resolve = {
+  builtins: [/^node:/, ...nodeBuiltins],
   alias: [
     { find: /^solid-js\/store$/, replacement: "solid-js/store/dist/store.js" },
     { find: /^solid-js$/, replacement: "solid-js/dist/solid.js" },
@@ -195,7 +198,7 @@ __cjs_mod__.registerHooks({
   },
 })
 const __ocUid = typeof process.getuid === "function" ? process.getuid() : undefined
-const __ocCacheRoot = __ocPath.join(__ocTmpdir(), \`opencode-node-\${__ocUid ?? "user"}\`)
+const __ocCacheRoot = __ocPath.join(__ocTmpdir(), \`ocv-node-\${__ocUid ?? "user"}\`)
 if (__ocIsSea()) {
   try {
     __ocMkdir(__ocCacheRoot, { mode: 0o700 })
@@ -276,8 +279,9 @@ export function mainConfig(input: NodeBuildInput): UserConfig {
     esbuild: { jsx: "automatic" },
     define: {
       OPENCODE_VERSION: JSON.stringify(input.version),
-      OPENCODE_CLI_NAME: JSON.stringify("opencode2-node"),
-      OPENCODE_CHANNEL: JSON.stringify(input.channel),
+      OPENCODE_CLI_NAME: JSON.stringify("ocv"),
+      OPENCODE_PRODUCT_NAME: JSON.stringify("ocv"),
+      OPENCODE_CHANNEL: JSON.stringify("ocv"),
       OPENCODE_ARTIFACT: JSON.stringify("cli-node"),
       ...(input.highlights ? { OPENCODE_RELEASE_HIGHLIGHTS: JSON.stringify(input.highlights) } : {}),
       OPENCODE_LIBC: input.target.platform === "linux" ? JSON.stringify("glibc") : "undefined",
@@ -292,6 +296,8 @@ export function mainConfig(input: NodeBuildInput): UserConfig {
       emptyOutDir: false,
       minify: true,
       rollupOptions: {
+        // Bun's resolver can find npm's legacy `fs` stub; Node built-ins must stay native in the SEA bundle.
+        external: (id) => id.startsWith("node:") || nodeBuiltins.includes(id),
         output: output("opencode.mjs", nodePrelude(input)),
       },
     },

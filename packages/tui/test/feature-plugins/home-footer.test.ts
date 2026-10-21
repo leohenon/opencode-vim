@@ -10,4 +10,8 @@ describe("home footer visibility", () => {
     expect(homeFooterVisibility(64)).toEqual({ mcpCommand: true, pluginCommand: false, version: true })
     expect(homeFooterVisibility(80)).toEqual({ mcpCommand: true, pluginCommand: true, version: true })
   })
+
+  test("minimal UI hides only the version", () => {
+    expect(homeFooterVisibility(80, true)).toEqual({ mcpCommand: true, pluginCommand: true, version: false })
+  })
 })

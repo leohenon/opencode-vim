@@ -9,12 +9,101 @@ import { CommandMap, Definitions } from "../src/config/v1/keybind"
 
 const decodeInfo = Schema.decodeUnknownSync(Info)
 
-test("validates the explicit diff source defaults", () => {
+test("validates diff settings", () => {
   for (const source of ["branch", "committed", "working", "turn"] as const) {
     expect(decodeInfo({ diffs: { source } })).toEqual({ diffs: { source } })
   }
+  expect(decodeInfo({ diffs: { command: ["git", "difftool", "HEAD"] } })).toEqual({
+    diffs: { command: ["git", "difftool", "HEAD"] },
+  })
   expect(decodeInfo({ diffs: {} })).toEqual({ diffs: {} })
   expect(() => decodeInfo({ diffs: { source: "auto" } })).toThrow()
+  expect(() => decodeInfo({ diffs: { command: [] } })).toThrow()
+  expect(() => decodeInfo({ diffs: { command: "git difftool" } })).toThrow()
+})
+
+test("validates OCV prompt and Vim settings", () => {
+  const options = {
+    vim: false,
+    vim_modal_input: false,
+    vim_enter_submit: true,
+    vim_insert_after_submit: true,
+    vim_initial_mode: "normal",
+    vim_system_clipboard_register: true,
+    vim_langmap: { д: "l" },
+    vim_line_motions: "display",
+    vim_showbreak: true,
+    vim_escape_sequence: "jk",
+    prompt_max_height: 24,
+    prompt_scrollbar: false,
+  } as const
+
+  expect(decodeInfo(options)).toEqual(options)
+  expect(() => decodeInfo({ vim_initial_mode: "visual" })).toThrow()
+  expect(() => decodeInfo({ vim_line_motions: "wrapped" })).toThrow()
+  expect(() => decodeInfo({ vim_langmap: { дд: "l" } })).toThrow()
+  expect(() => decodeInfo({ vim_langmap: { д: "ll" } })).toThrow()
+  expect(() => decodeInfo({ vim_escape_sequence: "j" })).toThrow()
+  expect(() => decodeInfo({ vim_escape_sequence: "jkl" })).toThrow()
+  expect(() => decodeInfo({ prompt_max_height: 0 })).toThrow()
+  expect(() => decodeInfo({ prompt_max_height: 51 })).toThrow()
+})
+
+test("resolves OCV defaults and overrides", () => {
+  const defaults = resolve({}, { terminalSuspend: true })
+  expect(defaults.vim_modal_input).toBe(true)
+  expect(defaults.vim_line_motions).toBe("logical")
+  expect(defaults.vim_showbreak).toBe(false)
+
+  expect(
+    resolve(
+      { vim_modal_input: false, vim_line_motions: "display_vertical", vim_showbreak: true },
+      { terminalSuspend: true },
+    ),
+  ).toMatchObject({ vim_modal_input: false, vim_line_motions: "display_vertical", vim_showbreak: true })
+})
+
+test("validates Vim normal keybind scopes", () => {
+  expect(decodeInfo({ keybinds: { "vim.normal": { "input.move.down": "j" } } })).toEqual({
+    keybinds: { "vim.normal": { "input.move.down": "j" } },
+  })
+  expect(() => decodeInfo({ keybinds: { "vim.normal": "j" } })).toThrow()
+  expect(TuiKeybind.unknownKeys({ "vim.normal": { invalid: "j" } })).toEqual(["vim.normal.invalid"])
+})
+
+test("resolves Vim normal scoped keybinds and leader", () => {
+  const config = resolve(
+    {
+      keybinds: {
+        "input.move.down": "down",
+        "vim.normal": {
+          "input.move.down": "j",
+          "input.move.up": [{ key: "k", preventDefault: false }],
+          leader: "space",
+        },
+      },
+    },
+    { terminalSuspend: true },
+  )
+
+  expect(config.keybinds.get("leader")).toMatchObject([{ key: "space", vimMode: "normal" }])
+  expect(config.keybinds.get("input.move.down")).toMatchObject([
+    { key: "down" },
+    { key: "j", vimMode: "normal" },
+  ])
+  expect(config.keybinds.get("input.move.up")).toMatchObject([
+    { key: "up" },
+    { key: "k", vimMode: "normal", preventDefault: false },
+  ])
+})
+
+test("Vim normal bindings re-enable globally disabled commands", () => {
+  const config = resolve(
+    { keybinds: { "input.move.down": "none", "vim.normal": { "input.move.down": "j" } } },
+    { terminalSuspend: true },
+  )
+
+  expect(config.keybinds.get("input.move.down")).toMatchObject([{ key: "j", vimMode: "normal" }])
 })
 
 test("validates mini replay and work spinner settings", () => {
@@ -162,6 +251,9 @@ test("preserves current navigation defaults", () => {
   expect(config.keybinds.get("session.tab.next_unread")).toMatchObject([{ key: "alt+shift+down" }])
   expect(config.keybinds.get("session.tab.previous_unread")).toMatchObject([{ key: "alt+shift+up" }])
   expect(config.keybinds.get("session.tab.reopen")).toMatchObject([{ key: "ctrl+shift+t" }])
+  expect(config.keybinds.get("session.child.next")).toMatchObject([{ key: "right,l" }])
+  expect(config.keybinds.get("session.child.previous")).toMatchObject([{ key: "left,h" }])
+  expect(config.keybinds.get("session.parent")).toMatchObject([{ key: "up,k" }])
   expect(config.keybinds.get("session.tab.select.10")).toMatchObject([{ key: "<leader>0,ctrl+0" }])
   expect(config.keybinds.get("session.message.next")).toEqual([])
   expect(config.keybinds.get("session.message.previous")).toEqual([])

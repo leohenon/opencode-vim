@@ -21,6 +21,7 @@ export type StatefulColor = Readonly<Record<ResolvedActionState, RGBA>> & {
   readonly state: (states: ActionStates) => RGBA
 }
 export type FormfieldColor = StatefulColor
+export type SelectionColor = Readonly<{ base: RGBA; search: RGBA; current: RGBA }>
 
 export type ResolvedThemeTokens = {
   readonly hue: Hue
@@ -32,12 +33,14 @@ export type ResolvedThemeTokens = {
     readonly base: RGBA
     readonly muted: RGBA
     readonly faint: RGBA
+    readonly selection: SelectionColor
     readonly action: Readonly<Record<ActionVariant, StatefulColor>>
     readonly formfield: FormfieldColor
     readonly feedback: Readonly<Record<FeedbackKind, { readonly base: RGBA; readonly muted: RGBA }>>
   }
   readonly background: {
     readonly base: RGBA
+    readonly selection: SelectionColor
     readonly raised: {
       readonly base: RGBA
       readonly high: RGBA

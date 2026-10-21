@@ -10,6 +10,7 @@ import { filetype } from "../../util/filetype"
 import { permissionAlwaysLines, permissionOptionLabel, permissionPresentation } from "../../util/permission"
 import { getScrollAcceleration } from "../../util/scroll"
 import { useConfig } from "../../config"
+import { DISPLAY_NAME } from "@opencode/util/identity"
 import { Keymap } from "../../context/keymap"
 import { useInteractivity } from "../../context/interactivity"
 import { usePathFormatter } from "../../context/path-format"
@@ -325,7 +326,7 @@ function RejectPrompt(props: {
           <text fg={theme.text.base}>Reject permission</text>
         </box>
         <box paddingLeft={1}>
-          <text fg={theme.text.muted}>Tell OpenCode what to do differently</text>
+          <text fg={theme.text.muted}>Tell {DISPLAY_NAME} what to do differently</text>
         </box>
       </box>
       <box

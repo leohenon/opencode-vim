@@ -541,7 +541,22 @@ export interface UI {
   readonly slot: (claim: SlotClaim) => () => void
 }
 
+export type CopySelection = {
+  readonly sessionID: string
+  readonly text: string
+  readonly mode: "char" | "line" | "block"
+  readonly references: readonly {
+    readonly messageID: string
+    readonly partID?: string
+    readonly role: "user" | "assistant"
+  }[]
+}
+
 export interface Context {
+  readonly copy: {
+    /** Reads a detached visual selection without yanking or changing copy mode. */
+    selection(): CopySelection | undefined
+  }
   readonly options: Readonly<Record<string, any>>
   readonly location: LocationRef | undefined
   readonly app: App

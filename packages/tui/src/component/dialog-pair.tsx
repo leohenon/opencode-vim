@@ -7,6 +7,7 @@ import { useTheme } from "../context/theme"
 import { DialogHeader, DialogLayout, useDialog } from "../ui/dialog"
 import { Link } from "../ui/link"
 import { errorMessage } from "../util/error"
+import { CLI_NAME } from "@opencode/util/identity"
 
 export function DialogPair() {
   const client = useClient()
@@ -68,7 +69,7 @@ export function DialogPair() {
           </box>
           <Show when={value.loopback}>
             <text fg={theme.text.muted} wrapMode="word">
-              Run `opencode service set hostname 0.0.0.0` to access the service remotely.
+              Run `{CLI_NAME} service set hostname 0.0.0.0` to access the service remotely.
             </text>
           </Show>
         </box>

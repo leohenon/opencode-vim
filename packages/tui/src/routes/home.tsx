@@ -104,7 +104,7 @@ export function Home() {
         <box flexGrow={1} minHeight={0} />
       </box>
       <box width="100%" flexShrink={0}>
-        <Slot path="home.footer" />
+        <Slot path="home.footer" input={{}} />
       </box>
       <Show when={forms()[0]?.id} keyed>
         {(_) => {

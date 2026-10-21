@@ -105,6 +105,8 @@ export const Definitions = {
 
   "session.export": keybind("<leader>x", "Export session to editor"),
   "session.copy": keybind("none", "Copy session transcript"),
+  "session.copy_mode": keybind({ key: "<leader>v", vimMode: "normal" }, "Enter copy mode"),
+  "session.toggle.conceal": keybind("<leader>h", "Toggle Markdown syntax visibility"),
   "session.copy.id": keybind("none", "Copy session ID"),
   "session.move": keybind("none", "Manage workspaces"),
   "session.new": keybind("<leader>n", "Create a new session"),
@@ -136,9 +138,9 @@ export const Definitions = {
   "session.toggle.exploration_grouping": keybind("none", "Toggle related tool call grouping"),
   "session.verbosity.cycle": keybind("none", "Cycle transcript verbosity"),
   "session.child.first": keybind("down", "Toggle subagent picker"),
-  "session.child.next": keybind("right", "Go to next child session"),
-  "session.child.previous": keybind("left", "Go to previous child session"),
-  "session.parent": keybind("up", "Go to parent session"),
+  "session.child.next": keybind("right,l", "Go to next child session"),
+  "session.child.previous": keybind("left,h", "Go to previous child session"),
+  "session.parent": keybind("up,k", "Go to parent session"),
   "session.pin.toggle": keybind("ctrl+f", "Pin or unpin session in the session list"),
   "session.quick_switch.1": keybind("<leader>1", "Switch to session in quick slot 1"),
   "session.quick_switch.2": keybind("<leader>2", "Switch to session in quick slot 2"),
@@ -195,6 +197,7 @@ export const Definitions = {
   "session.toggle.thinking": keybind("none", "Toggle thinking blocks visibility"),
 
   "prompt.submit": keybind("none", "Submit prompt"),
+  "prompt.copy_selection": keybind({ key: "<leader>y", vimMode: "normal" }, "Copy prompt selection"),
   "prompt.queue": keybind("<leader>return", "Queue prompt"),
   "prompt.editor_context.clear": keybind("none", "Clear editor context"),
   "prompt.images.view": keybind("<leader>i", "View image attachments"),
@@ -285,6 +288,8 @@ export const Definitions = {
 
   "terminal.suspend": keybind("ctrl+z", "Suspend terminal"),
   "terminal.title.toggle": keybind("none", "Toggle terminal title"),
+  "input.vim.toggle": keybind("none", "Toggle Vim mode"),
+  "ui.minimal.toggle": keybind("none", "Toggle minimal UI"),
   "plugins.list": keybind("none", "Open plugin manager dialog"),
 
   "which-key.toggle": keybind("ctrl+alt+k", "Toggle which-key panel"),
@@ -303,20 +308,32 @@ export const Definitions = {
 type KeybindName = keyof typeof Definitions
 const KeybindNames = new Set<string>(Object.keys(Definitions))
 
-export const KeybindOverrides = Schema.Struct(
-  Object.fromEntries(
-    Object.entries(Definitions).map(([name, item]) => [
-      name,
-      Schema.optional(BindingValueSchema).annotate({ description: item.description }),
-    ]),
-  ),
-).annotate({ description: "TUI keybinding overrides" })
+const VimModeScopes = {
+  "vim.normal": ["normal"],
+} as const satisfies Record<string, readonly string[]>
+
+type VimModeScope = keyof typeof VimModeScopes
+const VimModeScopeNames = new Set<string>(Object.keys(VimModeScopes))
+export type Keybinds = { [K in KeybindName]: BindingValueSchema }
+export type KeybindOverrides = Partial<Keybinds> & Partial<Record<VimModeScope, Partial<Keybinds>>>
+const KeybindOverrideFields = Object.fromEntries(
+  Object.entries(Definitions).map(([name, item]) => [
+    name,
+    Schema.optional(BindingValueSchema).annotate({ description: item.description }),
+  ]),
+)
+const KeybindOverrideBase = Schema.Struct(KeybindOverrideFields)
+
+const KeybindOverridesSchema = Schema.StructWithRest(KeybindOverrideBase, [
+  Schema.Record(Schema.Literal("vim.normal"), Schema.optionalKey(KeybindOverrideBase)),
+]).annotate({ description: "TUI keybinding overrides" })
+export const KeybindOverrides = KeybindOverridesSchema as Omit<typeof KeybindOverridesSchema, "Type"> & {
+  readonly Type: KeybindOverrides
+}
 export const Descriptions = Object.fromEntries(
   Object.entries(Definitions).map(([name, item]) => [name, item.description]),
 ) as Record<KeybindName, string>
 
-export type Keybinds = { [K in KeybindName]: BindingValueSchema }
-export type KeybindOverrides = Partial<Keybinds>
 export type BindingLookupView = {
   readonly bindings: readonly Binding<Renderable, KeyEvent>[]
   get(command: string): readonly Binding<Renderable, KeyEvent>[]
@@ -339,16 +356,67 @@ export function defaultValue(name: KeybindName) {
 export function parse(keybinds: KeybindOverrides): Keybinds {
   const invalid = unknownKeys(keybinds)
   if (invalid.length) throw new Error(`Unrecognized keybind${invalid.length === 1 ? "" : "s"}: ${invalid.join(", ")}`)
-  return Object.fromEntries(
+  const scopedLeader = hasScopedKeybind(keybinds, "leader")
+  const result = Object.fromEntries(
     Object.entries(Definitions).map(([name, item]) => [
       name,
-      decodeBindingValue(keybinds[name as KeybindName] ?? item.default),
+      decodeBindingValue(
+        scopedLeader && name === "leader" && keybinds.leader === undefined
+          ? "none"
+          : keybinds[name as KeybindName] ?? item.default,
+      ),
     ]),
   ) as Keybinds
+
+  for (const [scope, modes] of Object.entries(VimModeScopes)) {
+    const scoped = keybinds[scope as VimModeScope]
+    if (!scoped || typeof scoped !== "object" || Array.isArray(scoped)) continue
+    for (const [name, value] of Object.entries(scoped)) {
+      if (!KeybindNames.has(name)) continue
+      const items = scopedBindingItems(decodeBindingValue(value), modes)
+      if (items.length) result[name as KeybindName] = appendBindingItems(result[name as KeybindName], items)
+    }
+  }
+  return result
+}
+
+function hasScopedKeybind(keybinds: KeybindOverrides, name: KeybindName) {
+  return Object.keys(VimModeScopes).some((scope) => {
+    const scoped = keybinds[scope as VimModeScope]
+    return !!scoped && typeof scoped === "object" && !Array.isArray(scoped) && name in scoped
+  })
 }
 
 export function unknownKeys(input: object) {
-  return Object.keys(input).filter((key) => !KeybindNames.has(key))
+  return Object.entries(input).flatMap(([key, value]) => {
+    if (KeybindNames.has(key)) return []
+    if (!VimModeScopeNames.has(key)) return [key]
+    if (!value || typeof value !== "object" || Array.isArray(value)) return []
+    return Object.keys(value).filter((nested) => !KeybindNames.has(nested)).map((nested) => `${key}.${nested}`)
+  })
+}
+
+type BindingItemValue = Schema.Schema.Type<typeof BindingItem>
+
+function isBindingItemArray(value: BindingValueSchema): value is readonly BindingItemValue[] {
+  return Array.isArray(value)
+}
+
+function bindingItems(value: BindingValueSchema): readonly BindingItemValue[] {
+  if (value === false || value === "none") return []
+  return isBindingItemArray(value) ? value : [value]
+}
+
+function scopedBindingItems(value: BindingValueSchema, modes: readonly string[]) {
+  return bindingItems(value).flatMap((item) =>
+    modes.map((vimMode) => (typeof item === "string" || !("key" in item) ? { key: item, vimMode } : { ...item, vimMode })),
+  )
+}
+
+function appendBindingItems(value: BindingValueSchema, items: ReturnType<typeof scopedBindingItems>): BindingValueSchema {
+  if (!items.length) return value
+  if (value === false || value === "none") return items
+  return isBindingItemArray(value) ? [...value, ...items] : [value, ...items]
 }
 
 export function bindingDefaults(): BindingDefaults<Renderable, KeyEvent> {

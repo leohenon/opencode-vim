@@ -13,7 +13,7 @@ import {
   type Renderable,
   ScrollBoxRenderable,
 } from "@opentui/core"
-import { testRender } from "@opentui/solid"
+import { testRender, useRenderer } from "@opentui/solid"
 import type {
   Context,
   Destination,
@@ -64,6 +64,63 @@ test("closing the diff viewer returns to the route it opened from", async () => 
     expect(viewer.commands.has("diff.close")).toBe(true)
     viewer.commands.get("diff.close")!.run()
     expect(viewer.current()).toEqual(startRoute)
+  } finally {
+    viewer.app.renderer.destroy()
+  }
+})
+
+test("configured external viewer falls back to the built-in viewer when the session directory is unavailable", async () => {
+  const directory = "/opencode/external-diff-directory-that-does-not-exist"
+  const viewer = await renderDiffViewer([], {
+    command: [process.execPath, "-e", "process.exit(0)"],
+    sessionDirectory: directory,
+  })
+
+  try {
+    expect(viewer.current()).toEqual({
+      type: "plugin",
+      id: "opencode.diffs",
+      name: "diff",
+      data: { sessionID: "session-1", returnRoute: startRoute },
+    })
+    expect(viewer.toasts).toEqual([
+      {
+        variant: "warning",
+        title: "External diff viewer failed",
+        message: `Diff directory does not exist: ${directory}. Opening the built-in diff viewer.`,
+      },
+    ])
+  } finally {
+    viewer.app.renderer.destroy()
+  }
+})
+
+test("configured external viewer stays on the current route and prevents duplicate launches", async () => {
+  const events: string[] = []
+  const rendered = Promise.withResolvers<void>()
+  const renderer = {
+    suspend: () => events.push("suspend"),
+    resume: () => events.push("resume"),
+    requestRender: () => {
+      events.push("render")
+      rendered.resolve()
+    },
+    currentRenderBuffer: { clear: () => events.push("clear") },
+  } as unknown as Context["renderer"]
+  const viewer = await renderDiffViewer([], {
+    open: false,
+    command: [process.execPath, "-e", "setTimeout(() => process.exit(0), 50)"],
+    sessionDirectory: process.cwd(),
+    externalRenderer: renderer,
+  })
+
+  try {
+    viewer.commands.get("diff.open")!.run()
+    viewer.commands.get("diff.open")!.run()
+    await rendered.promise
+    expect(viewer.current()).toEqual(startRoute)
+    expect(events).toEqual(["suspend", "resume", "render"])
+    expect(viewer.toasts).toEqual([])
   } finally {
     viewer.app.renderer.destroy()
   }
@@ -626,6 +683,7 @@ test("dismissing the base picker leaves the comparison unchanged", async () => {
   try {
     await chooseSource(viewer, 4)
     await viewer.app.waitForFrame((frame) => frame.includes("origin/release"))
+    if (!viewer.app.renderer.currentFocusedEditor) await once(viewer.app.renderer, CliRenderEvents.FOCUSED_EDITOR)
     viewer.app.mockInput.pressArrow("down")
     viewer.app.mockInput.pressEscape()
     await viewer.app.waitForFrame((frame) => !frame.includes("Base branch"))
@@ -1969,11 +2027,16 @@ async function renderDiffViewer(
     diffResponse?: (url: URL) => Promise<Response>
     branchesResponse?: (url: URL) => Promise<Response>
     state?: string
+    command?: string[]
+    sessionDirectory?: string
+    externalRenderer?: Context["renderer"]
   } = {},
 ) {
   const commands = new Map<string, KeymapCommand>()
   const [current, setCurrent] = createSignal<Route>(options.initialRoute ?? startRoute)
-  const [sessionLocation, setSessionLocation] = createSignal(session.location)
+  const [sessionLocation, setSessionLocation] = createSignal(
+    options.sessionDirectory ? { directory: options.sessionDirectory } : session.location,
+  )
   const [branch, setBranch] = createSignal("feature")
   const [sessionStatus, setSessionStatus] = createSignal<"idle" | "running">("idle")
   const state = options.state ?? path.join(temporary.path, crypto.randomUUID())
@@ -1983,9 +2046,13 @@ async function renderDiffViewer(
   let imageReadInput: unknown
   let shortcut: (command: string) => string | undefined = () => undefined
   const stored: { info: Info } = {
-    info: { keybinds: options.keybinds, diffs: { source: options.source, single: options.single } },
+    info: {
+      keybinds: options.keybinds,
+      diffs: { source: options.source, single: options.single, command: options.command },
+    },
   }
   const writes: Info[] = []
+  const toasts: Array<{ title?: string; message: string; variant?: string }> = []
   const baseRequests: URL[] = []
   const diffRequests: URL[] = []
   const turnDiffRequests: URL[] = []
@@ -2046,6 +2113,7 @@ async function renderDiffViewer(
     function Content() {
       const dialog = useDialog()
       const keymap = Keymap.use()
+      const renderer = useRenderer()
       const shortcuts = Keymap.useShortcuts()
       if (options.onSessionTab) {
         Keymap.createLayer(() => ({
@@ -2062,6 +2130,7 @@ async function renderDiffViewer(
       const context = {
         options: {},
         storage: useStorage(),
+        renderer: options.externalRenderer ?? renderer,
         client: createApi(transport.fetch),
         data: {
           session: { get: () => ({ ...session, location: sessionLocation() }), status: sessionStatus },
@@ -2086,6 +2155,7 @@ async function renderDiffViewer(
         },
         ui: {
           dialog: createDialogApi(dialog, (render) => render()),
+          toast: { show: (toast: { title?: string; message: string; variant?: string }) => toasts.push(toast) },
           panel: { open: () => false, close: () => {}, current: () => undefined },
           router: {
             register(page: Page) {
@@ -2180,6 +2250,7 @@ async function renderDiffViewer(
     setBranch,
     state,
     writes,
+    toasts,
     settings: () => stored.info,
   }
 }

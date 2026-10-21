@@ -5,6 +5,7 @@ import "./component/spinner-renderable"
 import { Effect, Latch } from "effect"
 import { Service, type Endpoint } from "@opencode/client/effect/service"
 import { OpenCode, type SessionInfo } from "@opencode/client"
+import { DISPLAY_NAME, TERMINAL_NAME } from "@opencode/util/identity"
 import { Global } from "@opencode/util/global"
 import { noTimeoutFetch } from "@opencode/util/no-timeout-fetch"
 import { ClipboardProvider, useClipboard } from "./context/clipboard"
@@ -110,6 +111,7 @@ import { SessionTerminalsProvider } from "./context/session-terminals"
 import { PanelProvider, usePanel } from "./context/panel"
 import { SessionFrame } from "./component/session-frame"
 import { createTuiClipboard } from "./clipboard"
+import { useUIState } from "./context/ui-state"
 
 const appGlobalBindingCommands = ["session.list", "session.new", "open.menu"] as const
 
@@ -175,6 +177,8 @@ const appBindingCommands = [
   "app.console",
   "terminal.suspend",
   "terminal.title.toggle",
+  "input.vim.toggle",
+  "ui.minimal.toggle",
   "app.toggle.animations",
   "app.toggle.file_context",
   "app.toggle.diffwrap",
@@ -493,6 +497,7 @@ function App() {
   const plugins = usePlugin()
   const clipboard = useClipboard()
   const terminalEnvironment = useTuiTerminalEnvironment()
+  const [, updateUI] = useUIState()
   let paletteTimer: ReturnType<typeof setTimeout> | undefined
   const afterFrame = () => {
     // The native writer can still be flushing the frame when FRAME fires. Keep OSC probes behind visible app output.
@@ -618,23 +623,23 @@ function App() {
     if (!terminalTitleEnabled()) return
 
     if (route.data.type === "home") {
-      setTerminalTitle(renderer, "OpenCode")
+      setTerminalTitle(renderer, DISPLAY_NAME)
       return
     }
 
     if (route.data.type === "session") {
       const title = session?.title
       if (!title || isFallbackTitle(title)) {
-        setTerminalTitle(renderer, "OpenCode")
+        setTerminalTitle(renderer, DISPLAY_NAME)
         return
       }
 
-      setTerminalTitle(renderer, `OC | ${title.length > 40 ? title.slice(0, 37) + "…" : title}`)
+      setTerminalTitle(renderer, `${TERMINAL_NAME} | ${title.length > 40 ? title.slice(0, 37) + "…" : title}`)
       return
     }
 
     if (route.data.type === "plugin") {
-      setTerminalTitle(renderer, `OC | ${route.data.name}`)
+      setTerminalTitle(renderer, `${TERMINAL_NAME} | ${route.data.name}`)
     }
   })
 
@@ -1031,7 +1036,7 @@ function App() {
         ? [
             {
               name: "opencode.update",
-              title: "Update OpenCode",
+              title: `Update ${DISPLAY_NAME}`,
               slash: { name: "update" },
               run: () => updater.open?.("manual"),
               category: "System",
@@ -1197,6 +1202,28 @@ function App() {
         },
       },
       {
+        name: "input.vim.toggle",
+        title: "Toggle vim mode",
+        category: "System",
+        run: () => {
+          void updateUI((draft) => {
+            draft.vim = !(draft.vim ?? config.data.vim ?? true)
+          }).catch(toast.error)
+          dialog.clear()
+        },
+      },
+      {
+        name: "ui.minimal.toggle",
+        title: "Toggle minimal ui",
+        category: "System",
+        run: () => {
+          void updateUI((draft) => {
+            draft.minimal = !(draft.minimal ?? config.data.ui_minimal ?? false)
+          }).catch(toast.error)
+          dialog.clear()
+        },
+      },
+      {
         name: "app.toggle.animations",
         title: (config.data.animations ?? true) ? "Disable animations" : "Enable animations",
         category: "System",
@@ -1273,6 +1300,7 @@ function App() {
   }))
 
   Keymap.createLayer(() => ({
+    mode: keymap.mode.current() === "copy" ? "copy" : "base",
     bindings: appBindingCommands,
   }))
 

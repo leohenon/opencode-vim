@@ -23,6 +23,7 @@ export {
   type HueDefinition,
   type Mode,
   type SemanticHue,
+  type SelectionColorDefinition,
   type StatefulColorDefinition,
   type TextDefinition,
   type ThemeTokensDefinition,
@@ -39,6 +40,7 @@ export type {
   ResolvedFormfieldState,
   ResolvedTheme,
   ResolvedThemeTokens,
+  SelectionColor,
   StatefulColor,
 } from "./types.js"
 export { rgbToOklch } from "./color.js"

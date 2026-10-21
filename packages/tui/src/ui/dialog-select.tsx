@@ -1,4 +1,11 @@
-import { CliRenderEvents, InputRenderable, RGBA, ScrollBoxRenderable, TextAttributes } from "@opentui/core"
+import {
+  CliRenderEvents,
+  InputRenderable,
+  RGBA,
+  ScrollBoxRenderable,
+  TextAttributes,
+  type KeyEvent,
+} from "@opentui/core"
 import { Keymap, type KeymapCommand } from "../context/keymap"
 import { useTheme } from "../context/theme"
 import { entries, filter, flatMap, groupBy, pipe } from "remeda"
@@ -22,6 +29,9 @@ import { Locale } from "../util/locale"
 import { getScrollAcceleration } from "../util/scroll"
 import { useConfig, useNewDesigns } from "../config"
 import { moveSelection, reconcileSelection } from "./select-controller"
+import { useVimEnabled } from "../component/vim"
+import { createModalInputControls, type ModalInputMode } from "../component/vim/modal-input-controls"
+import { vimCursorStyle } from "../component/vim/cursor-style"
 
 export interface DialogSelectProps<T> {
   title: string
@@ -61,6 +71,7 @@ export interface DialogSelectProps<T> {
   focusTarget?: T
   focusCurrent?: boolean
   sectionNavigation?: boolean
+  modalInput?: boolean
   /** Under the "new-designs" experiment, puts the search input in the header row in place of the title. */
   searchInTitle?: boolean
   /** Placeholder for the search input while it replaces the title, e.g. "Search models". */
@@ -143,6 +154,8 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
   const dialog = useDialog()
   const theme = useTheme().surface("dialog")
   const config = useConfig().data
+  const keymap = Keymap.use()
+  const vimEnabled = useVimEnabled()
   const newDesigns = useNewDesigns()
   const scrollAcceleration = createMemo(() => getScrollAcceleration(config))
   const renderer = useRenderer()
@@ -150,7 +163,17 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
   const [store, setStore] = createStore({
     selected: 0,
     filter: "",
+    inputMode: "insert" as ModalInputMode,
   })
+  const modalInputEnabled = createMemo(
+    () => vimEnabled() && props.renderFilter !== false && (props.modalInput ?? config.vim_modal_input),
+  )
+  onCleanup(
+    keymap.vim.register(
+      () => (modalInputEnabled() ? store.inputMode : undefined),
+      () => keymap.mode.current() === "modal",
+    ),
+  )
   let selection: { value: T; category?: string } | undefined
   let resetSelection = false
   let pendingScroll: (() => void) | undefined
@@ -185,6 +208,37 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
   )
 
   let input: InputRenderable | undefined
+  const modalInput = createModalInputControls({
+    mode: () => store.inputMode,
+    setMode: (mode) => setStore("inputMode", mode),
+    move: (direction) => move(direction),
+    moveToStart: () => moveTo(0),
+    moveToEnd: () => moveTo(flat().length - 1),
+    focus: () => input?.focus(),
+    text: () => input?.plainText ?? "",
+    cursor: () => input?.cursorOffset ?? 0,
+    setCursor: (offset) => {
+      if (!input || input.isDestroyed) return
+      input.cursorOffset = offset
+    },
+    setText: (text) => {
+      if (!input || input.isDestroyed) return
+      input.setText(text)
+      batch(() => {
+        setStore("filter", text)
+        props.onFilter?.(text)
+      })
+    },
+    langmap: () => config.vim_langmap,
+    vimEscapeSequence: () => config.vim_escape_sequence,
+  })
+  const filterCursorStyle = createMemo(() =>
+    vimCursorStyle(modalInputEnabled() ? store.inputMode : undefined, config.cursor),
+  )
+  createEffect(() => {
+    if (!input || input.isDestroyed) return
+    input.cursorStyle = filterCursorStyle()
+  })
 
   const actions = createMemo(() => props.actions ?? [])
   const shownActions = createMemo(() => actions().filter((item) => !item.hidden))
@@ -378,6 +432,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
     ),
   )
   onCleanup(() => {
+    modalInput.clearPending()
     if (!pendingScroll) return
     renderer.off(CliRenderEvents.FRAME, pendingScroll)
     pendingScroll = undefined
@@ -403,6 +458,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
   )
 
   function move(direction: number) {
+    modalInput.clearPending()
     if (props.locked) return
     if (flat().length === 0) return
     moveTo(moveSelection(store.selected, { count: flat().length, delta: direction, policy: "wrap" }), true)
@@ -418,6 +474,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
   }
 
   function moveTo(next: number, center = false, preserve = true) {
+    modalInput.clearPending()
     setStore("selected", next)
     const option = selected()
     if (option) {
@@ -462,6 +519,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
   }
 
   function submit() {
+    modalInput.clearPending()
     if (props.locked) return
     const option = selected()
     if (!option) return
@@ -474,6 +532,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
 
     return {
       mode: "modal",
+      priority: modalInputEnabled() && store.inputMode === "insert" ? 2 : undefined,
       commands: [
         {
           id: "dialog.select.prev",
@@ -540,7 +599,17 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
           run: () => trigger(item),
         })),
         ...(props.bindings ?? []),
-        ...(props.onCancel
+        ...(modalInputEnabled() && store.inputMode === "insert"
+          ? [
+              {
+                bind: "escape",
+                title: "Enter normal mode",
+                group: "Dialog",
+                run: () => modalInput.enterNormal(),
+              },
+            ]
+          : []),
+        ...(props.onCancel && (!modalInputEnabled() || store.inputMode === "normal")
           ? [
               {
                 bind: "escape",
@@ -665,8 +734,11 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
       }}
       focusedBackgroundColor={theme.background.formfield.focused}
       cursorColor={newDesigns() ? theme.text.base : theme.text.formfield.focused}
-      cursorStyle={config.cursor}
+      cursorStyle={filterCursorStyle()}
       focusedTextColor={newDesigns() ? theme.text.formfield.base : theme.text.formfield.focused}
+      onKeyDown={(event: KeyEvent) => {
+        if (modalInputEnabled()) modalInput.handleKey(event)
+      }}
       ref={(r) => {
         input = r
         input.traits = { status: "FILTER" }

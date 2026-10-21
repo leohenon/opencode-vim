@@ -136,7 +136,18 @@ function resolveView(
   categorical: ResolvedThemeTokens["categorical"],
   hueSteps: Pick<ResolvedThemeTokens, "source" | "increase" | "decrease">,
 ): ResolvedThemeTokens {
-  const source: Record<string, unknown> = { hue, ...definition }
+  const source: Record<string, unknown> = {
+    hue,
+    ...mergeTheme(
+      {
+        text: { selection: { base: "$background.base", search: "$background.base", current: "$background.base" } },
+        background: {
+          selection: { base: "$hue.interactive.200", search: "$hue.neutral.400", current: "$hue.interactive.200" },
+        },
+      },
+      definition,
+    ),
+  }
   const resolved = createResolver(source)(source, "theme") as ResolvedThemeTokens
   return {
     ...resolved,

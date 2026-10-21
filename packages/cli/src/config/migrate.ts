@@ -60,36 +60,9 @@ export const run = Effect.fn("cli.config.migrate")(function* (input: {
             text,
           )
     const keybinds = Option.getOrUndefined(decodeRecord(config.keybinds))
+    const scoped = Option.getOrUndefined(decodeRecord(keybinds?.["vim.normal"]))
     const updated =
-      keybinds === undefined
-        ? renamed
-        : Object.keys(keybinds).reduce(
-            (text, name) => {
-              const target =
-                TuiKeybind.CommandMap[name as keyof typeof TuiKeybind.CommandMap] ??
-                (name in Definitions || LegacyKeybindTargets.has(name) ? name : undefined)
-              if (target === undefined) return text
-              const properties = findKeybindProperties(text, name)
-              if (!properties.length) return text
-              const remove = !(target in Definitions) || (target !== name && target in keybinds)
-              // The parser gives the final duplicate precedence, so remove earlier properties before renaming it.
-              const cleaned = properties.slice(0, remove ? properties.length : -1).reduce((text) => {
-                const property = findKeybindProperties(text, name)[0]
-                return property === undefined ? text : removeProperty(text, property)
-              }, text)
-              if (remove) return cleaned
-              if (target === name) return cleaned
-              const key = findKeybindProperties(cleaned, name)[0]?.children?.[0]
-              if (key === undefined) return text
-              return cleaned.slice(0, key.offset) + JSON.stringify(target) + cleaned.slice(key.offset + key.length)
-            },
-            findKeybindObjects(renamed)
-              .slice(0, -1)
-              .reduce((text) => {
-                const property = findKeybindObjects(text)[0]
-                return property === undefined ? text : removeProperty(text, property)
-              }, renamed),
-          )
+      keybinds === undefined ? renamed : migrateKeybinds(migrateKeybinds(renamed, keybinds), scoped, "vim.normal")
     if (updated === text) return
     const updatedErrors: ParseError[] = []
     const info = Option.getOrUndefined(decodeInfo(parse(updated, updatedErrors, { allowTrailingComma: true })))
@@ -97,34 +70,65 @@ export const run = Effect.fn("cli.config.migrate")(function* (input: {
     return yield* persist(updated, info)
   }
 
-  const legacyValue = yield* readJson(path.join(input.config, "tui.json"))
-  const legacy = Option.getOrUndefined(decodeV1(legacyValue))
+  const legacyValue = yield* readJsonCandidates([
+    path.join(input.config, "tui.json"),
+    path.join(input.config, "tui.jsonc"),
+  ])
+  const legacy = Option.getOrUndefined(decodeV1(legacyValue?.value))
   const kv = yield* readJson(path.join(input.state, "kv.json"))
   const values = migrateV1(legacy, kv ?? {})
   if (!Object.keys(values).length) return
-  const migrated = { $schema: SchemaURL, ...values }
+  const migrated = { ...(SchemaURL ? { $schema: SchemaURL } : {}), ...values }
 
   const result = yield* persist(JSON.stringify(migrated, null, 2) + "\n", migrated)
   if (result.cause === undefined)
     yield* Effect.logInfo("migrated cli config", {
-      from: [
-        legacyValue === undefined ? undefined : path.join(input.config, "tui.json"),
-        kv === undefined ? undefined : path.join(input.state, "kv.json"),
-      ].filter(Boolean),
+      from: [legacyValue?.file, kv === undefined ? undefined : path.join(input.state, "kv.json")].filter(Boolean),
       to: input.file,
     })
   return result
 })
 
-function findKeybindProperties(text: string, name: string) {
-  const keybinds = findKeybindObjects(text).at(-1)?.children?.[1]
+function migrateKeybinds(text: string, bindings: Record<string, unknown> | undefined, scope?: string) {
+  if (!bindings) return text
+  return Object.keys(bindings).reduce(
+    (text, name) => {
+      const target =
+        TuiKeybind.CommandMap[name as keyof typeof TuiKeybind.CommandMap] ??
+        (name in Definitions || LegacyKeybindTargets.has(name) ? name : undefined)
+      if (target === undefined) return text
+      const properties = findKeybindProperties(text, name, scope)
+      if (!properties.length) return text
+      const remove = !(target in Definitions) || (target !== name && target in bindings)
+      // The effective duplicate wins, at both global and Vim-normal scope.
+      const cleaned = properties.slice(0, remove ? properties.length : -1).reduce((text) => {
+        const property = findKeybindProperties(text, name, scope)[0]
+        return property === undefined ? text : removeProperty(text, property)
+      }, text)
+      if (remove || target === name) return cleaned
+      const key = findKeybindProperties(cleaned, name, scope)[0]?.children?.[0]
+      if (key === undefined) return text
+      return cleaned.slice(0, key.offset) + JSON.stringify(target) + cleaned.slice(key.offset + key.length)
+    },
+    findKeybindObjects(text, scope)
+      .slice(0, -1)
+      .reduce((text) => {
+        const property = findKeybindObjects(text, scope)[0]
+        return property === undefined ? text : removeProperty(text, property)
+      }, text),
+  )
+}
+
+function findKeybindProperties(text: string, name: string, scope?: string) {
+  const keybinds = findKeybindObjects(text, scope).at(-1)?.children?.[1]
   return keybinds?.children?.filter((property) => property.children?.[0]?.value === name) ?? []
 }
 
-function findKeybindObjects(text: string) {
+function findKeybindObjects(text: string, scope?: string) {
   const tree = parseTree(text)
-  if (tree === undefined) return []
-  return tree.children?.filter((property) => property.children?.[0]?.value === "keybinds") ?? []
+  const bindings = tree?.children?.filter((property) => property.children?.[0]?.value === "keybinds") ?? []
+  if (scope === undefined) return bindings
+  return bindings.at(-1)?.children?.[1]?.children?.filter((property) => property.children?.[0]?.value === scope) ?? []
 }
 
 function removeProperty(text: string, property: Node) {
@@ -157,6 +161,25 @@ function findComma(text: string, start: number, end: number) {
   }
 }
 
+export const readV1 = Effect.fn("cli.config.read-v1")(function* (input: {
+  readonly config: string
+  readonly state: string
+}) {
+  const legacy = yield* readJsonCandidates([path.join(input.config, "tui.json"), path.join(input.config, "tui.jsonc")])
+  const kvFile = path.join(input.state, "kv.json")
+  const kv = yield* readJson(kvFile)
+  const info = migrateV1(Option.getOrUndefined(decodeV1(legacy?.value)), kv ?? {})
+  const sources = [legacy?.file, kv === undefined ? undefined : kvFile].filter((file): file is string => !!file)
+  return Object.keys(info).length ? { info, sources } : undefined
+})
+
+export function mergeV1(target: Record<string, any>, source: Record<string, any>) {
+  for (const [key, value] of Object.entries(source)) {
+    if (isRecord(target[key]) && isRecord(value)) mergeV1(target[key], value)
+    else target[key] = value
+  }
+}
+
 export function migrateV1(legacy: TuiConfigV1.Info | undefined, kv: Record<string, any>): Info {
   const plugins = [
     ...(legacy?.plugin?.map((plugin) =>
@@ -173,13 +196,27 @@ export function migrateV1(legacy: TuiConfigV1.Info | undefined, kv: Record<strin
   const keybinds =
     legacy?.keybinds === undefined
       ? undefined
-      : Object.fromEntries(
-          Object.entries(legacy.keybinds).flatMap(([name, value]) => {
-            const target = TuiKeybind.CommandMap[name as keyof typeof TuiKeybind.CommandMap] ?? name
-            if (!(target in Definitions)) return []
-            return [[target, value]]
-          }),
-        )
+      : {
+          ...Object.fromEntries(
+            Object.entries(legacy.keybinds).flatMap(([name, value]) => {
+              if (name === "vim.normal") return []
+              const target = TuiKeybind.CommandMap[name as keyof typeof TuiKeybind.CommandMap] ?? name
+              if (!(target in Definitions)) return []
+              return [[target, value]]
+            }),
+          ),
+          ...(legacy.keybinds["vim.normal"]
+            ? {
+                "vim.normal": Object.fromEntries(
+                  Object.entries(legacy.keybinds["vim.normal"]).flatMap(([name, value]) => {
+                    const target = TuiKeybind.CommandMap[name as keyof typeof TuiKeybind.CommandMap] ?? name
+                    if (!(target in Definitions)) return []
+                    return [[target, value]]
+                  }),
+                ),
+              }
+            : {}),
+        }
 
   return {
     ...(themeName !== undefined || themeMode !== undefined
@@ -207,11 +244,20 @@ export function migrateV1(legacy: TuiConfigV1.Info | undefined, kv: Record<strin
       ? {}
       : {
           attention: {
-            ...legacy?.attention,
+            ...(legacy?.attention === undefined
+              ? {}
+              : {
+                  notifications: (legacy.attention.enabled ?? false) && (legacy.attention.notifications ?? true),
+                  sound: (legacy.attention.enabled ?? false) && (legacy.attention.sound ?? true),
+                  ...(legacy.attention.volume === undefined ? {} : { volume: legacy.attention.volume }),
+                  ...(legacy.attention.sound_pack === undefined ? {} : { sound_pack: legacy.attention.sound_pack }),
+                  ...(legacy.attention.sounds === undefined ? {} : { sounds: legacy.attention.sounds }),
+                }),
             ...(attentionSoundPack === undefined ? {} : { sound_pack: attentionSoundPack }),
           },
         }),
     ...(legacy?.diff_style === undefined &&
+    legacy?.diff_viewer === undefined &&
     kv.diff_wrap_mode === undefined &&
     kv.diff_viewer_show_file_tree === undefined &&
     kv.diff_viewer_single_patch === undefined &&
@@ -219,6 +265,7 @@ export function migrateV1(legacy: TuiConfigV1.Info | undefined, kv: Record<strin
       ? {}
       : {
           diffs: {
+            ...(legacy?.diff_viewer === undefined ? {} : { command: legacy.diff_viewer.command }),
             ...(kv.diff_wrap_mode === undefined ? {} : { wrap: kv.diff_wrap_mode }),
             ...(kv.diff_viewer_show_file_tree === undefined ? {} : { tree: kv.diff_viewer_show_file_tree }),
             ...(kv.diff_viewer_single_patch === undefined ? {} : { single: kv.diff_viewer_single_patch }),
@@ -254,7 +301,41 @@ export function migrateV1(legacy: TuiConfigV1.Info | undefined, kv: Record<strin
     ...(kv.animations_enabled === undefined ? {} : { animations: kv.animations_enabled }),
     ...(legacy?.mouse === undefined ? {} : { mouse: legacy.mouse }),
     ...(legacy?.cursor === undefined ? {} : { cursor: legacy.cursor }),
+    ...(typeof kv.input_vim_mode === "boolean"
+      ? { vim: kv.input_vim_mode }
+      : legacy?.vim === undefined
+        ? {}
+        : { vim: legacy.vim }),
+    ...(typeof kv.ui_minimal === "boolean" ? { ui_minimal: kv.ui_minimal } : {}),
+    ...(legacy?.vim_modal_input === undefined ? {} : { vim_modal_input: legacy.vim_modal_input }),
+    ...(legacy?.vim_enter_submit === undefined ? {} : { vim_enter_submit: legacy.vim_enter_submit }),
+    ...(legacy?.vim_insert_after_submit === undefined
+      ? {}
+      : { vim_insert_after_submit: legacy.vim_insert_after_submit }),
+    ...(legacy?.vim_initial_mode === undefined ? {} : { vim_initial_mode: legacy.vim_initial_mode }),
+    ...(legacy?.vim_system_clipboard_register === undefined
+      ? {}
+      : { vim_system_clipboard_register: legacy.vim_system_clipboard_register }),
+    ...(legacy?.vim_langmap === undefined ? {} : { vim_langmap: legacy.vim_langmap }),
+    ...(legacy?.vim_line_motions === undefined ? {} : { vim_line_motions: legacy.vim_line_motions }),
+    ...(legacy?.vim_showbreak === undefined ? {} : { vim_showbreak: legacy.vim_showbreak }),
+    ...(legacy?.vim_escape_sequence === undefined ? {} : { vim_escape_sequence: legacy.vim_escape_sequence }),
+    ...(legacy?.prompt_max_height === undefined && legacy?.prompt?.max_height === undefined
+      ? {}
+      : { prompt_max_height: legacy.prompt_max_height ?? Math.min(50, legacy.prompt!.max_height!) }),
+    ...(legacy?.prompt_scrollbar === undefined ? {} : { prompt_scrollbar: legacy.prompt_scrollbar }),
   }
+}
+
+const readJsonCandidates = Effect.fnUntraced(function* (targets: readonly string[]) {
+  for (const file of targets) {
+    const value = yield* readJson(file)
+    if (value !== undefined) return { file, value }
+  }
+})
+
+function isRecord(value: unknown): value is Record<string, any> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
 const readJson = Effect.fnUntraced(function* (target: string) {

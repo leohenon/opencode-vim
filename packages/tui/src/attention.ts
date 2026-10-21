@@ -8,6 +8,7 @@ import type {
   AttentionSoundName,
 } from "@opencode/plugin/tui/context"
 import { Config } from "./config"
+import { DISPLAY_NAME } from "@opencode/util/identity"
 import { Schema } from "effect"
 import stripAnsi from "strip-ansi"
 import * as TuiAudio from "./audio"
@@ -32,7 +33,7 @@ type AttentionHost = Attention & {
   dispose(): void
 }
 
-const DEFAULT_TITLE = "OpenCode"
+const DEFAULT_TITLE = DISPLAY_NAME
 const TITLE_LIMIT = 80
 const MESSAGE_LIMIT = 240
 const BUILTIN_SOUNDS: Record<AttentionSoundName, string> = {

@@ -3,6 +3,7 @@ export * as RemoteTunnel from "./remote-tunnel"
 import type { OpenTunnelError } from "@opentunnel/client/effect"
 import { Cause, Effect, Schedule } from "effect"
 import { EOL } from "os"
+import { CLI_NAME } from "@opencode/util/identity"
 
 // OpenTunnel keeps one tunnel per device in its default profile, shared by the opentunnel CLI and every app
 // using the SDK; each claims its own routes. The service claims a subdomain (its route) rather than the tunnel
@@ -39,7 +40,7 @@ export const run = Effect.fnUntraced(function* (input: {
     Effect.catchCause((cause) =>
       Cause.hasInterruptsOnly(cause)
         ? Effect.failCause(cause)
-        : Effect.logError("remote access tunnel stopped; run `opencode service set remote true` to retry", { cause }),
+        : Effect.logError(`remote access tunnel stopped; run \`${CLI_NAME} service set remote true\` to retry`, { cause }),
     ),
   )
 })

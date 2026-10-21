@@ -1,13 +1,24 @@
-import type { KeymapActive, KeymapCommand, KeymapLayer, KeymapPending } from "@opencode/plugin/tui/context"
+import type {
+  CopySelection,
+  KeymapActive,
+  KeymapCommand,
+  KeymapLayer,
+  KeymapPending,
+} from "@opencode/plugin/tui/context"
 import { InputRenderable, TextareaRenderable, type KeyEvent, type Renderable } from "@opentui/core"
-import { stringifyKeyStroke, type Binding, type CommandContext } from "@opentui/keymap"
+import {
+  stringifyKeyStroke,
+  type Binding,
+  type CommandContext,
+  type KeyLike,
+  type KeySequencePart,
+} from "@opentui/keymap"
 import {
   registerBackspacePopsPendingSequence,
   registerBaseLayoutFallback,
   registerCommaBindings,
   registerEscapeClearsPendingSequence,
   registerManagedTextareaLayer,
-  registerTimedLeader,
 } from "@opentui/keymap/addons/opentui"
 import { formatCommandBindings, formatKeySequence } from "@opentui/keymap/extras"
 import { createDefaultOpenTuiKeymap } from "@opentui/keymap/opentui"
@@ -39,6 +50,15 @@ declare module "@opentui/keymap" {
 }
 
 const MODE = { key: "opencode.mode", base: "base" } as const
+const VIM_MODE_KEY = "opencode.vim.mode"
+const COPY_SELECTION_KEY = "opencode.copy.selection"
+type CopySelectionProvider = () => CopySelection | undefined
+const VIM_WINDOW_TOKEN = "vim-window"
+const CopyModeKeys = {
+  enter: `<${VIM_WINDOW_TOKEN}>k,<${VIM_WINDOW_TOKEN}>ctrl+k`,
+  toggle: `<${VIM_WINDOW_TOKEN}>w,<${VIM_WINDOW_TOKEN}><${VIM_WINDOW_TOKEN}>,<${VIM_WINDOW_TOKEN}>ctrl+w`,
+  exit: `<${VIM_WINDOW_TOKEN}>j,<${VIM_WINDOW_TOKEN}>ctrl+j`,
+} as const
 
 type OpenTuiKeymap = Parameters<typeof KeymapProvider>[0]["keymap"]
 type Mode = ReturnType<typeof createMode>
@@ -77,6 +97,7 @@ function Provider(props: ParentProps<{ config?: KeymapConfig }>) {
   }
   const dispose = [
     registerCommaBindings(keymap),
+    keymap.registerToken({ name: VIM_WINDOW_TOKEN, key: "ctrl+w" }),
     keymap.appendBindingExpander((context) => {
       const key = Object.entries({ enter: "return", esc: "escape", pgdown: "pagedown", pgup: "pageup" }).reduce(
         (result, [alias, value]) =>
@@ -92,7 +113,15 @@ function Provider(props: ParentProps<{ config?: KeymapConfig }>) {
     registerManagedTextareaLayer(keymap, renderer, {
       enabled: () => {
         const editor = renderer.currentFocusedEditor
-        return editor instanceof TextareaRenderable && !(editor instanceof InputRenderable)
+        const vim = keymap.getData(VIM_MODE_KEY)
+        return (
+          editor instanceof TextareaRenderable &&
+          !(editor instanceof InputRenderable) &&
+          vim !== "normal" &&
+          vim !== "visual" &&
+          vim !== "visual-line" &&
+          vim !== "copy"
+        )
       },
       bindings: [
         "input.move.left",
@@ -137,16 +166,17 @@ function Provider(props: ParentProps<{ config?: KeymapConfig }>) {
   const leader = config.keybinds.get("leader")?.[0]?.key
   if (leader) {
     dispose.push(
-      registerTimedLeader(keymap, {
-        trigger: leader,
-        name: "leader",
-        timeoutMs: config.leader?.timeout ?? ("leader_timeout" in config ? config.leader_timeout : undefined) ?? 2000,
-      }),
+      registerLeader(
+        keymap,
+        config.keybinds.get("leader"),
+        config.leader?.timeout ?? ("leader_timeout" in config ? config.leader_timeout : undefined) ?? 2000,
+      ),
     )
   }
   onCleanup(() => {
     dispose.reverse().forEach((item) => item())
     mode.dispose()
+    keymap.setData(COPY_SELECTION_KEY, undefined)
   })
   return (
     <KeymapProvider keymap={keymap}>
@@ -177,6 +207,17 @@ export interface Keymap {
     /** Pushes a mode until the returned cleanup is called. */
     push(mode: string): () => void
   }
+  /** Publishes Vim's active mode for mode-scoped bindings. */
+  readonly vim: {
+    current(): string | undefined
+    set(mode: string | undefined): void
+    /** Registers a reactive publication until cleanup, suspended with its interactive scope. */
+    register(mode: Accessor<string | undefined>, active?: Accessor<boolean>): () => void
+  }
+  readonly copy: {
+    selection(): CopySelection | undefined
+    register(provider: CopySelectionProvider): () => void
+  }
   /** Registers a low-level keymap interceptor. */
   intercept: OpenTuiKeymap["intercept"]
   /** Returns whether an event matches the configured leader key. */
@@ -188,6 +229,8 @@ function use(): Keymap {
   const enabled = useInteractivity()
   const leader = value.config.keybinds.get("leader")?.[0]?.key
   const isLeader = leader ? value.keymap.createKeyMatcher(leader) : () => false
+  let releaseVim: (() => void) | undefined
+  onCleanup(() => releaseVim?.())
   return {
     dispatch(id, input) {
       value.dispatch(id, input)
@@ -195,6 +238,29 @@ function use(): Keymap {
     mode: {
       current: value.mode.current,
       push: (mode) => value.mode.push(mode, resolveInteractivity(enabled)),
+    },
+    vim: {
+      current: () => value.keymap.getData(VIM_MODE_KEY) as string | undefined,
+      set(mode) {
+        releaseVim?.()
+        releaseVim = mode === undefined ? undefined : value.mode.registerVim(() => mode, enabled)
+      },
+      register(mode, active = () => true) {
+        const scope = resolveInteractivity(enabled)
+        return value.mode.registerVim(mode, () => scope() && active())
+      },
+    },
+    copy: {
+      selection: () => (value.keymap.getData(COPY_SELECTION_KEY) as CopySelectionProvider | undefined)?.(),
+      register(provider) {
+        value.keymap.setData(COPY_SELECTION_KEY, provider)
+        let disposed = false
+        return () => {
+          if (disposed) return
+          disposed = true
+          if (value.keymap.getData(COPY_SELECTION_KEY) === provider) value.keymap.setData(COPY_SELECTION_KEY, undefined)
+        }
+      },
     },
     intercept: value.keymap.intercept.bind(value.keymap),
     isLeader,
@@ -404,6 +470,7 @@ function useValue() {
 }
 
 export const Keymap = {
+  CopyModeKeys,
   Provider,
   use,
   createLayer,
@@ -421,18 +488,40 @@ function createMode(keymap: OpenTuiKeymap) {
   const [stack, setStack] = createSignal<
     { readonly id: symbol; readonly mode: string; readonly enabled: Accessor<boolean> }[]
   >([])
+  const [vim, setVim] = createSignal<
+    { readonly id: symbol; readonly mode: Accessor<string | undefined>; readonly enabled: Accessor<boolean> }[]
+  >([])
+  createComputed(() =>
+    keymap.setData(
+      VIM_MODE_KEY,
+      vim()
+        .findLast((item) => item.enabled())
+        ?.mode(),
+    ),
+  )
   const current = createMemo(() => stack().findLast((item) => item.enabled())?.mode ?? MODE.base)
   // Publish mode changes before another command can be dispatched in the same callback.
   createComputed(() => keymap.setData(MODE.key, current()))
-  const unregister = keymap.registerLayerFields({
+  const unregisterLayerFields = keymap.registerLayerFields({
     mode(value, context) {
       context.require(MODE.key, value)
+    },
+  })
+  const unregisterBindingFields = keymap.registerBindingFields({
+    vimMode(value, context) {
+      context.require(VIM_MODE_KEY, value)
     },
   })
   let disposed = false
 
   return {
     current,
+    registerVim(mode: Accessor<string | undefined>, enabled: Accessor<boolean>) {
+      if (disposed) return () => {}
+      const id = Symbol("vim")
+      setVim((items) => [...items, { id, mode, enabled }])
+      return () => setVim((items) => items.filter((item) => item.id !== id))
+    },
     push(mode: string, enabled: Accessor<boolean>) {
       if (disposed) return () => {}
       const id = Symbol(mode)
@@ -446,9 +535,53 @@ function createMode(keymap: OpenTuiKeymap) {
       if (disposed) return
       disposed = true
       setStack([])
-      unregister()
+      setVim([])
+      unregisterBindingFields()
+      unregisterLayerFields()
       keymap.setData(MODE.key, undefined)
+      keymap.setData(VIM_MODE_KEY, undefined)
     },
+  }
+}
+
+type LeaderBinding = Binding<Renderable, KeyEvent> & { vimMode?: unknown }
+const SCOPED_LEADER_TOKEN_KEY = { name: "opencode-scoped-leader" } as const
+
+function registerLeader(keymap: OpenTuiKeymap, input: readonly Binding<Renderable, KeyEvent>[], timeoutMs: number) {
+  const bindings = input as readonly LeaderBinding[]
+  const global = bindings.find((binding) => binding.vimMode === undefined)
+  const scoped = bindings.filter((binding) => binding.vimMode === "normal")
+  if (!global && scoped.length === 0) return () => {}
+
+  const tokenKey: KeyLike = global?.key ?? SCOPED_LEADER_TOKEN_KEY
+  const unregisterToken = keymap.registerToken({ name: "leader", key: tokenKey })
+  const matchers = scoped.map((binding) => keymap.createKeyMatcher(binding.key))
+  const unregisterScoped = matchers.length
+    ? keymap.prependEventMatchResolver((event, context) => {
+        if (keymap.getData(VIM_MODE_KEY) !== "normal") return
+        if (!matchers.some((matches) => matches(event))) return
+        return [context.resolveKey(tokenKey)]
+      })
+    : () => {}
+  const matchesLeader = keymap.createKeyMatcher(tokenKey)
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const clearTimer = () => {
+    if (!timer) return
+    clearTimeout(timer)
+    timer = undefined
+  }
+  const sync = (sequence: readonly KeySequencePart[]) => {
+    clearTimer()
+    if (matchesLeader(sequence[0])) timer = setTimeout(() => keymap.clearPendingSequence(), timeoutMs)
+  }
+  const unregisterPending = keymap.on("pendingSequence", sync)
+  sync(keymap.getPendingSequence())
+
+  return () => {
+    clearTimer()
+    unregisterPending()
+    unregisterScoped()
+    unregisterToken()
   }
 }
 

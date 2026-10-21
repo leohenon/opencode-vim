@@ -1,26 +1,19 @@
 #!/usr/bin/env bun
 import { Script } from "@opencode/script"
-import { $ } from "bun"
-import { mkdir, rm } from "node:fs/promises"
+import { mkdir } from "node:fs/promises"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import { UpdateArtifact } from "../../../script/update-artifact"
-
-if (Script.channel !== "beta" && Script.channel !== "latest") {
-  throw new Error("Homebrew publishing requires the beta or latest channel")
+if (!/^\d+\.\d+\.\d+-ocv\.\d+\.\d+$/.test(Script.version)) {
+  throw new Error("Expected an OCV V2 release version")
 }
-const valid =
-  Script.channel === "beta"
-    ? /^\d+\.\d+\.\d+-beta[.-]\d+(?:\.\d+)?$/.test(Script.version)
-    : /^\d+\.\d+\.\d+$/.test(Script.version)
-if (!valid) throw new Error(`Expected a ${Script.channel} release version`)
 
 const dir = fileURLToPath(new URL("..", import.meta.url))
-const root = path.resolve(process.env.OPENCODE_CLI_DIST ?? path.join(dir, "dist"))
-const outdir = path.join(root, "homebrew-tap")
-const dryRun = process.argv.includes("--dry-run")
-const name = Script.channel === "beta" ? "opencode-beta" : "opencode-v2"
-const formulaClass = Script.channel === "beta" ? "OpencodeBeta" : "OpencodeV2"
+const dist = path.resolve(process.env.OPENCODE_CLI_DIST ?? path.join(dir, "dist"))
+const root = path.join(dist, "release")
+const outdir = root
+const publish = process.argv.includes("--publish")
+const name = "ocv-v2"
+const formulaClass = "OcvV2"
 
 const targets = await Promise.all(
   [
@@ -29,27 +22,20 @@ const targets = await Promise.all(
     { name: "linux-arm64", archive: "tar.gz" },
     { name: "linux-x64-baseline", archive: "tar.gz" },
   ].map(async (target) => {
-    const filename = `opencode-${target.name}.${target.archive}`
+    const filename = `ocv-${target.name}.${target.archive}`
     const file = Bun.file(path.join(root, filename))
     if (!(await file.exists()) || !file.size) throw new Error(`Missing Homebrew archive: ${filename}`)
     const sha256 = new Bun.CryptoHasher("sha256")
     for await (const chunk of file.stream()) sha256.update(chunk)
     return {
       ...target,
-      url: `https://opencode.ai/files/bin/${encodeURIComponent(Script.version)}/${filename}`,
+      url: `https://github.com/leohenon/opencode-vim/releases/download/v${encodeURIComponent(Script.version)}/${filename}`,
       sha256: sha256.digest("hex"),
     }
   }),
 )
 
-await rm(outdir, { recursive: true, force: true })
-if (dryRun) await mkdir(outdir, { recursive: true })
-if (!dryRun) {
-  const token = process.env.GITHUB_TOKEN
-  if (!token) throw new Error("GITHUB_TOKEN is required to update the Homebrew tap")
-  await $`git clone ${`https://x-access-token:${token}@github.com/anomalyco/homebrew-tap.git`} ${outdir}`
-  await $`git checkout -B master`.cwd(outdir)
-}
+await mkdir(outdir, { recursive: true })
 
 const target = (name: string) => {
   const result = targets.find((item) => item.name === name)
@@ -68,14 +54,14 @@ await Bun.write(
     "# frozen_string_literal: true",
     "",
     `class ${formulaClass} < Formula`,
-    `  desc "OpenCode V2${Script.channel === "beta" ? " beta" : ""} - the AI coding agent for the terminal"`,
-    '  homepage "https://github.com/anomalyco/opencode"',
+    '  desc "OpenCode V2 with first-class Vim and transcript copy modes"',
+    '  homepage "https://github.com/leohenon/opencode-vim"',
     `  version "${Script.version}"`,
     '  license "MIT"',
     "",
     '  depends_on "ripgrep"',
-    '  conflicts_with "opencode", because: "both install an opencode binary"',
-    "",
+    '  conflicts_with "ocv", because: "both install the ocv command"',
+
     "  on_macos do",
     "    if Hardware::CPU.arm?",
     `      url "${macArm.url}"`,
@@ -97,24 +83,13 @@ await Bun.write(
     "  end",
     "",
     "  def install",
-    '    bin.install "opencode"',
+    '    bin.install "opencode" => "ocv"',
     "  end",
     "end",
     "",
   ].join("\n"),
 )
 console.log(`Prepared ${name} ${Script.version} in ${outdir}`)
-if (dryRun) process.exit(0)
-
-await $`git add ${name + ".rb"}`.cwd(outdir)
-if ((await $`git diff --cached --quiet`.cwd(outdir).nothrow()).exitCode !== 0) {
-  await $`git commit -m ${`chore: update ${name} to ${Script.version}`}`.cwd(outdir)
-  await $`git push origin master`.cwd(outdir)
+if (publish) {
+  throw new Error("Homebrew tap publication is owned by publish-ocv.yml; this script only generates the formula")
 }
-await UpdateArtifact.publish({
-  channel: Script.channel,
-  name: "cli",
-  distribution: "homebrew",
-  version: Script.version,
-  metadata: { package: `anomalyco/tap/${name}` },
-})

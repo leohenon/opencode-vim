@@ -8,5 +8,5 @@ type ResolvedInput = Omit<Info, "attention" | "keybinds" | "leader"> & {
 }
 
 export function createTuiResolvedConfig(input: ResolvedInput = {}) {
-  return resolve(input, { terminalSuspend: process.platform !== "win32", environment: {} })
+  return resolve({ vim: false, ...input }, { terminalSuspend: process.platform !== "win32", environment: {} })
 }

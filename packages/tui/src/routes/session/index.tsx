@@ -32,7 +32,7 @@ import {
   MouseEvent,
   type Renderable,
 } from "@opentui/core"
-import { Prompt, type PromptRef } from "../../component/prompt"
+import { Prompt, type PromptProps, type PromptRef } from "../../component/prompt"
 import type {
   SessionMessageInfo,
   SessionMessageAssistant,
@@ -106,7 +106,6 @@ import {
   legacyTurns,
   messageBoundaryIDs,
   resolvePart,
-  sessionRowID,
   turnDuration,
   turnTokensPerSecond,
   type CacheUsage,
@@ -118,6 +117,8 @@ import { findMessageBoundary, messageNavigationSlack } from "./message-navigatio
 import { stringWidth } from "../../util/string-width"
 import { useArgs } from "../../context/args"
 import { withTimestampedFallback } from "@opencode/util/session-title-fallback"
+import { useMinimalUI } from "../../context/ui-state"
+import { useVimEnabled } from "../../component/vim"
 import { useSessionTabs, type ScrollAnchor } from "../../context/session-tabs"
 import { createSingleFlight } from "../../util/single-flight"
 import { createDelayedPresence } from "../../util/delayed-presence"
@@ -132,6 +133,9 @@ import { SessionGroupView } from "./group-view"
 import { useEntryAnchor } from "./anchor-view"
 import { containsAnchor, createTimelineAnchors, groupID } from "./anchors"
 import { rowsAfter, rowsBefore, rowWeight } from "./mount-budget"
+import { createCopyMode, type CopyHighlight } from "./copy-mode"
+import { copyTarget, identifyCopyNode } from "./copy-geometry"
+import { CopyOverlay, type CopyPosition } from "./copy-overlay"
 export { InlineToolRow } from "./message-parts"
 export { toolDisplay } from "./message-parts"
 
@@ -173,6 +177,8 @@ export function Session(props: {
   const config = configState.data
   const theme = useTheme()
   const promptRef = usePromptRef()
+  const keymap = Keymap.use()
+  const vimEnabled = useVimEnabled()
   const session = createMemo(() => data.session.get(route.sessionID))
   const messages = () => data.session.message.list(route.sessionID)
   const messageIndexes = createMemo(() => new Map(messages().map((message, index) => [message.id, index])))
@@ -387,12 +393,18 @@ export function Session(props: {
     saveScrollAnchor(true)
   })
   const [prompt, setPrompt] = createSignal<PromptRef>()
-  const bind = (r: PromptRef | undefined) => {
-    setPrompt(r)
-    promptRef.set(r)
-    if (seeded || !route.prompt || !r) return
-    seeded = true
-    r.set(route.prompt)
+  const SessionPrompt = (props: Omit<PromptProps, "ref">) => {
+    let owner: PromptRef | undefined
+    const bind = (r: PromptRef | undefined) => {
+      if (r) owner = r
+      else if (prompt() !== owner) return
+      setPrompt(r)
+      promptRef.set(r)
+      if (seeded || !route.prompt || !r) return
+      seeded = true
+      r.set(route.prompt)
+    }
+    return <Prompt {...props} ref={bind} />
   }
 
   /** Runs after layout has settled (two frames), unless the transcript was torn down. */
@@ -433,6 +445,15 @@ export function Session(props: {
   )
   const visibleEnd = createMemo(() => Math.max(hidden(), Math.min(visibleRowsEnd() ?? rows.length, rows.length)))
   const visibleRows = createMemo(() => rows.slice(hidden(), visibleEnd()))
+  const copyTargets = createMemo(() =>
+    visibleRows().map((row, index) =>
+      copyTarget(
+        row,
+        (messageID) => data.session.message.get(route.sessionID, messageID),
+        boundaries()[index + hidden()],
+      ),
+    ),
+  )
   const prependHistory = createHistoryPrepend({
     sessionID: () => route.sessionID,
     more: (id) => data.session.message.more(id),
@@ -491,7 +512,7 @@ export function Session(props: {
     })
     return true
   }
-  /** Message navigation needs the full transcript mounted before walking or jumping. */
+  /** Message navigation and copy mode need the full loaded transcript mounted before walking it. */
   const ensureAllRows = (continuation: () => void) => {
     if (firstJump()) clearMessageNavigation()
     if (!ensureAllRowsPending && hidden() === 0 && visibleEnd() === rows.length) return continuation()
@@ -509,6 +530,110 @@ export function Session(props: {
       updateAwayFromBottom()
     })
   }
+
+  const copyToggles = new Map<string, () => void>()
+  const registerCopyToggle = (id: string, toggle: () => void) => {
+    copyToggles.set(id, toggle)
+    return () => {
+      if (copyToggles.get(id) === toggle) copyToggles.delete(id)
+    }
+  }
+  let copyDisposed = false
+  let copyMounted = false
+  let copyPrepare = 0
+  onCleanup(() => {
+    copyDisposed = true
+    copyPrepare++
+    copyToggles.clear()
+  })
+  const cm = createCopyMode({
+    scroll: () => scroll,
+    targets: copyTargets,
+    session: () => route.sessionID,
+    toBottom,
+    write: clipboard.write,
+    prepare(continuation) {
+      copyMounted = true
+      clearMessageNavigation()
+      const request = ++copyPrepare
+      const mount = () => {
+        if (!copyDisposed && request === copyPrepare) ensureAllRows(() => {
+          if (!copyDisposed && request === copyPrepare) continuation()
+        })
+      }
+      if (!data.session.message.more(route.sessionID)) {
+        mount()
+        return
+      }
+      const id = route.sessionID
+      void data.session.message.loadMore(id, { all: true }).then(
+        () => {
+          if (!copyDisposed && route.sessionID === id) mount()
+        },
+        (error) => {
+          if (copyDisposed) return
+          toast.error(error)
+          if (route.sessionID === id) mount()
+        },
+      )
+    },
+    cleanup() {
+      copyMounted = false
+      copyPrepare++
+      if (!scroll || scroll.isDestroyed) return
+      const first = scroll.getChildren().find(
+        (child) =>
+          child.id &&
+          child.y + child.height > scroll.viewport.y &&
+          copyTargets().some((item) => item.id === child.id),
+      )
+      const index = first
+        ? rows.findIndex(
+            (row, index) =>
+              copyTarget(
+                row,
+                (id) => data.session.message.get(route.sessionID, id),
+                boundaries()[index],
+              ).id === first.id,
+          )
+        : -1
+      if (index === -1 || !isAwayFromBottom()) {
+        setHiddenRows(undefined)
+        setVisibleRowsEnd(undefined)
+        return
+      }
+      setHiddenRows(rowsBefore(weights(), index, TRANSCRIPT_BACKFILL_CHUNK))
+      const end = rowsAfter(weights(), index, TRANSCRIPT_BACKFILL_CHUNK)
+      setVisibleRowsEnd(end === rows.length ? undefined : end)
+    },
+    canToggle(id) {
+      return copyToggles.has(id)
+    },
+    toggleCollapsed(id) {
+      const toggle = copyToggles.get(id)
+      if (toggle) {
+        toggle()
+        return true
+      }
+      return false
+    },
+    activate(copyRow) {
+      if (!copyRow.part || !copyRow.messageID) return false
+      const message = data.session.message.get(route.sessionID, copyRow.messageID)
+      const part = message?.type === "assistant" ? resolvePart(message, copyRow.part) : undefined
+      if (part?.type !== "tool" || canonicalToolName(part.name) !== "subagent") return false
+      const metadata = "metadata" in part.state && isRecord(part.state.metadata) ? part.state.metadata : undefined
+      const childID = metadata && (metadata.sessionID ?? metadata.sessionId)
+      if (typeof childID !== "string") return false
+      navigate({ type: "session", sessionID: childID })
+      return true
+    },
+  })
+
+  // Native text/layout changes do not notify Solid. Refresh copy projections only
+  // when rendered geometry/content changes, including resize and streamed output.
+  renderer.on("frame", cm.refresh)
+  onCleanup(() => renderer.off("frame", cm.refresh))
 
   function isAwayFromBottom() {
     if (
@@ -532,7 +657,7 @@ export function Session(props: {
       if (!scroll || scroll.isDestroyed) return
       const away = preserveWindow || isAwayFromBottom()
       setAwayFromBottom(away)
-      if (!away) {
+      if (!away && !copyMounted) {
         if (!renderer.getSelection()) setHiddenRows(undefined)
         scroll.stickyScroll = true
       }
@@ -899,6 +1024,7 @@ export function Session(props: {
       return
     }
     scroll.scrollBy(delta)
+    cm.clamp(delta)
     updateAwayFromBottom()
     dialog.clear()
   }
@@ -1030,6 +1156,25 @@ export function Session(props: {
   ]
 
   const baseCommands = createMemo(() => [
+    {
+      title: "Copy mode",
+      id: "session.copy_mode",
+      group: "Session",
+      palette: undefined,
+      run: () =>
+        toggleSessionCopyMode({ copy: cm.prompt, prompt: prompt(), setVimMode: (mode) => keymap.vim.set(mode) }),
+    },
+    {
+      title: "Toggle Markdown syntax",
+      id: "session.toggle.conceal",
+      group: "Session",
+      run: () => {
+        void configState.update((draft) => {
+          draft.session = { ...draft.session, markdown: markdownMode() === "rendered" ? "source" : "rendered" }
+        }).catch(toast.error)
+        dialog.clear()
+      },
+    },
     {
       title: "Rename session",
       id: "session.rename",
@@ -1436,7 +1581,45 @@ export function Session(props: {
   Keymap.createLayer(() => ({
     mode: "global",
     commands: commands(),
-    bindings: globalCommands.map((command) => command.id),
+    bindings: [...globalCommands.map((command) => command.id), "session.copy_mode"],
+  }))
+
+  Keymap.createLayer(() => ({
+    mode: "global",
+    enabled: () =>
+      vimEnabled() &&
+      ["base", "form", "copy"].includes(keymap.mode.current()) &&
+      (["normal", "visual", "visual-line", "copy"].includes(keymap.vim.current() ?? "") ||
+        (disabled() && renderer.currentFocusedEditor === null)),
+    commands: [
+      {
+        bind: Keymap.CopyModeKeys.enter,
+        title: "Enter copy mode",
+        group: "Session",
+        run: () => {
+          if (cm.active()) return false
+          toggleSessionCopyMode({ copy: cm.prompt, prompt: prompt(), setVimMode: (mode) => keymap.vim.set(mode) })
+        },
+      },
+      {
+        bind: Keymap.CopyModeKeys.toggle,
+        title: "Toggle copy mode",
+        group: "Session",
+        run: () => {
+          if (cm.active()) return cm.prompt.exit(false)
+          toggleSessionCopyMode({ copy: cm.prompt, prompt: prompt(), setVimMode: (mode) => keymap.vim.set(mode) })
+        },
+      },
+      {
+        bind: Keymap.CopyModeKeys.exit,
+        title: "Focus answer or prompt",
+        group: "Session",
+        run: () => {
+          if (!cm.active()) return false
+          cm.prompt.exit(false)
+        },
+      },
+    ],
   }))
 
   Keymap.createLayer(() => ({
@@ -1497,6 +1680,8 @@ export function Session(props: {
         thinkingMode,
         markdownMode,
         groupExploration,
+        copyActive: cm.unified,
+        registerCopyToggle,
         diffWrapMode,
         models,
         messageIndex: (messageID) => messageIndexes().get(messageID),
@@ -1551,6 +1736,15 @@ export function Session(props: {
                       row={row}
                       message={(messageID) => data.session.message.get(route.sessionID, messageID)}
                       boundaryID={boundaries()[index() + hidden()]}
+                      copy={cm.row()?.id === copyTargets()[index()]?.id ? {
+                        line: cm.row()!.line,
+                        col: cm.cursorCol(),
+                        visual: !!cm.state().visual,
+                        cursorText: cm.cursorText(),
+                        rowHasText: cm.rowHasText(),
+                        action: cm.action(),
+                      } : undefined}
+                      highlights={cm.highlights().get(copyTargets()[index()]?.id ?? "") ?? []}
                     />
                   )}
                 </For>
@@ -1606,6 +1800,9 @@ export function Session(props: {
                 terminals={props.terminals}
                 visibleTerminalID={props.visibleTerminalID}
               />
+              <Show when={disabled()}>
+                <SessionPrompt visible={false} copy={cm.prompt} sessionID={route.sessionID} />
+              </Show>
               <Switch>
                 <Match when={composer.open || (!!session()?.parentID && forms().length === 0)}>{null}</Match>
                 <Match when={promptedPermissions().length > 0}>
@@ -1639,9 +1836,9 @@ export function Session(props: {
                   />
                 </Match>
                 <Match when={!disabled()}>
-                  <Prompt
+                  <SessionPrompt
                     visible={true}
-                    ref={bind}
+                    copy={cm.prompt}
                     muted={props.promptMuted}
                     onSubmit={() => {
                       toBottom()
@@ -1663,10 +1860,27 @@ export function Session(props: {
   )
 }
 
+export function toggleSessionCopyMode(input: {
+  copy: Pick<ReturnType<typeof createCopyMode>["prompt"], "active" | "enter" | "exit">
+  prompt?: Pick<PromptRef, "enterCopyMode">
+  setVimMode: (mode: "normal" | "copy") => void
+}) {
+  if (input.copy.active()) {
+    input.copy.exit()
+    input.setVimMode("normal")
+    return
+  }
+  if (input.prompt?.enterCopyMode()) return
+  input.setVimMode("copy")
+  input.copy.enter()
+}
+
 type SessionRowViewProps = {
   row: SessionRow
   message: (messageID: string) => SessionMessageInfo | undefined
   boundaryID?: string
+  copy?: CopyPosition
+  highlights?: CopyHighlight[]
 }
 
 function SessionRowView(props: SessionRowViewProps) {
@@ -1675,8 +1889,9 @@ function SessionRowView(props: SessionRowViewProps) {
     entry: () => (props.row.type === "group" ? undefined : props.row),
     node: target,
   })
+  const descriptor = () => copyTarget(props.row, props.message, props.boundaryID)
   return (
-    <box ref={setTarget} id={sessionRowID(props.row, props.boundaryID)} marginTop={1} flexShrink={0}>
+    <box ref={setTarget} id={descriptor().id} marginTop={1} flexShrink={0} position="relative">
       <Switch>
         <Match when={props.row.type === "group" ? props.row : undefined}>
           {(row) => (
@@ -1692,41 +1907,44 @@ function SessionRowView(props: SessionRowViewProps) {
           {(row) => <SessionEntryView row={row()} message={props.message} />}
         </Match>
       </Switch>
+      <CopyOverlay copy={props.copy} highlights={props.highlights} />
     </box>
   )
 }
 
 function SessionEntryView(props: { row: SessionEntry; message: SessionRowViewProps["message"]; images?: boolean }) {
   return (
-    <Switch>
-      <Match when={props.row.type === "message" ? props.row : undefined}>
-        {(row) => (
-          <Show when={props.message(row().messageID)}>{(message) => <SessionMessageView message={message()} />}</Show>
-        )}
-      </Match>
-      <Match when={props.row.type === "compaction-queued"}>
-        <CompactionQueued />
-      </Match>
-      <Match when={props.row.type === "part" ? props.row : undefined}>
-        {(row) => <SessionPartView partRef={row().ref} message={props.message} images={props.images} />}
-      </Match>
-      <Match when={props.row.type === "assistant-footer" ? props.row : undefined}>
-        {(row) => (
-          <Show when={props.message(row().messageID)}>
-            {(message) => (
-              <Show when={message().type === "assistant"}>
-                <AssistantFooter message={message() as SessionMessageAssistant} />
-              </Show>
-            )}
-          </Show>
-        )}
-      </Match>
-      <Match when={props.row.type === "turn-usage" ? props.row : undefined}>
-        {(row) => (
-          <TurnTokenUsage messageIDs={row().messageIDs} previousCache={row().previousCache} message={props.message} />
-        )}
-      </Match>
-    </Switch>
+    <box flexShrink={0} ref={(node) => identifyCopyNode(node, () => copyTarget(props.row, props.message))}>
+      <Switch>
+        <Match when={props.row.type === "message" ? props.row : undefined}>
+          {(row) => (
+            <Show when={props.message(row().messageID)}>{(message) => <SessionMessageView message={message()} />}</Show>
+          )}
+        </Match>
+        <Match when={props.row.type === "compaction-queued"}>
+          <CompactionQueued />
+        </Match>
+        <Match when={props.row.type === "part" ? props.row : undefined}>
+          {(row) => <SessionPartView partRef={row().ref} message={props.message} images={props.images} />}
+        </Match>
+        <Match when={props.row.type === "assistant-footer" ? props.row : undefined}>
+          {(row) => (
+            <Show when={props.message(row().messageID)}>
+              {(message) => (
+                <Show when={message().type === "assistant"}>
+                  <AssistantFooter message={message() as SessionMessageAssistant} />
+                </Show>
+              )}
+            </Show>
+          )}
+        </Match>
+        <Match when={props.row.type === "turn-usage" ? props.row : undefined}>
+          {(row) => (
+            <TurnTokenUsage messageIDs={row().messageIDs} previousCache={row().previousCache} message={props.message} />
+          )}
+        </Match>
+      </Switch>
+    </box>
   )
 }
 
@@ -1892,6 +2110,7 @@ function turnTokenToolSummary(tool: SessionMessageAssistantTool) {
 
 function BackgroundToolHint(props: { messages: SessionMessageInfo[] }) {
   const theme = useTheme()
+  const minimal = useMinimalUI()
   const shortcut = Keymap.useShortcut("session.background")
   const running = createMemo(() => {
     if (!shortcut()) return
@@ -1912,7 +2131,7 @@ function BackgroundToolHint(props: { messages: SessionMessageInfo[] }) {
     (previous, next) => previous.key === next.key && previous.started === next.started,
   )
   return (
-    <Show when={visible() && shortcut()}>
+    <Show when={!minimal() && visible() && shortcut()}>
       {(value) => (
         <box marginTop={1} paddingLeft={3} flexShrink={0}>
           <text fg={theme.text.muted}>
@@ -2731,11 +2950,19 @@ type ToolProps = {
 }
 function GenericTool(props: ToolProps) {
   const theme = useTheme()
+  const ctx = use()
   const output = createMemo(() => props.output?.trim() ?? "")
   const input = createMemo(() => Object.entries(props.input))
   const [expanded, setExpanded] = createSignal(false)
   const expandable = createMemo(() => input().length > 0 || output().length > 0)
   const loading = createMemo(() => props.part.state.status === "streaming" || props.part.state.status === "running")
+  const toggle = () => setExpanded((value) => !value)
+
+  createEffect(() => {
+    if (!expandable()) return
+    const unregister = ctx.registerCopyToggle?.(props.part.id, toggle)
+    onCleanup(() => unregister?.())
+  })
 
   return (
     <>
@@ -2745,7 +2972,7 @@ function GenericTool(props: ToolProps) {
         pending={props.tool}
         spinner={loading()}
         part={props.part}
-        onClick={expandable() ? () => setExpanded((value) => !value) : undefined}
+        onClick={expandable() ? toggle : undefined}
       >
         {genericToolSummary(props.tool, props.input)}
       </InlineTool>
@@ -3100,6 +3327,11 @@ function ShellDisplay(props: {
     setExpanded(next)
     if (next) void loadBackgroundOutput(!backgroundRunning())
   }
+  createEffect(() => {
+    if (!expandable() || !props.part) return
+    const unregister = ctx.registerCopyToggle?.(props.part.id, toggle)
+    onCleanup(() => unregister?.())
+  })
 
   return (
     <BlockTool part={props.part} error={props.error} onClick={expandable() ? toggle : undefined}>
@@ -3448,6 +3680,7 @@ function Edit(props: ToolProps) {
   const pathFormatter = usePathFormatter()
 
   const view = createMemo(() => {
+    if (ctx.copyActive?.()) return "unified"
     const diffView = ctx.config.diffs?.view
     if (diffView === "unified") return "unified"
     if (diffView === "split") return "split"
@@ -3527,6 +3760,7 @@ function ApplyPatch(props: ToolProps) {
     })
   })
   const view = createMemo(() => {
+    if (ctx.copyActive?.()) return "unified"
     if (ctx.config.diffs?.view === "unified") return "unified"
     if (ctx.config.diffs?.view === "split") return "split"
     return ctx.width > 120 ? "split" : "unified"

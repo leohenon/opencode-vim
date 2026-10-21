@@ -40,7 +40,7 @@ test("prompt footer separates simultaneous subagent, shell, and usage status", a
     },
   } as unknown as Context
   const app = await testRender(
-    () => <PromptFooter context={context} sessionID="session" mode="normal" showDetails={true} />,
+    () => <PromptFooter context={context} sessionID="session" mode="normal" showDetails={true} minimal={false} />,
     {
       width: 80,
       height: 2,
@@ -59,6 +59,36 @@ test("prompt footer separates simultaneous subagent, shell, and usage status", a
 
     await app.mockMouse.click(2, 0)
     expect(dispatched).toEqual(["session.child.first"])
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("minimal UI hides prompt footer chrome", async () => {
+  const color = RGBA.fromInts(200, 200, 200)
+  const context = {
+    theme: { text: { base: color, muted: color } },
+    keymap: { shortcuts: () => ["ctrl+p"] },
+    data: {
+      session: {
+        family: () => ["session"],
+        status: () => "idle",
+        get: () => ({ id: "session", location: { directory: "/workspace" } }),
+        cost: () => 1,
+        message: { list: () => [] },
+      },
+      shell: { list: () => [] },
+      location: { model: { list: () => [] } },
+    },
+  } as unknown as Context
+  const app = await testRender(
+    () => <PromptFooter context={context} sessionID="session" mode="normal" showDetails={true} minimal={true} />,
+    { width: 80, height: 1 },
+  )
+
+  try {
+    await app.renderOnce()
+    expect(app.captureCharFrame().trim()).toBe("")
   } finally {
     app.renderer.destroy()
   }
@@ -114,6 +144,7 @@ test("prompt footer can hide details", async () => {
           sessionID={sessionID()}
           mode="normal"
           showDetails={showDetails()}
+          minimal={false}
         />
       </box>
     ),

@@ -57,6 +57,10 @@ export const Plugin = Schema.Union([
 export const DiffSource = Schema.Union([Vcs.Mode, Schema.Literal("turn")])
 export type DiffSource = Schema.Schema.Type<typeof DiffSource>
 
+export const ExternalDiffCommand = Schema.Array(Schema.String).check(Schema.isMinLength(1)).annotate({
+  description: "External diff viewer command; the first item is the executable and the rest are arguments",
+})
+
 export const Cursor = Schema.Struct({
   style: Schema.optional(Schema.Literals(["block", "underline", "line", "default"])).annotate({
     description: "Cursor shape. Use 'default' to preserve the terminal setting",
@@ -65,6 +69,28 @@ export const Cursor = Schema.Struct({
     description: "Whether the cursor blinks. Has no effect when style is 'default'",
   }),
 }).annotate({ description: "Terminal cursor settings" })
+
+const VimLangmapCharacter = Schema.String.check(Schema.isPattern(/^.$/u)).annotate({
+  description: "A single Vim langmap character",
+})
+export const VimLangmap = Schema.Record(Schema.String, VimLangmapCharacter)
+  .check(
+    Schema.makeFilter((value) => Object.keys(value).every((key) => /^.$/u.test(key)), {
+      message: "Expected Vim langmap keys to be single characters",
+    }),
+  )
+  .annotate({
+    description: "Map keyboard-layout characters to Vim command keys in normal and visual modes",
+  })
+export const VimInitialMode = Schema.Literals(["normal", "insert"]).annotate({
+  description: "Initial Vim mode for the prompt",
+})
+export const VimLineMotions = Schema.Literals(["logical", "display_vertical", "display"]).annotate({
+  description: "Use logical lines, display lines for j/k only, or display lines for j/k and 0/^/$ Vim motions",
+})
+const PromptMaxHeight = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(50)).annotate({
+  description: "Maximum number of rows the prompt input expands to",
+})
 
 export const Info = Schema.Struct({
   theme: Schema.optional(
@@ -126,6 +152,7 @@ export const Info = Schema.Struct({
       view: Schema.optional(Schema.Literals(["auto", "split", "unified"])).annotate({
         description: "Diff layout; 'auto' selects a layout from the available width",
       }),
+      command: Schema.optional(ExternalDiffCommand),
     }),
   ).annotate({ description: "Diff presentation settings" }),
   terminal: Schema.optional(
@@ -253,10 +280,47 @@ export const Info = Schema.Struct({
   }),
   mouse: Schema.optional(Schema.Boolean).annotate({ description: "Enable terminal mouse capture" }),
   cursor: Schema.optional(Cursor),
+  vim: Schema.optional(Schema.Boolean).annotate({ description: "Enable Vim-style input for the prompt" }),
+  ui_minimal: Schema.optional(Schema.Boolean).annotate({ description: "Hide secondary TUI hints" }),
+  vim_modal_input: Schema.optional(Schema.Boolean).annotate({
+    description: "Enable Vim-style modal controls for select and prompt dialogs",
+  }),
+  vim_enter_submit: Schema.optional(Schema.Boolean).annotate({
+    description: "Submit with Enter in Vim insert and replace modes",
+  }),
+  vim_insert_after_submit: Schema.optional(Schema.Boolean).annotate({
+    description: "Return the prompt to Vim insert mode after submitting",
+  }),
+  vim_initial_mode: Schema.optional(VimInitialMode),
+  vim_system_clipboard_register: Schema.optional(Schema.Boolean).annotate({
+    description: "Use the system clipboard instead of Vim's internal register for yank and paste",
+  }),
+  vim_langmap: Schema.optional(VimLangmap),
+  vim_line_motions: Schema.optional(VimLineMotions),
+  vim_showbreak: Schema.optional(Schema.Boolean).annotate({
+    description: "Show a marker in the prompt gutter for wrapped rows",
+  }),
+  vim_escape_sequence: Schema.optional(Schema.String.check(Schema.isPattern(/^.{2}$/u))).annotate({
+    description: "Two-character sequence to exit Vim insert mode (for example, 'jk')",
+  }),
+  prompt_max_height: Schema.optional(PromptMaxHeight),
+  prompt_scrollbar: Schema.optional(Schema.Boolean).annotate({ description: "Show a scrollbar for the prompt input" }),
 })
 export type Info = Schema.Schema.Type<typeof Info>
 
-export type Resolved = Omit<Info, "attention" | "cursor" | "keybinds" | "leader" | "mouse" | "session" | "tabs"> & {
+export type Resolved = Omit<
+  Info,
+  | "attention"
+  | "cursor"
+  | "keybinds"
+  | "leader"
+  | "mouse"
+  | "session"
+  | "tabs"
+  | "vim_modal_input"
+  | "vim_line_motions"
+  | "vim_showbreak"
+> & {
   attention: {
     notifications: boolean
     sound: boolean
@@ -283,6 +347,9 @@ export type Resolved = Omit<Info, "attention" | "cursor" | "keybinds" | "leader"
     layout: "horizontal" | "vertical"
     indicators: "status" | "numbers"
   }
+  vim_modal_input: boolean
+  vim_line_motions: "logical" | "display_vertical" | "display"
+  vim_showbreak: boolean
 }
 
 export function resolve(
@@ -335,6 +402,9 @@ export function resolve(
       layout: input.tabs?.layout ?? "horizontal",
       indicators: input.tabs?.indicators ?? "status",
     },
+    vim_modal_input: input.vim_modal_input ?? true,
+    vim_line_motions: input.vim_line_motions ?? "logical",
+    vim_showbreak: input.vim_showbreak ?? false,
   }
 }
 

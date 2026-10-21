@@ -22,6 +22,7 @@ async function mountForm(
   height = 20,
   clipboardText?: string,
   response?: { reply?: 404 | 409; cancel?: 404 | 409; syncFailure?: boolean },
+  modalConfig: Parameters<typeof createTuiResolvedConfig>[0] = { vim_modal_input: false },
 ) {
   const state = path.join(root, "state")
   await mkdir(state, { recursive: true })
@@ -32,7 +33,7 @@ async function mountForm(
   let terminal = false
   let formLists = 0
   const events = createEventStream()
-  const config = createTuiResolvedConfig()
+  const config = createTuiResolvedConfig(modalConfig)
   const form = {
     id: "frm_test",
     sessionID: "ses_test",
@@ -709,6 +710,155 @@ test("space activates the custom multiselect option", async () => {
     await prompt.app.waitFor(() => prompt.app.renderer.currentFocusedEditor !== null)
     await prompt.app.waitForFrame((frame) => frame.includes("[✓] Type your own answer"))
     expect(prompt.replies).toEqual([])
+  } finally {
+    prompt.app.renderer.destroy()
+  }
+})
+
+for (const custom of [false, true]) {
+  for (const escape of ["escape", "jk"]) {
+    test(`modal ${custom ? "custom" : "text"} input supports ${escape}, langmap and normal editing`, async () => {
+      await using tmp = await tmpdir()
+      const prompt = await mountForm(
+        tmp.path,
+        80,
+        [
+          custom
+            ? { key: "answer", type: "multiselect", custom: true, options: [{ value: "staging", label: "Staging" }] }
+            : { key: "answer", type: "string" },
+        ],
+        20,
+        undefined,
+        undefined,
+        {
+          vim: true,
+          vim_modal_input: true,
+          vim_escape_sequence: "jk",
+          vim_langmap: { q: "h" },
+        },
+      )
+      try {
+        if (custom) {
+          prompt.app.mockInput.pressArrow("down")
+          prompt.app.mockInput.pressEnter()
+        }
+        await prompt.app.waitFor(() => prompt.app.renderer.currentFocusedEditor !== null)
+        await prompt.app.mockInput.typeText("abcd")
+        if (escape === "escape") prompt.app.mockInput.pressEscape()
+        else await prompt.app.mockInput.typeText("jk")
+        const editor = prompt.app.renderer.currentFocusedEditor!
+        expect(editor.plainText).toBe("abcd")
+        expect(editor.cursorOffset).toBe(3)
+        expect(editor.cursorStyle).toEqual({ style: "block", blinking: false })
+        expect(prompt.cancellations).toEqual([])
+        await prompt.app.mockInput.typeText("q")
+        expect(editor.cursorOffset).toBe(2)
+        await prompt.app.mockInput.typeText("s")
+        expect(editor.plainText).toBe("abd")
+        await prompt.app.mockInput.typeText("Z")
+        expect(editor.plainText).toBe("abZd")
+        expect(prompt.replies).toEqual([])
+      } finally {
+        prompt.app.renderer.destroy()
+      }
+    })
+  }
+}
+
+for (const config of [
+  { vim: false, vim_modal_input: true },
+  { vim: true, vim_modal_input: false },
+]) {
+  test(`disabled modal input preserves typing and direct Escape cancellation: ${JSON.stringify(config)}`, async () => {
+    await using tmp = await tmpdir()
+    const prompt = await mountForm(tmp.path, 80, [{ key: "answer", type: "string" }], 20, undefined, undefined, {
+      ...config,
+      vim_escape_sequence: "jk",
+      vim_langmap: { q: "h" },
+    })
+    try {
+      await prompt.app.mockInput.typeText("jkqx")
+      expect(prompt.app.renderer.currentFocusedEditor?.plainText).toBe("jkqx")
+      prompt.app.mockInput.pressEscape()
+      await prompt.app.waitFor(() => prompt.cancellations.length === 1)
+    } finally {
+      prompt.app.renderer.destroy()
+    }
+  })
+}
+
+test("cancelled custom modal editing can be restored with u without typing u into the answer", async () => {
+  await using tmp = await tmpdir()
+  const prompt = await mountForm(
+    tmp.path,
+    80,
+    [
+      {
+        key: "targets",
+        type: "multiselect",
+        custom: true,
+        options: [{ value: "staging", label: "Staging" }],
+      },
+    ],
+    20,
+    undefined,
+    undefined,
+    { vim: true, vim_modal_input: true },
+  )
+  try {
+    prompt.app.mockInput.pressEnter()
+    prompt.app.mockInput.pressArrow("down")
+    prompt.app.mockInput.pressEnter()
+    await prompt.app.waitFor(() => prompt.app.renderer.currentFocusedEditor !== null)
+    await prompt.app.mockInput.typeText("production")
+    prompt.app.mockInput.pressEscape()
+    expect(prompt.app.renderer.currentFocusedEditor).not.toBeNull()
+    prompt.app.mockInput.pressEscape()
+    await prompt.app.waitFor(() => prompt.app.renderer.currentFocusedEditor === null)
+    await prompt.app.mockInput.typeText("u")
+    await prompt.app.waitFor(() => prompt.app.renderer.currentFocusedEditor?.plainText === "production")
+    await prompt.app.mockInput.typeText("!")
+    expect(prompt.app.renderer.currentFocusedEditor?.plainText).toBe("production!")
+    prompt.app.mockInput.pressTab()
+    await prompt.app.waitForFrame((frame) => frame.includes("enter submit"))
+    prompt.app.mockInput.pressEnter()
+    await prompt.app.waitFor(() => prompt.replies.length === 1)
+    expect(prompt.replies).toEqual([{ answer: { targets: ["staging", "production!"] } }])
+    expect(prompt.cancellations).toEqual([])
+  } finally {
+    prompt.app.renderer.destroy()
+  }
+})
+
+test("modal tab navigation flushes a pending escape prefix and preserves numeric validation", async () => {
+  await using tmp = await tmpdir()
+  const prompt = await mountForm(
+    tmp.path,
+    80,
+    [
+      { key: "notes", type: "string" },
+      { key: "count", type: "integer", minimum: 2, required: true },
+    ],
+    20,
+    undefined,
+    undefined,
+    { vim: true, vim_modal_input: true, vim_escape_sequence: "jk" },
+  )
+  try {
+    await prompt.app.mockInput.typeText("proj")
+    prompt.app.mockInput.pressTab()
+    await prompt.app.waitFor(() => prompt.app.renderer.currentFocusedEditor?.plainText === "")
+    await prompt.app.mockInput.typeText("1")
+    prompt.app.mockInput.pressTab()
+    await prompt.app.waitForFrame((frame) => frame.includes("at least"))
+    expect(prompt.replies).toEqual([])
+    prompt.app.mockInput.pressEscape()
+    await prompt.app.mockInput.typeText("S3")
+    prompt.app.mockInput.pressTab()
+    await prompt.app.waitForFrame((frame) => frame.includes("notes: proj") && frame.includes("count: 3"))
+    prompt.app.mockInput.pressEnter()
+    await prompt.app.waitFor(() => prompt.replies.length === 1)
+    expect(prompt.replies).toEqual([{ answer: { notes: "proj", count: 3 } }])
   } finally {
     prompt.app.renderer.destroy()
   }

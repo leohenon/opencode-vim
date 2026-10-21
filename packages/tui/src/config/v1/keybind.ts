@@ -84,6 +84,7 @@ export const Definitions = {
 
   session_export: keybind("<leader>x", "Export session to editor"),
   session_copy: keybind("none", "Copy session transcript"),
+  copy_mode: keybind("<leader>v", "Enter copy mode"),
   session_move: keybind("none", "Move session"),
   session_new: keybind("<leader>n", "Create a new session"),
   session_list: keybind("<leader>l", "List all sessions"),
@@ -163,6 +164,7 @@ export const Definitions = {
   display_thinking: keybind("none", "Toggle thinking blocks visibility"),
 
   prompt_submit: keybind("none", "Submit prompt"),
+  prompt_copy_selection: keybind("<leader>y", "Copy prompt selection"),
   prompt_queue: keybind("<leader>return", "Queue prompt"),
   prompt_editor_context_clear: keybind("none", "Clear editor context"),
   prompt_images_view: keybind("<leader>i", "View image attachments"),
@@ -233,21 +235,52 @@ export const Definitions = {
   "plugins.toggle": keybind("return", "Toggle plugin"),
   "dialog.mcp.toggle": keybind("space", "Toggle MCP server"),
 
+  app_toggle_session_directory_filter: keybind("none", "Toggle session directory filtering"),
+  console_org_switch: keybind("none", "Switch console organization"),
+  messages_toggle_conceal: keybind("<leader>h", "Toggle code block concealment in messages"),
+  plugin_install: keybind("none", "Install plugin"),
+  plugin_manager: keybind("none", "Open plugin manager dialog"),
+  session_child_cycle: keybind("right", "Go to next child session"),
+  session_child_cycle_reverse: keybind("left", "Go to previous child session"),
+  session_toggle_generic_tool_output: keybind("none", "Toggle generic tool output"),
+  session_toggle_timestamps: keybind("none", "Toggle message timestamps"),
+  tips_toggle: keybind("<leader>h", "Toggle tips on home screen"),
+  tool_details: keybind("none", "Toggle tool details visibility"),
+  which_key_end: keybind("ctrl+alt+end", "Jump to last which-key binding"),
+  which_key_group_next: keybind("ctrl+alt+right,ctrl+alt+]", "Next which-key group"),
+  which_key_group_previous: keybind("ctrl+alt+left,ctrl+alt+[", "Previous which-key group"),
+  which_key_home: keybind("ctrl+alt+home", "Jump to first which-key binding"),
+  which_key_layout_toggle: keybind("ctrl+alt+shift+k", "Switch which-key layout"),
+  which_key_page_down: keybind("ctrl+alt+pagedown", "Page which-key down"),
+  which_key_page_up: keybind("ctrl+alt+pageup", "Page which-key up"),
+  which_key_pending_toggle: keybind("ctrl+alt+shift+p", "Toggle which-key pending preview"),
+  which_key_scroll_down: keybind("ctrl+alt+down,ctrl+alt+n", "Scroll which-key down"),
+  which_key_scroll_up: keybind("ctrl+alt+up,ctrl+alt+p", "Scroll which-key up"),
+  which_key_toggle: keybind("ctrl+alt+k", "Toggle which-key panel"),
+  workspace_set: keybind("none", "Set workspace"),
+
   terminal_suspend: keybind("ctrl+z", "Suspend terminal"),
   terminal_title_toggle: keybind("none", "Toggle terminal title"),
 } satisfies Record<string, Definition>
 
 type KeybindName = keyof typeof Definitions
 const KeybindNames = new Set<string>(Object.keys(Definitions))
+export type Keybinds = { [K in KeybindName]: BindingValueSchema }
+export type KeybindOverrides = Partial<Keybinds> & { "vim.normal"?: Partial<Keybinds> }
+const KeybindOverrideFields = Object.fromEntries(
+  Object.entries(Definitions).map(([name, item]) => [
+    name,
+    Schema.optional(BindingValueSchema).annotate({ description: item.description }),
+  ]),
+)
+const KeybindOverrideBase = Schema.Struct(KeybindOverrideFields)
 
-export const KeybindOverrides = Schema.Struct(
-  Object.fromEntries(
-    Object.entries(Definitions).map(([name, item]) => [
-      name,
-      Schema.optional(BindingValueSchema).annotate({ description: item.description }),
-    ]),
-  ),
-).annotate({ description: "TUI keybinding overrides" })
+const KeybindOverridesSchema = Schema.StructWithRest(KeybindOverrideBase, [
+  Schema.Record(Schema.Literal("vim.normal"), Schema.optionalKey(KeybindOverrideBase)),
+]).annotate({ description: "TUI keybinding overrides" })
+export const KeybindOverrides = KeybindOverridesSchema as Omit<typeof KeybindOverridesSchema, "Type"> & {
+  readonly Type: KeybindOverrides
+}
 export const CommandMap = {
   app_exit: "app.exit",
   app_debug: "app.debug",
@@ -286,6 +319,7 @@ export const CommandMap = {
   debug_view: "opencode.debug",
   session_export: "session.export",
   session_copy: "session.copy",
+  copy_mode: "session.copy_mode",
   session_move: "session.move",
   session_new: "session.new",
   session_list: "session.list",
@@ -362,6 +396,7 @@ export const CommandMap = {
   messages_redo: "session.redo",
   display_thinking: "session.toggle.thinking",
   prompt_submit: "prompt.submit",
+  prompt_copy_selection: "prompt.copy_selection",
   prompt_queue: "prompt.queue",
   prompt_editor_context_clear: "prompt.editor_context.clear",
   prompt_images_view: "prompt.images.view",
@@ -409,6 +444,29 @@ export const CommandMap = {
   input_select_all: "input.select.all",
   history_previous: "prompt.history.previous",
   history_next: "prompt.history.next",
+  app_toggle_session_directory_filter: "app.toggle.session_directory_filter",
+  console_org_switch: "console.org.switch",
+  messages_toggle_conceal: "session.toggle.conceal",
+  plugin_install: "plugins.install",
+  plugin_manager: "plugins.list",
+  session_child_cycle: "session.child.next",
+  session_child_cycle_reverse: "session.child.previous",
+  session_toggle_generic_tool_output: "session.toggle.generic_tool_output",
+  session_toggle_timestamps: "session.toggle.timestamps",
+  tips_toggle: "tips.toggle",
+  tool_details: "session.toggle.actions",
+  which_key_end: "which-key.end",
+  which_key_group_next: "which-key.group.next",
+  which_key_group_previous: "which-key.group.previous",
+  which_key_home: "which-key.home",
+  which_key_layout_toggle: "which-key.layout.toggle",
+  which_key_page_down: "which-key.page.down",
+  which_key_page_up: "which-key.page.up",
+  which_key_pending_toggle: "which-key.pending.toggle",
+  which_key_scroll_down: "which-key.scroll.down",
+  which_key_scroll_up: "which-key.scroll.up",
+  which_key_toggle: "which-key.toggle",
+  workspace_set: "workspace.set",
   terminal_suspend: "terminal.suspend",
   terminal_title_toggle: "terminal.title.toggle",
 } satisfies BindingCommandMap
@@ -419,8 +477,6 @@ const CommandDescriptions = Object.fromEntries(
   ]),
 ) as Record<string, string>
 
-export type Keybinds = { [K in KeybindName]: BindingValueSchema }
-export type KeybindOverrides = Partial<Keybinds>
 export type BindingLookupView = {
   readonly bindings: readonly Binding<Renderable, KeyEvent>[]
   get(command: string): readonly Binding<Renderable, KeyEvent>[]
@@ -452,7 +508,14 @@ export function parse(keybinds: KeybindOverrides): Keybinds {
 }
 
 export function unknownKeys(input: object) {
-  return Object.keys(input).filter((key) => !KeybindNames.has(key))
+  return Object.entries(input).flatMap(([key, value]) => {
+    if (KeybindNames.has(key)) return []
+    if (key !== "vim.normal") return [key]
+    if (!value || typeof value !== "object" || Array.isArray(value)) return []
+    return Object.keys(value)
+      .filter((nested) => !KeybindNames.has(nested))
+      .map((nested) => `${key}.${nested}`)
+  })
 }
 
 export function bindingDefaults(): BindingDefaults<Renderable, KeyEvent> {

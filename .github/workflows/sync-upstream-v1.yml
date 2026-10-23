@@ -1,0 +1,32 @@
+name: Schedule OCV V1 maintenance
+
+on:
+  schedule:
+    - cron: "15 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Verify V1 synchronization without pushing or publishing"
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dispatch-sync-upstream-v1
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    if: github.repository == 'leohenon/opencode-vim' && github.ref == 'refs/heads/ocv'
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ secrets.SYNC_PAT }}
+      DRY_RUN: ${{ github.event_name != 'schedule' && inputs.dry_run }}
+    steps:
+      - name: Dispatch isolated V1 synchronization
+        run: |
+          [ -n "$GH_TOKEN" ] || { echo "SYNC_PAT with Actions write access is required" >&2; exit 1; }
+          gh workflow run sync-upstream.yml --repo "$GITHUB_REPOSITORY" --ref ocv1 -f dry_run="$DRY_RUN"

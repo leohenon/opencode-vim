@@ -24,13 +24,18 @@ TARGET="ocv-${PLATFORM}-${ARCH}"
 
 # Get latest version
 if [ -z "$OCV_VERSION" ]; then
-  VERSION=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" | grep '"tag_name"' | sed 's/.*"v\(.*\)".*/\1/')
+  VERSION=$(curl -fsSL "https://registry.npmjs.org/@leohenon/ocv/latest" | tr ',' '\n' | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)
 else
   VERSION="$OCV_VERSION"
 fi
 
 if [ -z "$VERSION" ]; then
   echo "Could not determine latest version"
+  exit 1
+fi
+
+if ! printf '%s\n' "$VERSION" | grep -Eq '^1\.[0-9]+\.[0-9]+-ocv\.[0-9]+\.[0-9]+$' || [ "$(printf '%s' "$VERSION" | wc -l | tr -d ' ')" != "0" ]; then
+  echo "Expected a V1 OCV version (1.x.y-ocv.a.b): $VERSION"
   exit 1
 fi
 

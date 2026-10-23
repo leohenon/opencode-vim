@@ -6,7 +6,7 @@ permissions:
 on:
   workflow_dispatch:
   push:
-    branches: [ocv]
+    branches: [ocv1]
     paths:
       - "bun.lock"
       - "package.json"
@@ -25,7 +25,7 @@ jobs:
   # Native runners required: bun install cross-compilation flags (--os/--cpu)
   # do not produce byte-identical node_modules as native installs.
   compute-hash:
-    if: github.event_name != 'push' || !contains(github.event.head_commit.message, '[skip nix-hashes]')
+    if: github.repository == 'leohenon/opencode-vim' && github.ref == 'refs/heads/ocv1' && (github.event_name != 'push' || !contains(github.event.head_commit.message, '[skip nix-hashes]'))
     strategy:
       fail-fast: false
       matrix:
@@ -62,7 +62,7 @@ jobs:
 
   update-hashes:
     needs: compute-hash
-    if: github.event_name != 'pull_request'
+    if: github.repository == 'leohenon/opencode-vim' && github.ref == 'refs/heads/ocv1'
     runs-on: ubuntu-24.04
 
     steps:

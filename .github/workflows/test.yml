@@ -3,34 +3,38 @@ name: test
 on:
   push:
     branches:
-      - dev
+      - ocv1
   pull_request:
+    branches: [ocv1]
   workflow_dispatch:
 
 concurrency:
-  # Keep every run on dev so cancelled checks do not pollute the default branch
+  # Keep every run on ocv1 so cancelled checks do not pollute maintenance branch
   # commit history. PRs and other branches still share a group and cancel stale runs.
-  group: ${{ case(github.ref == 'refs/heads/dev', format('{0}-{1}', github.workflow, github.run_id), format('{0}-{1}', github.workflow, github.event.pull_request.number || github.ref)) }}
+  group: ${{ case(github.ref == 'refs/heads/ocv1', format('{0}-{1}', github.workflow, github.run_id), format('{0}-{1}', github.workflow, github.event.pull_request.number || github.ref)) }}
   cancel-in-progress: true
 
 permissions:
   contents: read
-  checks: write
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   unit:
+    if: >-
+      github.repository == 'leohenon/opencode-vim' &&
+      ((github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'ocv1') ||
+       ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/ocv1'))
     name: unit (${{ matrix.settings.name }})
     strategy:
       fail-fast: false
       matrix:
         settings:
           - name: linux
-            host: blacksmith-4vcpu-ubuntu-2404
+            host: ubuntu-latest
           - name: windows
-            host: blacksmith-4vcpu-windows-2025
+            host: windows-2025
     runs-on: ${{ matrix.settings.host }}
     defaults:
       run:
@@ -48,6 +52,8 @@ jobs:
 
       - name: Setup Bun
         uses: ./.github/actions/setup-bun
+        with:
+          install-flags: --frozen-lockfile
 
       - name: Configure git identity
         run: |
@@ -80,15 +86,19 @@ jobs:
         run: bun run test:httpapi
 
   e2e:
+    if: >-
+      github.repository == 'leohenon/opencode-vim' &&
+      ((github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'ocv1') ||
+       ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/ocv1'))
     name: e2e (${{ matrix.settings.name }})
     strategy:
       fail-fast: false
       matrix:
         settings:
           - name: linux
-            host: blacksmith-4vcpu-ubuntu-2404
+            host: ubuntu-latest
           - name: windows
-            host: blacksmith-4vcpu-windows-2025
+            host: windows-2025
     runs-on: ${{ matrix.settings.host }}
     env:
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright-browsers
@@ -101,14 +111,17 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Setup Bun
+        uses: ./.github/actions/setup-bun
+        with:
+          install-flags: --frozen-lockfile
+
+      # The shared Bun action installs Node too, so apply this pin afterwards.
       - name: Setup Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           # Playwright 1.59 hangs while extracting Chromium with Node 24.16.
           node-version: "24.15"
-
-      - name: Setup Bun
-        uses: ./.github/actions/setup-bun
 
       - name: Read Playwright version
         id: playwright-version

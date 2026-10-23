@@ -1,17 +1,23 @@
-name: CI
+name: OCV V1 CI
 
 on:
   push:
-    branches: [ocv]
+    branches: [ocv1]
   pull_request:
-    branches: [ocv]
+    branches: [ocv1]
 
 jobs:
   test:
+    if: github.repository == 'leohenon/opencode-vim'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-bun
+        with:
+          install-flags: --frozen-lockfile
       - name: Run vim tests
         run: bun test ./test/cli/tui/vim-*.test.ts
         working-directory: packages/tui
+      - name: Check V1 release automation
+        run: bun test ./test/ocv-*.test.ts ./test/installation/installation.test.ts
+        working-directory: packages/opencode

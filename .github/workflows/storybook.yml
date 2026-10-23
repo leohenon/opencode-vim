@@ -2,7 +2,7 @@ name: storybook
 
 on:
   push:
-    branches: [dev]
+    branches: [ocv1]
     paths:
       - ".github/workflows/storybook.yml"
       - "package.json"
@@ -11,7 +11,7 @@ on:
       - "packages/ui/**"
       - "packages/session-ui/**"
   pull_request:
-    branches: [dev]
+    branches: [ocv1]
     paths:
       - ".github/workflows/storybook.yml"
       - "package.json"
@@ -25,16 +25,25 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   build:
+    if: >-
+      github.repository == 'leohenon/opencode-vim' &&
+      ((github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'ocv1') ||
+       ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/ocv1'))
     name: storybook build
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Setup Bun
         uses: ./.github/actions/setup-bun
+        with:
+          install-flags: --frozen-lockfile
 
       - name: Build Storybook
         run: bun --cwd packages/storybook build

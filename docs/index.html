@@ -556,7 +556,7 @@
                 <div class="command-inner">
                   <span class="prompt" aria-hidden="true">$</span
                   ><code id="install-command"
-                    >curl -fsSL https://raw.githubusercontent.com/leohenon/opencode-vim/ocv/install.sh | sh</code
+                    >curl -fsSL https://raw.githubusercontent.com/leohenon/opencode-vim/ocv1/install.sh | sh</code
                   >
                   <button class="copy" type="button" aria-label="Copy install command" title="Copy">
                     <svg viewBox="0 0 512 512" aria-hidden="true">
@@ -634,8 +634,8 @@
           <div class="wrap">
             <h2>Prefer a plugin?</h2>
             <p class="lede">
-              Vim mode is also available as a plugin for the official OpenCode. Motions, operators, text objects,
-              registers, and more, in the prompt only.
+              The prompt Vim mode is also available as a plugin for the official OpenCode — no fork required. Motions,
+              operators, text objects, registers, and more, in the prompt only.
             </p>
             <div class="install">
               <div class="panel-bar">
@@ -695,9 +695,9 @@
 
     <script>
       const installCommands = {
-        npm: "npm i -g @leohenon/ocv",
+        npm: "npm i -g @leohenon/ocv@latest",
         homebrew: "brew install leohenon/tap/ocv",
-        curl: "curl -fsSL https://raw.githubusercontent.com/leohenon/opencode-vim/ocv/install.sh | sh",
+        curl: "curl -fsSL https://raw.githubusercontent.com/leohenon/opencode-vim/ocv1/install.sh | sh",
       }
       const installCommand = document.querySelector("#install-command")
       const installButtons = document.querySelectorAll("[data-install]")

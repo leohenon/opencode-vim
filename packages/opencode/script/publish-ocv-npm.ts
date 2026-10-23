@@ -4,25 +4,59 @@ import { $ } from "bun"
 import fs from "fs"
 import path from "path"
 import { fileURLToPath } from "url"
+import semver from "semver"
 
 const file = fileURLToPath(import.meta.url)
 const root = path.resolve(path.dirname(file), "..")
 process.chdir(root)
 
 const version = process.env.OPENCODE_VERSION
-if (!version) {
-  throw new Error("OPENCODE_VERSION is required")
+if (!version || !/^1\.\d+\.\d+-ocv\.\d+\.\d+$/.test(version)) {
+  throw new Error("OPENCODE_VERSION must be an OCV V1 version")
 }
 
 const tag = process.env.OCV_NPM_TAG || "latest"
+if (tag !== "latest") throw new Error("V1 publishes only to the latest npm channel")
+const dryRun = process.argv.includes("--dry-run") || process.env.OCV_DRY_RUN === "true"
 const tries = 6
-const canPublish = process.env.CI === "true" || process.env.OCV_ALLOW_LOCAL_PUBLISH === "1"
+const canPublish = !dryRun && (process.env.CI === "true" || process.env.OCV_ALLOW_LOCAL_PUBLISH === "1")
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
-async function exists(name: string, version: string) {
-  const result = await $`npm view ${`${name}@${version}`} version --json`.nothrow()
-  return result.exitCode === 0
+async function lookup(name: string, selector: string) {
+  const result = await $`npm view ${`${name}@${selector}`} version --json`.nothrow()
+  const data: unknown = JSON.parse(result.stdout.toString().trim() || result.stderr.toString().trim())
+  if (result.exitCode !== 0) {
+    if (
+      typeof data === "object" &&
+      data !== null &&
+      "error" in data &&
+      typeof data.error === "object" &&
+      data.error !== null &&
+      "code" in data.error &&
+      data.error.code === "E404"
+    )
+      return undefined
+    throw new Error(`failed to look up ${name}@${selector}: ${result.stderr.toString()}\n${result.stdout.toString()}`)
+  }
+  if (
+    typeof data !== "string" ||
+    !/^1\.\d+\.\d+-ocv\.\d+\.\d+$/.test(data) ||
+    !semver.valid(data) ||
+    (selector !== "latest" && data !== selector)
+  )
+    throw new Error(`Invalid V1 registry version for ${name}@${selector}: ${JSON.stringify(data)}`)
+  return data
+}
+
+async function reconcileLatest(name: string, version: string) {
+  const latest = await lookup(name, "latest")
+  if (latest && semver.gt(latest, version)) {
+    console.log(`keep latest ${latest} (newer than ${version})`)
+    return
+  }
+  if (latest === version) return
+  await $`npm dist-tag add ${`${name}@${version}`} latest`
 }
 
 async function publish(dir: string, name: string, version: string) {
@@ -31,9 +65,15 @@ async function publish(dir: string, name: string, version: string) {
     return
   }
 
-  if (await exists(name, version)) {
+  if (await lookup(name, version)) {
     console.log(`skip ${name}@${version} (already published)`)
+    await reconcileLatest(name, version)
     return
+  }
+
+  const latest = await lookup(name, "latest")
+  if (latest && semver.gt(latest, version)) {
+    throw new Error(`Refusing to publish ${name}@${version}: latest ${latest} is newer`)
   }
 
   for (let i = 0; i < tries; i++) {
@@ -45,7 +85,9 @@ async function publish(dir: string, name: string, version: string) {
 
     const err = result.stderr.toString() + "\n" + result.stdout.toString()
     if (err.includes("cannot publish over the previously published versions") || err.includes("EPUBLISHCONFLICT")) {
+      if (!(await lookup(name, version))) throw new Error(`Publish conflict but ${name}@${version} is absent`)
       console.log(`skip ${name}@${version} (already published)`)
+      await reconcileLatest(name, version)
       return
     }
 

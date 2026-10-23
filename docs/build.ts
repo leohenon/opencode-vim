@@ -1,9 +1,9 @@
 #!/usr/bin/env bun
 
 const installCommands = {
-  npm: "npm i -g @leohenon/ocv",
+  npm: "npm i -g @leohenon/ocv@latest",
   homebrew: "brew install leohenon/tap/ocv",
-  curl: "curl -fsSL https://raw.githubusercontent.com/leohenon/opencode-vim/ocv/install.sh | sh",
+  curl: "curl -fsSL https://raw.githubusercontent.com/leohenon/opencode-vim/ocv1/install.sh | sh",
 }
 
 const html = `<!DOCTYPE html>
@@ -239,7 +239,7 @@ const html = `<!DOCTYPE html>
             </div>
             <div class="command-row">
               <div class="command-inner">
-                <span class="prompt" aria-hidden="true">$</span><code id="install-command">curl -fsSL https://raw.githubusercontent.com/leohenon/opencode-vim/ocv/install.sh | sh</code>
+                <span class="prompt" aria-hidden="true">$</span><code id="install-command">curl -fsSL https://raw.githubusercontent.com/leohenon/opencode-vim/ocv1/install.sh | sh</code>
                 <button class="copy" type="button" aria-label="Copy install command" title="Copy">
                   <svg viewBox="0 0 512 512" aria-hidden="true"><rect width="336" height="336" x="128" y="128" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-width="32" rx="57" ry="57"/><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="32" d="m383.5 128 .5-24a56.16 56.16 0 0 0-56-56H112a64.19 64.19 0 0 0-64 64v216a56.16 56.16 0 0 0 56 56h24"/></svg>
                 </button>

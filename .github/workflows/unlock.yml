@@ -19,6 +19,7 @@ permissions:
 
 jobs:
   unlock:
+    if: github.repository == 'anomalyco/opencode'
     runs-on: ubuntu-latest
     environment: ${{ inputs.stage }}
     steps:

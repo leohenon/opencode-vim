@@ -2,6 +2,12 @@
 
 This repository is the ocv fork of OpenCode. Treat most code as upstream; keep fork changes focused on Vim mode and copy mode.
 
+## Branches
+
+- `ocv1` maintains V1 and tracks upstream `v1`; never merge upstream `dev` here.
+- `ocv` is the default V2 branch and tracks upstream `dev`.
+- V1 publishes npm `latest` and Homebrew `ocv`; V2 uses npm `ocv-v2` and Homebrew `ocv-v2`.
+
 ## Priorities
 
 - Prefer stability, simplicity, and maintainability over broad rewrites.

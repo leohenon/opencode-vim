@@ -6,7 +6,6 @@ import { Effect, Layer, Stream } from "effect"
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { Installation } from "../../src/installation"
-import { InstallationChannel } from "@opencode-ai/core/installation/version"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { testEffect } from "../lib/effect"
 
@@ -68,35 +67,40 @@ function testLayer(
 
 describe("installation", () => {
   describe("latest", () => {
-    testEffect(testLayer(() => jsonResponse({ tag_name: "v1.2.3" }))).effect(
-      "reads release version from GitHub releases",
-      () =>
-        Effect.gen(function* () {
-          const result = yield* Installation.use.latest("unknown")
-          expect(result).toBe("1.2.3")
+    for (const method of ["curl", "unknown"] as const) {
+      testEffect(
+        testLayer((request) => {
+          expect(request.url).toBe(`https://registry.npmjs.org/${encodeURIComponent("@leohenon/ocv")}/latest`)
+          return jsonResponse({ version: "1.18.35-ocv.4.13" })
         }),
-    )
+      ).effect(`reads V1 npm latest for ${method}`, () =>
+        Effect.gen(function* () {
+          expect(yield* Installation.use.latest(method)).toBe("1.18.35-ocv.4.13")
+        }),
+      )
+    }
 
-    testEffect(testLayer(() => jsonResponse({ tag_name: "v4.0.0-beta.1" }))).effect(
-      "strips v prefix from GitHub release tag",
-      () =>
-        Effect.gen(function* () {
-          const result = yield* Installation.use.latest("curl")
-          expect(result).toBe("4.0.0-beta.1")
-        }),
-    )
+    for (const method of ["npm", "bun", "pnpm", "curl", "unknown"] as const) {
+      testEffect(testLayer(() => jsonResponse({ version: "2.0.0-ocv.4.13" }))).effect(
+        `rejects a misconfigured V2 registry response for ${method}`,
+        () =>
+          Effect.gen(function* () {
+            expect((yield* Effect.exit(Installation.use.latest(method)))._tag).toBe("Failure")
+          }),
+      )
+    }
 
     const npmCalls: string[] = []
     testEffect(
       testLayer((request) => {
         npmCalls.push(request.url)
-        return jsonResponse({ version: "1.5.0" })
+        return jsonResponse({ version: "1.5.0-ocv.4.13" })
       }),
     ).effect("reads npm versions via registry", () =>
       Effect.gen(function* () {
         const result = yield* Installation.use.latest("npm")
-        expect(result).toBe("1.5.0")
-        expect(npmCalls).toContain(`https://registry.npmjs.org/${encodeURIComponent("@leohenon/ocv")}/${InstallationChannel}`)
+        expect(result).toBe("1.5.0-ocv.4.13")
+        expect(npmCalls).toContain(`https://registry.npmjs.org/${encodeURIComponent("@leohenon/ocv")}/latest`)
       }),
     )
 
@@ -104,13 +108,13 @@ describe("installation", () => {
     testEffect(
       testLayer((request) => {
         bunCalls.push(request.url)
-        return jsonResponse({ version: "1.6.0" })
+        return jsonResponse({ version: "1.6.0-ocv.4.13" })
       }),
     ).effect("reads bun versions via registry", () =>
       Effect.gen(function* () {
         const result = yield* Installation.use.latest("bun")
-        expect(result).toBe("1.6.0")
-        expect(bunCalls).toContain(`https://registry.npmjs.org/${encodeURIComponent("@leohenon/ocv")}/${InstallationChannel}`)
+        expect(result).toBe("1.6.0-ocv.4.13")
+        expect(bunCalls).toContain(`https://registry.npmjs.org/${encodeURIComponent("@leohenon/ocv")}/latest`)
       }),
     )
 
@@ -118,13 +122,13 @@ describe("installation", () => {
     testEffect(
       testLayer((request) => {
         pnpmCalls.push(request.url)
-        return jsonResponse({ version: "1.7.0" })
+        return jsonResponse({ version: "1.7.0-ocv.4.13" })
       }),
     ).effect("reads pnpm versions via registry", () =>
       Effect.gen(function* () {
         const result = yield* Installation.use.latest("pnpm")
-        expect(result).toBe("1.7.0")
-        expect(pnpmCalls).toContain(`https://registry.npmjs.org/${encodeURIComponent("@leohenon/ocv")}/${InstallationChannel}`)
+        expect(result).toBe("1.7.0-ocv.4.13")
+        expect(pnpmCalls).toContain(`https://registry.npmjs.org/${encodeURIComponent("@leohenon/ocv")}/latest`)
       }),
     )
 
@@ -182,6 +186,27 @@ describe("installation", () => {
   })
 
   describe("upgrade", () => {
+    for (const method of ["npm", "pnpm", "bun", "curl", "brew", "scoop", "choco", "unknown"] as const) {
+      testEffect(
+        testLayer(
+          () => {
+            throw new Error("Must not fetch for an invalid target")
+          },
+          () => {
+            throw new Error("Must not spawn for an invalid target")
+          },
+        ),
+      ).effect(`rejects non-V1 upgrade targets before side effects for ${method}`, () =>
+        Effect.gen(function* () {
+          for (const target of ["2.0.0-ocv.4.13", "1.18.35", "latest", "1.18.35-ocv.4.13\n"]) {
+            const error = yield* Effect.flip(Installation.use.upgrade(method, target))
+            expect(error).toBeInstanceOf(Installation.UpgradeFailedError)
+            expect(error.stderr).toContain("Expected a V1 OCV version")
+          }
+        }),
+      )
+    }
+
     testEffect(
       testLayer(
         () => jsonResponse({}),
@@ -192,7 +217,7 @@ describe("installation", () => {
       ),
     ).effect("returns sanitized typed errors for failed package upgrades", () =>
       Effect.gen(function* () {
-        const error = yield* Effect.flip(Installation.use.upgrade("npm", "9.9.9"))
+        const error = yield* Effect.flip(Installation.use.upgrade("npm", "1.18.35-ocv.4.13"))
         expect(error).toBeInstanceOf(Installation.UpgradeFailedError)
         expect(error.stderr).toBe("Upgrade failed for npm (exit code 1).")
         expect(error.message).toBe(error.stderr)
@@ -203,7 +228,10 @@ describe("installation", () => {
 
     testEffect(
       testLayer(
-        () => new Response("install script with token=secret", { status: 200 }),
+        (request) => {
+          expect(request.url).toBe("https://raw.githubusercontent.com/leohenon/opencode-vim/ocv1/install.sh")
+          return new Response("install script with token=secret", { status: 200 })
+        },
         (cmd, args) => {
           if (cmd === "bash" && args[0] === "--version") return "GNU bash"
           if (cmd === "bash" || cmd === "sh") return { code: 1, stderr: "script output with token=secret" }
@@ -212,7 +240,7 @@ describe("installation", () => {
       ),
     ).effect("returns sanitized typed errors when the curl install script fails", () =>
       Effect.gen(function* () {
-        const error = yield* Effect.flip(Installation.use.upgrade("curl", "9.9.9"))
+        const error = yield* Effect.flip(Installation.use.upgrade("curl", "1.18.35-ocv.4.13"))
         expect(error).toBeInstanceOf(Installation.UpgradeFailedError)
         expect(error.stderr).toBe("Upgrade failed for curl (exit code 1).")
         expect(error.message).toBe(error.stderr)
@@ -233,7 +261,7 @@ describe("installation", () => {
       ),
     ).effect("falls back to sh when bash is unavailable during curl upgrade", () =>
       Effect.gen(function* () {
-        yield* Installation.use.upgrade("curl", "9.9.9")
+        yield* Installation.use.upgrade("curl", "1.18.35-ocv.4.13")
       }),
     )
   })

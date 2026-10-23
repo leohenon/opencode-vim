@@ -2,9 +2,9 @@ name: nix-eval
 
 on:
   push:
-    branches: [dev]
+    branches: [ocv1]
   pull_request:
-    branches: [dev]
+    branches: [ocv1]
   workflow_dispatch:
 
 concurrency:
@@ -16,7 +16,11 @@ permissions:
 
 jobs:
   nix-eval:
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    if: >-
+      github.repository == 'leohenon/opencode-vim' &&
+      ((github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'ocv1') ||
+       ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/ocv1'))
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - name: Checkout repository

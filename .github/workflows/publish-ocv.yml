@@ -1,10 +1,19 @@
-name: Release ocv
+name: Release OCV V1
 
 on:
   workflow_dispatch:
     inputs:
+      sha:
+        description: "Exact ocv1 source commit (defaults to dispatched commit)"
+        required: false
+        type: string
+      dry_run:
+        description: "Build and pack without pushing or publishing"
+        required: true
+        default: true
+        type: boolean
       version:
-        description: "Version (e.g. 1.2.20)"
+        description: "V1 version (for example 1.18.35-ocv.4.14)"
         required: true
         type: string
       force_nix_hash_refresh:
@@ -18,12 +27,19 @@ permissions:
   issues: write
   pull-requests: read
 
+env:
+  VERSION: ${{ inputs.version }}
+  OPENCODE_VERSION: ${{ inputs.version }}
+  OCV_NPM_TAG: latest
+  GH_TOKEN: ${{ github.token }}
+
 concurrency:
-  group: release-ocv-${{ github.ref }}
+  group: release-ocv-v1
   cancel-in-progress: false
 
 jobs:
   prepare:
+    if: github.repository == 'leohenon/opencode-vim' && github.ref == 'refs/heads/ocv1'
     runs-on: ubuntu-latest
     outputs:
       branch: ${{ steps.nix.outputs.branch }}
@@ -32,19 +48,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ inputs.sha || github.sha }}
           fetch-depth: 0
 
       - name: Validate version
         shell: bash
         run: |
-          VERSION="${{ inputs.version }}"
           TRACK=$(tr -d '[:space:]' < .github/ocv-track)
           if ! printf '%s' "$TRACK" | grep -Eq '^[0-9]+\.[0-9]+$'; then
             echo "Invalid ocv track: '$TRACK'"
             exit 1
           fi
-          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+-ocv\.[0-9]+\.[0-9]+$'; then
+          if ! printf '%s' "$VERSION" | grep -Eq '^1\.[0-9]+\.[0-9]+-ocv\.[0-9]+\.[0-9]+$'; then
             echo "Invalid ocv version: '$VERSION'"
             exit 1
           fi
@@ -52,6 +67,33 @@ jobs:
             echo "Version track '${VERSION##*-ocv.}' does not match pinned track '$TRACK'"
             exit 1
           fi
+
+          BASE=$(jq -r '.version' packages/opencode/package.json)
+          [ "$VERSION" = "$BASE-ocv.$TRACK" ] || { echo "Version must match the V1 source and track" >&2; exit 1; }
+          [ "$GITHUB_REF" = refs/heads/ocv1 ]
+          git merge-base --is-ancestor HEAD origin/ocv1
+          if git rev-parse -q --verify "refs/tags/v$VERSION^{commit}" >/dev/null; then
+            [ "$(git rev-parse "refs/tags/v$VERSION^{commit}")" = "$(git rev-parse HEAD)" ] || { echo "Release tag belongs to different source" >&2; exit 1; }
+          fi
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 --json tagName,isDraft,isPrerelease > "$RUNNER_TEMP/releases.json"
+          previous=$(jq -r '.[] | select(.isDraft == false and .isPrerelease == false) | .tagName | select(test("^v1\\.[0-9]+\\.[0-9]+-ocv\\.[0-9]+\\.[0-9]+$"))' "$RUNNER_TEMP/releases.json" | sort -V | tail -n 1)
+          if [ -n "$previous" ] && [ "$(printf '%s\n' "$previous" "v$VERSION" | sort -V | tail -n 1)" != "v$VERSION" ]; then
+            echo "Refusing a V1 release older than $previous; stable channels must not be downgraded" >&2
+            exit 1
+          fi
+          if jq -e --arg tag "v$VERSION" '.[] | select(.tagName == $tag and .isDraft)' "$RUNNER_TEMP/releases.json" >/dev/null; then
+            target=$(gh release view "v$VERSION" --json targetCommitish --jq '.targetCommitish')
+            [ "$target" = "$(git rev-parse HEAD)" ] || { echo "Draft belongs to different source" >&2; exit 1; }
+          fi
+
+      - name: Require distribution credentials before publishing
+        if: inputs.dry_run == false
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          [ -n "$HOMEBREW_TAP_TOKEN" ] || { echo "HOMEBREW_TAP_TOKEN is required" >&2; exit 1; }
+          [ -n "$NODE_AUTH_TOKEN" ] || { echo "NPM_TOKEN is required" >&2; exit 1; }
 
       - name: Detect Nix hash state
         id: nix
@@ -149,31 +191,31 @@ jobs:
           exit 1
 
       - name: Checkout repository
-        if: needs.prepare.outputs.branch != '' && needs.prepare.outputs.nix_hashes_current != 'true'
+        if: inputs.dry_run == false && needs.prepare.outputs.branch != '' && needs.prepare.outputs.nix_hashes_current != 'true'
         uses: actions/checkout@v4
         with:
           ref: ${{ needs.prepare.outputs.sha }}
           fetch-depth: 0
 
       - name: Configure git committer
-        if: needs.prepare.outputs.branch != '' && needs.prepare.outputs.nix_hashes_current != 'true'
+        if: inputs.dry_run == false && needs.prepare.outputs.branch != '' && needs.prepare.outputs.nix_hashes_current != 'true'
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
       - name: Download hash artifacts
-        if: needs.prepare.outputs.branch != '' && needs.prepare.outputs.nix_hashes_current != 'true'
+        if: inputs.dry_run == false && needs.prepare.outputs.branch != '' && needs.prepare.outputs.nix_hashes_current != 'true'
         uses: actions/download-artifact@v4
         with:
           path: hashes
           pattern: hash-*
 
       - name: Update hashes.json
-        if: needs.prepare.outputs.branch != '' && needs.prepare.outputs.nix_hashes_current != 'true'
+        if: inputs.dry_run == false && needs.prepare.outputs.branch != '' && needs.prepare.outputs.nix_hashes_current != 'true'
         run: nix/scripts/update-node-modules-hashes-json.sh
 
       - name: Commit Nix hashes
-        if: needs.prepare.outputs.branch != '' && needs.prepare.outputs.nix_hashes_current != 'true'
+        if: inputs.dry_run == false && needs.prepare.outputs.branch != '' && needs.prepare.outputs.nix_hashes_current != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -187,19 +229,10 @@ jobs:
             REMOTE_SHA="$(git rev-parse "origin/$BRANCH")"
 
             if [ "$REMOTE_SHA" != "$PREPARED_SHA" ]; then
-              # The branch advanced while we were computing hashes. It is only
-              # safe to continue if the hash inputs are unchanged (e.g. a
-              # concurrent nix/hashes.json commit); otherwise our hashes are
-              # stale and a fresh release must recompute them.
-              if ! git diff --quiet "$PREPARED_SHA" "$REMOTE_SHA" -- \
-                bun.lock \
-                package.json \
-                'packages/*/package.json' \
-                flake.lock \
-                nix/node_modules.nix \
-                nix/scripts \
-                patches; then
-                echo "::error::Hash inputs changed on $BRANCH while preparing; rerun the release"
+              # A hash-only update is safe to adopt; source changes invalidate
+              # the pinned release checkout even when dependencies are identical.
+              if git diff --name-only "$PREPARED_SHA" "$REMOTE_SHA" | grep -vx 'nix/hashes.json' | grep -q .; then
+                echo "::error::Release source changed on $BRANCH while preparing; rerun the release"
                 exit 1
               fi
               # Re-anchor onto the advanced branch before re-applying hashes.
@@ -235,7 +268,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [ "${{ needs.prepare.outputs.branch }}" = "" ] || [ "${{ needs.prepare.outputs.nix_hashes_current }}" = "true" ]; then
+          if [ "${{ inputs.dry_run }}" = "true" ] || [ "${{ needs.prepare.outputs.branch }}" = "" ] || [ "${{ needs.prepare.outputs.nix_hashes_current }}" = "true" ]; then
             echo "sha=${{ needs.prepare.outputs.sha }}" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -245,7 +278,8 @@ jobs:
   release:
     needs:
       - update-nix-hashes
-    runs-on: ubuntu-latest
+    # The build script ad-hoc signs Darwin binaries only on macOS.
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
         with:
@@ -253,24 +287,29 @@ jobs:
           fetch-depth: 0
 
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
 
       - name: Install dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
 
       - name: Add release contributors
-        if: github.ref_type == 'branch'
+        if: inputs.dry_run == false && github.ref_type == 'branch'
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          VERSION="${{ inputs.version }}"
-          PREV_TAG=$(git tag --list 'v*-ocv.*' --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+-ocv\.[0-9]+\.[0-9]+$' | grep -vx "v$VERSION" | head -n 1 || true)
+          PREV_TAG=$(git tag --merged HEAD --list 'v1*-ocv.*' --sort=-version:refname | grep -E '^v1\.[0-9]+\.[0-9]+-ocv\.[0-9]+\.[0-9]+$' | grep -vx "v$VERSION" | head -n 1 || true)
           if [ -z "$PREV_TAG" ]; then
             echo "No previous ocv release found, skipping contributor update"
             exit 0
           fi
 
-          bun script/update-contributors.ts --from "$PREV_TAG" --to HEAD --repo "$GITHUB_REPOSITORY" --base ocv
+          if git rev-parse -q --verify "refs/tags/v$VERSION^{commit}" >/dev/null; then
+            echo "Retrying exact release source; leaving contributors unchanged"
+            exit 0
+          fi
+          bun script/update-contributors.ts --from "$PREV_TAG" --to HEAD --repo "$GITHUB_REPOSITORY" --base ocv1
           if git diff --quiet README.md; then
             exit 0
           fi
@@ -278,6 +317,18 @@ jobs:
           git add README.md
           git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -m "chore(release): update contributors"
           git push origin HEAD:${{ github.ref_name }}
+
+      - name: Check V1 source
+        run: |
+          bun run typecheck
+          (cd packages/tui && bun test ./test/cli/tui/vim-*.test.ts)
+          (cd packages/opencode && bun test ./test/ocv-*.test.ts ./test/installation/installation.test.ts)
+
+      - name: Verify immutable release source
+        run: |
+          if git rev-parse -q --verify "refs/tags/v$VERSION^{commit}" >/dev/null; then
+            [ "$(git rev-parse "refs/tags/v$VERSION^{commit}")" = "$(git rev-parse HEAD)" ] || { echo "Refusing to rebuild an existing release from different source" >&2; exit 1; }
+          fi
 
       - name: Build CLI
         run: bun run packages/opencode/script/build.ts --single=false
@@ -320,18 +371,17 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          VERSION="${{ inputs.version }}"
           BASE="${VERSION%%-ocv.*}"
           PATCH="${VERSION##*-ocv.}"
           NOTES_FILE="$RUNNER_TEMP/ocv-release-notes.txt"
           PRS_FILE="$RUNNER_TEMP/ocv-release-prs.txt"
-          PREV_TAG=$(git tag --list 'v*-ocv.*' --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+-ocv\.[0-9]+\.[0-9]+$' | grep -vx "v$VERSION" | head -n 1 || true)
+          PREV_TAG=$(git tag --merged HEAD --list 'v1*-ocv.*' --sort=-version:refname | grep -E '^v1\.[0-9]+\.[0-9]+-ocv\.[0-9]+\.[0-9]+$' | grep -vx "v$VERSION" | head -n 1 || true)
           PREV_PATCH=""
 
           if [ -n "$PREV_TAG" ]; then
             PREV_PATCH="${PREV_TAG##*-ocv.}"
             git log --first-parent --reverse --format='%H' "$PREV_TAG"..HEAD | while read -r sha; do
-              gh api "repos/${{ github.repository }}/commits/$sha/pulls" -q '.[] | select(.base.ref == "ocv") | "\(.number)\t\(.title)\t\(.user.login // "")"' || true
+              gh api "repos/${{ github.repository }}/commits/$sha/pulls" -q '.[] | select(.base.ref == "ocv1" or .base.ref == "ocv") | "\(.number)\t\(.title)\t\(.user.login // "")"' || true
             done | awk -F '\t' '!seen[$1]++' | while IFS=$'\t' read -r num title author; do
               [ -n "$num" ] || continue
               if [ -n "$author" ]; then
@@ -357,17 +407,25 @@ jobs:
           echo "file=$NOTES_FILE" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
+        if: inputs.dry_run == false
         shell: bash
         run: |
-          VERSION="${{ inputs.version }}"
           DIST="packages/opencode/dist/release"
           NOTES_FILE="${{ steps.notes.outputs.file }}"
           if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "v$VERSION" --repo "$GITHUB_REPOSITORY" --clobber "$DIST"/*
-            gh release edit "v$VERSION" --repo "$GITHUB_REPOSITORY" --title "v$VERSION" --notes-file "$NOTES_FILE"
+            draft=$(gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft')
+            if [ "$draft" = true ]; then
+              gh release upload "v$VERSION" --repo "$GITHUB_REPOSITORY" --clobber "$DIST"/*
+              gh release edit "v$VERSION" --repo "$GITHUB_REPOSITORY" --title "v$VERSION" --notes-file "$NOTES_FILE" --draft=false --prerelease=false --latest=true
+            else
+              # Preserve public binaries and checksums on retries; model snapshots
+              # fetched during a rebuild need not match the original publication.
+              gh release download "v$VERSION" --repo "$GITHUB_REPOSITORY" --pattern 'ocv-*' --dir "$DIST" --clobber
+            fi
           else
             gh release create "v$VERSION" \
               --title "v$VERSION" \
+              --prerelease=false --latest=true \
               --notes-file "$NOTES_FILE" \
               --repo "$GITHUB_REPOSITORY" \
               --target "$(git rev-parse HEAD)" \
@@ -375,7 +433,6 @@ jobs:
           fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
 
       - name: Compute checksums
         id: sum
@@ -388,6 +445,7 @@ jobs:
           echo "linux_x64=$(shasum -a 256 "$DIST/ocv-linux-x64.tar.gz" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
 
       - name: Checkout tap
+        if: inputs.dry_run == false
         id: checkout_tap
         continue-on-error: true
         uses: actions/checkout@v4
@@ -398,21 +456,22 @@ jobs:
 
       - name: Update formula
         id: update_formula
-        if: steps.checkout_tap.outcome == 'success'
+        if: inputs.dry_run || steps.checkout_tap.outcome == 'success'
         continue-on-error: true
         shell: bash
         run: |
-          VERSION="${{ inputs.version }}"
           DARWIN_ARM64="${{ steps.sum.outputs.darwin_arm64 }}"
           DARWIN_X64="${{ steps.sum.outputs.darwin_x64 }}"
           LINUX_ARM64="${{ steps.sum.outputs.linux_arm64 }}"
           LINUX_X64="${{ steps.sum.outputs.linux_x64 }}"
+          mkdir -p tap/Formula
           cat > tap/Formula/ocv.rb <<EOF
           class Ocv < Formula
             desc "OpenCode with Vim keybindings - AI coding assistant for the terminal"
             homepage "https://github.com/leohenon/opencode-vim"
             version "${VERSION}"
             license "MIT"
+            conflicts_with "ocv-v2", because: "both install the ocv executable"
 
             on_macos do
               if Hardware::CPU.arm?
@@ -439,10 +498,12 @@ jobs:
             end
 
             test do
-              assert_match version.to_s, shell_output("\#{bin}/ocv --version", 2)
+              assert_match version.to_s, shell_output("\#{bin}/ocv --version")
             end
           end
           EOF
+          ruby -c tap/Formula/ocv.rb
+          cp tap/Formula/ocv.rb packages/opencode/dist/release/ocv.rb
 
       - name: Push formula
         id: push_formula
@@ -466,7 +527,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          NUMBERS=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 100 --search "Homebrew tap update failed in:title" --json number,title --jq '.[] | select(.title | test("^\\[ci\\]: Homebrew tap update failed for v[0-9]+\\.[0-9]+\\.[0-9]+-ocv\\.[0-9]+\\.[0-9]+$")) | .number')
+          NUMBERS=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 100 --search "Homebrew tap update failed in:title" --json number,title --jq ".[] | select(.title == \"[ci]: Homebrew tap update failed for v$VERSION\") | .number")
           if [ -z "$NUMBERS" ]; then
             echo "No open Homebrew failure issue found"
             exit 0
@@ -501,22 +562,23 @@ jobs:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
 
-      - name: Publish npm package
+      - name: Pack or publish V1 npm package
         id: npm_publish
         continue-on-error: true
         run: bun run packages/opencode/script/publish-ocv-npm.ts
         env:
           OPENCODE_VERSION: ${{ inputs.version }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          OCV_DRY_RUN: ${{ inputs.dry_run }}
 
       - name: Close npm failure issues
-        if: steps.npm_publish.outcome == 'success'
+        if: inputs.dry_run == false && steps.npm_publish.outcome == 'success'
         continue-on-error: true
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          NUMBERS=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 100 --search "npm publish failed in:title" --json number,title --jq '.[] | select(.title | test("^\\[ci\\]: npm publish failed for v[0-9]+\\.[0-9]+\\.[0-9]+-ocv\\.[0-9]+\\.[0-9]+$")) | .number')
+          NUMBERS=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 100 --search "npm publish failed in:title" --json number,title --jq ".[] | select(.title == \"[ci]: npm publish failed for v$VERSION\") | .number")
           if [ -z "$NUMBERS" ]; then
             echo "No open npm failure issue found"
             exit 0
@@ -527,7 +589,7 @@ jobs:
           done <<< "$NUMBERS"
 
       - name: Create npm failure issue
-        if: steps.npm_publish.outcome == 'failure'
+        if: inputs.dry_run == false && steps.npm_publish.outcome == 'failure'
         continue-on-error: true
         shell: bash
         env:
@@ -552,3 +614,13 @@ jobs:
         run: |
           echo "One or more release distribution steps failed"
           exit 1
+
+      - name: Upload dry-run artifacts
+        if: inputs.dry_run && steps.npm_publish.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ocv-v1-${{ inputs.version }}
+          path: |
+            packages/opencode/dist/release/*
+            packages/opencode/dist/npm/**/*.tgz
+          if-no-files-found: error

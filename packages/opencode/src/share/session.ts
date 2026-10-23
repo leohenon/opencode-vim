@@ -1,10 +1,7 @@
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { Session } from "@/session/session"
 import { SessionID } from "@/session/schema"
-import { Effect, Layer, Scope, Context } from "effect"
-import { Config } from "@/config/config"
-import { RuntimeFlags } from "@/effect/runtime-flags"
-import { ShareNext } from "./share-next"
+import { Effect, Layer, Context } from "effect"
 
 export interface Interface {
   readonly create: (input?: Session.CreateInput) => Effect.Effect<Session.Info>
@@ -17,32 +14,20 @@ export class Service extends Context.Service<Service, Interface>()("@opencode/Se
 const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
-    const cfg = yield* Config.Service
     const session = yield* Session.Service
-    const shareNext = yield* ShareNext.Service
-    const scope = yield* Scope.Scope
-    const flags = yield* RuntimeFlags.Service
 
-    const share = Effect.fn("SessionShare.share")(function* (sessionID: SessionID) {
-      const conf = yield* cfg.get()
-      if (conf.share === "disabled") throw new Error("Sharing is disabled in configuration")
-      const result = yield* shareNext.create(sessionID)
-      yield* session.setShare({ sessionID, share: { url: result.url } })
-      return result
+    // Session sharing was discontinued. The share endpoints stay for API compatibility: share fails and unshare only
+    // clears the local link.
+    const share = Effect.fn("SessionShare.share")(function* (_sessionID: SessionID) {
+      return yield* Effect.fail(new Error("Session sharing has been discontinued"))
     })
 
     const unshare = Effect.fn("SessionShare.unshare")(function* (sessionID: SessionID) {
-      yield* shareNext.remove(sessionID)
       yield* session.setShare({ sessionID, share: undefined })
     })
 
     const create = Effect.fn("SessionShare.create")(function* (input?: Session.CreateInput) {
-      const result = yield* session.create(input)
-      if (result.parentID) return result
-      const conf = yield* cfg.get()
-      if (!(flags.autoShare || conf.share === "auto")) return result
-      yield* share(result.id).pipe(Effect.ignore, Effect.forkIn(scope))
-      return result
+      return yield* session.create(input)
     })
 
     return Service.of({ create, share, unshare })
@@ -52,7 +37,7 @@ const layer = Layer.effect(
 export const node = LayerNode.make({
   service: Service,
   layer: layer,
-  deps: [Config.node, Session.node, ShareNext.node, RuntimeFlags.node],
+  deps: [Session.node],
 })
 
 export * as SessionShare from "./session"

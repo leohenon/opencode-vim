@@ -8,7 +8,7 @@ Keyboard-first OpenCode with Vim controls across the TUI, kept in sync with upst
 
 </div>
 
-This branch maintains **OCV V1** and tracks upstream `v1`. For V2, see [`ocv`](https://github.com/leohenon/opencode-vim/tree/ocv).
+> This branch maintains **ocv v1** and tracks upstream `v1`. For v2, see [`ocv`](https://github.com/leohenon/opencode-vim/tree/ocv).
 
 ## Installation
 

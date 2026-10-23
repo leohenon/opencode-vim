@@ -53,7 +53,7 @@ describe("plugin.openai.ws", () => {
         url: server.wsUrl,
         headers: {},
       }),
-    ).rejects.toThrow("Expected 101 status code")
+    ).rejects.toThrow("Unexpected server response: 401")
   })
 
   test("enforces websocket send idle timeout", async () => {

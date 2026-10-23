@@ -20,8 +20,6 @@ runs:
       shell: bash
       run: |
         V=$(node -p "require('./package.json').packageManager.split('@')[1]")
-        # Bun 1.4.2 includes the patched peer-variant fix in oven-sh/bun#33646.
-        if [ "$RUNNER_OS" = "Windows" ]; then V=1.4.2; fi
         echo "version=$V" >> "$GITHUB_OUTPUT"
         if [ "$RUNNER_ARCH" = "X64" ]; then
           case "$RUNNER_OS" in

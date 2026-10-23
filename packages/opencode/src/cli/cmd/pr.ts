@@ -43,13 +43,11 @@ export const PrCommand = effectCmd({
           "view",
           `${prNumber}`,
           "--json",
-          "headRepository,headRepositoryOwner,isCrossRepository,headRefName,body",
+          "headRepository,headRepositoryOwner,isCrossRepository,headRefName",
         ],
         { nothrow: true },
       ),
     )
-
-    let sessionId: string | undefined
 
     if (prInfoResult.code === 0 && prInfoResult.text.trim()) {
       const prInfo = JSON.parse(prInfoResult.text)
@@ -71,26 +69,6 @@ export const PrCommand = effectCmd({
           cwd: worktree,
         })
       }
-
-      if (prInfo?.body) {
-        const sessionMatch = prInfo.body.match(/https:\/\/opncd\.ai\/s\/([a-zA-Z0-9_-]+)/)
-        if (sessionMatch) {
-          const sessionUrl = sessionMatch[0]
-          UI.println(`Found opencode session: ${sessionUrl}`)
-          UI.println(`Importing session...`)
-
-          const importResult = yield* Effect.promise(() =>
-            Process.text(["opencode", "import", sessionUrl], { nothrow: true }),
-          )
-          if (importResult.code === 0) {
-            const sessionIdMatch = importResult.text.trim().match(/Imported session: ([a-zA-Z0-9_-]+)/)
-            if (sessionIdMatch) {
-              sessionId = sessionIdMatch[1]
-              UI.println(`Session imported: ${sessionId}`)
-            }
-          }
-        }
-      }
     }
 
     UI.println(`Successfully checked out PR #${prNumber} as branch '${localBranchName}'`)
@@ -98,10 +76,9 @@ export const PrCommand = effectCmd({
     UI.println("Starting opencode...")
     UI.println()
 
-    const opencodeArgs = sessionId ? ["-s", sessionId] : []
     const code = yield* Effect.promise(
       () =>
-        Process.spawn(["opencode", ...opencodeArgs], {
+        Process.spawn(["opencode"], {
           stdin: "inherit",
           stdout: "inherit",
           stderr: "inherit",

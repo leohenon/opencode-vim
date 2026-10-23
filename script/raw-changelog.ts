@@ -50,11 +50,16 @@ function ref(input: string) {
   return input
 }
 
+// OpenCode 2 releases share this repository, so only OpenCode 1 tags are candidates.
+export function latestV1(releases: Release[]) {
+  return releases.find((item) => !item.draft && /^v1\.\d+\.\d+$/.test(item.tag_name))?.tag_name.replace(/^v/, "")
+}
+
 async function latest() {
   const data = await $`gh api "/repos/${repo}/releases?per_page=100"`.json()
-  const release = (data as Release[]).find((item) => !item.draft)
-  if (!release) throw new Error("No releases found")
-  return release.tag_name.replace(/^v/, "")
+  const release = latestV1(data as Release[])
+  if (!release) throw new Error("No OpenCode 1 releases found")
+  return release
 }
 
 async function diff(base: string, head: string) {

@@ -65,25 +65,57 @@ export class UpgradeFailedError extends Schema.TaggedErrorClass<UpgradeFailedErr
   }
 }
 
-// Response schemas for external version APIs
+// Normal updates stay within the installed major; V2 is offered separately through upgradeMajor.
+export function isUpdate(current: string, latest: string) {
+  if (!semver.valid(latest)) return false
+  if (!semver.valid(current)) return semver.major(latest) === 1
+  return semver.major(latest) === semver.major(current) && semver.gt(latest, current)
+}
+
+// Every install method discovers V1 OCV releases from npm's latest tag, never the ocv-v2 tag.
 // Require true end-of-input: JavaScript's $ also accepts a trailing line break.
 const V1Version = Schema.String.check(Schema.isPattern(/^1\.\d+\.\d+-ocv\.\d+\.\d+(?![\s\S])/))
 const NpmPackage = Schema.Struct({ version: V1Version })
-const BrewFormula = Schema.Struct({ versions: Schema.Struct({ stable: Schema.String }) })
 const BrewInfoV2 = Schema.Struct({
   formulae: Schema.Array(Schema.Struct({ versions: Schema.Struct({ stable: Schema.String }) })),
 })
 const ChocoPackage = Schema.Struct({
   d: Schema.Struct({ results: Schema.Array(Schema.Struct({ Version: Schema.String })) }),
 })
-const ScoopManifest = Schema.Struct({ version: Schema.String })
 
 export interface Interface {
   readonly info: () => Effect.Effect<Info>
   readonly method: () => Effect.Effect<Method>
   readonly latest: (method?: Method) => Effect.Effect<string>
   readonly upgrade: (method: Method, target: string) => Effect.Effect<void, UpgradeFailedError>
+  readonly upgradeMajor: (method: Method) => Effect.Effect<void, UpgradeFailedError>
 }
+
+// Both majors own the same binary, so remove V1 first and restore it if installing V2 fails.
+const MAJOR_INSTALL: Partial<Record<Method, { remove: string[]; install: string[]; restore: string[] }>> = {
+  npm: {
+    remove: ["npm", "uninstall", "-g", npm],
+    install: ["npm", "install", "-g", `${npm}@ocv-v2`],
+    restore: ["npm", "install", "-g", `${npm}@${InstallationVersion}`],
+  },
+  pnpm: {
+    remove: ["pnpm", "remove", "-g", npm],
+    install: ["pnpm", "add", "-g", `--allow-build=${npm}`, `${npm}@ocv-v2`],
+    restore: ["pnpm", "add", "-g", `${npm}@${InstallationVersion}`],
+  },
+  bun: {
+    remove: ["bun", "remove", "-g", npm],
+    install: ["bun", "install", "-g", "--trust", `${npm}@ocv-v2`],
+    restore: ["bun", "install", "-g", `${npm}@${InstallationVersion}`],
+  },
+  yarn: {
+    remove: ["yarn", "global", "remove", npm],
+    install: ["yarn", "global", "add", `${npm}@ocv-v2`],
+    restore: ["yarn", "global", "add", `${npm}@${InstallationVersion}`],
+  },
+}
+
+export const MAJOR_INSTRUCTIONS = "https://github.com/leohenon/opencode-vim/tree/ocv#installation"
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Installation") {}
 
@@ -172,6 +204,72 @@ const layer: Layer.Layer<Service, never, HttpClient.HttpClient | AppProcess.Serv
       Effect.mapError(() => new UpgradeFailedError({ stderr: upgradeFailure("curl") })),
     )
 
+    const majorUpgrade = Effect.fnUntraced(function* (m: Method) {
+      if (m === "curl") {
+        const response = yield* httpOk
+          .execute(HttpClientRequest.get("https://raw.githubusercontent.com/leohenon/opencode-vim/ocv/install.sh"))
+          .pipe(Effect.mapError(() => new UpgradeFailedError({ stderr: upgradeFailure("curl") })))
+        const body = yield* response.text.pipe(
+          Effect.mapError(() => new UpgradeFailedError({ stderr: upgradeFailure("curl") })),
+        )
+        // Keep the current binary location without pinning the V2 installer to a V1 version.
+        return yield* run([yield* upgradeScriptShell(), "-c", body], {
+          env: { OCV_VERSION: "", OCV_INSTALL_DIR: path.dirname(process.execPath) },
+        })
+      }
+
+      if (m === "brew") {
+        const formula = yield* getBrewFormula()
+        const env = { HOMEBREW_NO_AUTO_UPDATE: "1" }
+        const removed = yield* run(["brew", "uninstall", formula], { env })
+        if (removed.code !== 0) return removed
+        const installed = yield* run(["brew", "install", "leohenon/tap/ocv-v2"], { env })
+        if (installed.code !== 0) yield* run(["brew", "install", formula], { env })
+        return installed
+      }
+
+      const steps = MAJOR_INSTALL[m]
+      if (!steps)
+        return yield* new UpgradeFailedError({
+          stderr: `OCV V2 can't be installed automatically with ${m}. See ${MAJOR_INSTRUCTIONS}`,
+        })
+      const removed = yield* run(steps.remove)
+      if (removed.code !== 0) return removed
+      const installed = yield* run(steps.install)
+      if (installed.code !== 0) yield* run(steps.restore)
+      return installed
+    })
+
+    const npmLatest = Effect.fnUntraced(function* () {
+      const response = yield* httpOk.execute(
+        HttpClientRequest.get(`${yield* NpmConfig.registry(process.cwd())}/${encodeURIComponent(npm)}/latest`).pipe(
+          HttpClientRequest.acceptJson,
+        ),
+      )
+      const data = yield* HttpClientResponse.schemaBodyJson(NpmPackage)(response)
+      return data.version
+    })
+
+    // Chocolatey can only install versions its moderated community feed has published.
+    const chocoHas = Effect.fnUntraced(function* (version: string) {
+      const response = yield* httpOk.execute(
+        HttpClientRequest.get(
+          `https://community.chocolatey.org/api/v2/Packages?$filter=Id%20eq%20%27opencode%27%20and%20Version%20eq%20%27${encodeURIComponent(version)}%27&$select=Version`,
+        ).pipe(HttpClientRequest.setHeaders({ Accept: "application/json;odata=verbose" })),
+      )
+      const data = yield* HttpClientResponse.schemaBodyJson(ChocoPackage)(response)
+      return data.d.results.length > 0
+    })
+
+    const tapVersion = Effect.fnUntraced(
+      function* (formula: string) {
+        const infoJson = yield* text(["brew", "info", "--json=v2", formula])
+        const info = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(BrewInfoV2))(infoJson)
+        return info.formulae[0].versions.stable
+      },
+      Effect.orElseSucceed(() => undefined),
+    )
+
     const result: Interface = {
       info: Effect.fn("Installation.info")(function* () {
         return {
@@ -207,57 +305,20 @@ const layer: Layer.Layer<Service, never, HttpClient.HttpClient | AppProcess.Serv
           const output = yield* check.command()
           const installedName =
             check.name === "brew" ? "ocv" : check.name === "choco" || check.name === "scoop" ? "opencode" : npm
-          if (output.includes(installedName)) {
-            return check.name
-          }
+          if (output.includes(installedName)) return check.name
         }
 
         return "unknown" as Method
       }),
+      // Report the installed version when this method cannot deliver a newer V1 release.
       latest: Effect.fn("Installation.latest")(function* (installMethod?: Method) {
-        const detectedMethod = installMethod || (yield* result.method())
-
-        if (detectedMethod === "brew") {
-          const formula = yield* getBrewFormula()
-          if (formula.includes("/")) {
-            const infoJson = yield* text(["brew", "info", "--json=v2", formula])
-            const info = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(BrewInfoV2))(infoJson)
-            return info.formulae[0].versions.stable
-          }
-          const response = yield* httpOk.execute(
-            HttpClientRequest.get("https://formulae.brew.sh/api/formula/ocv.json").pipe(HttpClientRequest.acceptJson),
-          )
-          const data = yield* HttpClientResponse.schemaBodyJson(BrewFormula)(response)
-          return data.versions.stable
-        }
-
-        if (detectedMethod === "choco") {
-          const response = yield* httpOk.execute(
-            HttpClientRequest.get(
-              "https://community.chocolatey.org/api/v2/Packages?$filter=Id%20eq%20%27opencode%27%20and%20IsLatestVersion&$select=Version",
-            ).pipe(HttpClientRequest.setHeaders({ Accept: "application/json;odata=verbose" })),
-          )
-          const data = yield* HttpClientResponse.schemaBodyJson(ChocoPackage)(response)
-          return data.d.results[0].Version
-        }
-
-        if (detectedMethod === "scoop") {
-          const response = yield* httpOk.execute(
-            HttpClientRequest.get(
-              "https://raw.githubusercontent.com/ScoopInstaller/Main/master/bucket/opencode.json",
-            ).pipe(HttpClientRequest.setHeaders({ Accept: "application/json" })),
-          )
-          const data = yield* HttpClientResponse.schemaBodyJson(ScoopManifest)(response)
-          return data.version
-        }
-
-        const response = yield* httpOk.execute(
-          HttpClientRequest.get(`${yield* NpmConfig.registry(process.cwd())}/${encodeURIComponent(npm)}/latest`).pipe(
-            HttpClientRequest.acceptJson,
-          ),
-        )
-        const data = yield* HttpClientResponse.schemaBodyJson(NpmPackage)(response)
-        return data.version
+        const method = installMethod || (yield* result.method())
+        return yield* Effect.gen(function* () {
+          const found = yield* npmLatest()
+          if (!isUpdate(InstallationVersion, found)) return InstallationVersion
+          if (method === "choco" && !(yield* chocoHas(found))) return InstallationVersion
+          return found
+        }).pipe(Effect.timeout("10 seconds"))
       }, Effect.orDie),
       upgrade: Effect.fn("Installation.upgrade")(function* (m: Method, target: string) {
         if (Option.isNone(Schema.decodeUnknownOption(V1Version)(target))) {
@@ -276,6 +337,9 @@ const layer: Layer.Layer<Service, never, HttpClient.HttpClient | AppProcess.Serv
             break
           case "bun":
             upgradeResult = yield* run(["bun", "install", "-g", `${npm}@${target}`])
+            break
+          case "yarn":
+            upgradeResult = yield* run(["yarn", "global", "add", `${npm}@${target}`])
             break
           case "brew": {
             const formula = yield* getBrewFormula()
@@ -296,6 +360,12 @@ const layer: Layer.Layer<Service, never, HttpClient.HttpClient | AppProcess.Serv
                 }
               }
             }
+            // The tap may lag npm, so validate availability before running brew upgrade.
+            const available = yield* tapVersion(formula)
+            if (!available || semver.major(available) !== semver.major(target) || semver.lt(available, target))
+              return yield* new UpgradeFailedError({
+                stderr: `Homebrew can't install OCV ${target} yet: ${formula} is at ${available ?? "an unknown version"}. Try again in a few minutes.`,
+              })
             upgradeResult = yield* run(["brew", "upgrade", formula], { env })
             break
           }
@@ -319,6 +389,11 @@ const layer: Layer.Layer<Service, never, HttpClient.HttpClient | AppProcess.Serv
         })
         yield* text([process.execPath, "--version"])
       }),
+      upgradeMajor: Effect.fn("Installation.upgradeMajor")(function* (m: Method) {
+        const outcome = yield* majorUpgrade(m)
+        if (outcome.code !== 0) return yield* new UpgradeFailedError({ stderr: upgradeFailure(m, outcome) })
+        yield* Effect.logInfo("upgraded major", { method: m, stdout: outcome.stdout, stderr: outcome.stderr })
+      }),
     }
 
     return Service.of(result)
@@ -332,5 +407,7 @@ const { runPromise } = makeRuntime(Service, AppNodeBuilder.build(node))
 export const latest = (...args: Parameters<Interface["latest"]>) => runPromise((s) => s.latest(...args))
 export const method = () => runPromise((s) => s.method())
 export const upgrade = (...args: Parameters<Interface["upgrade"]>) => runPromise((s) => s.upgrade(...args))
+export const upgradeMajor = (...args: Parameters<Interface["upgradeMajor"]>) =>
+  runPromise((s) => s.upgradeMajor(...args))
 
 export * as Installation from "."

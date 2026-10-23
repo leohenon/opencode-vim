@@ -2,9 +2,9 @@ import { ServerAuth } from "../auth"
 import { UnauthorizedError } from "@opencode-ai/protocol/errors"
 import { Authorization } from "@opencode-ai/protocol/middleware/authorization"
 export { Authorization } from "@opencode-ai/protocol/middleware/authorization"
-import { hasPtyConnectTicketURL } from "@opencode-ai/protocol/groups/pty"
+import { PTY_CONNECT_PATH, PTY_CONNECT_TICKET_QUERY } from "@opencode-ai/protocol/groups/pty"
 import { Effect, Encoding, Layer, Redacted } from "effect"
-import { HttpEffect, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
+import { HttpEffect, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 
 const AUTH_TOKEN_QUERY = "auth_token"
 const WWW_AUTHENTICATE = 'Basic realm="Secure Area"'
@@ -43,9 +43,13 @@ export const authorizationLayer = Layer.effect(
     return Authorization.of((effect) =>
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest
+        const route = yield* HttpRouter.RouteContext
         // Browsers cannot set headers on WebSocket upgrades, so a ticketed PTY connect skips
-        // credential checks here; the connect handler consumes and validates the ticket.
-        if (hasPtyConnectTicketURL(new URL(request.url, "http://localhost"))) return yield* effect
+        // credential checks here; the connect handler consumes and validates the ticket. Use the
+        // route selected by Effect so authorization and dispatch cannot disagree about the request path.
+        const url = new URL(request.url, "http://localhost")
+        if (route.route.path === PTY_CONNECT_PATH && !!url.searchParams.get(PTY_CONNECT_TICKET_QUERY))
+          return yield* effect
         const credential = yield* credentialFromRequest(request)
         if (ServerAuth.authorized(credential, config)) return yield* effect
         yield* HttpEffect.appendPreResponseHandler((_request, response) =>

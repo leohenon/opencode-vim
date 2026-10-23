@@ -6,7 +6,7 @@ import { InstallationVersion } from "@opencode-ai/core/installation/version"
 
 export const UpgradeCommand = {
   command: "upgrade [target]",
-  describe: "upgrade opencode to the latest or a specific version",
+  describe: "upgrade ocv to the latest or a specific version",
   builder: (yargs: Argv) => {
     return yargs
       .positional("target", {
@@ -19,8 +19,12 @@ export const UpgradeCommand = {
         type: "string",
         choices: ["curl", "npm", "pnpm", "bun", "brew", "choco", "scoop"],
       })
+      .option("major", {
+        describe: "upgrade to OCV V2 beta and remove OCV V1",
+        type: "boolean",
+      })
   },
-  handler: async (args: { target?: string; method?: string }) => {
+  handler: async (args: { target?: string; method?: string; major?: boolean }) => {
     UI.empty()
     UI.println(UI.logo("  "))
     UI.empty()
@@ -28,7 +32,7 @@ export const UpgradeCommand = {
     const detectedMethod = await Installation.method()
     const method = (args.method as Installation.Method) ?? detectedMethod
     if (method === "unknown") {
-      prompts.log.error(`opencode is installed to ${process.execPath} and may be managed by a package manager`)
+      prompts.log.error(`ocv is installed to ${process.execPath} and may be managed by a package manager`)
       const install = await prompts.select({
         message: "Install anyways?",
         options: [
@@ -43,10 +47,36 @@ export const UpgradeCommand = {
       }
     }
     prompts.log.info("Using method: " + method)
-    const target = args.target ? args.target.replace(/^v/, "") : await Installation.latest()
+
+    if (args.major) {
+      prompts.log.info(`From ${InstallationVersion} → OCV V2 beta`)
+      const spinner = prompts.spinner()
+      spinner.start("Installing OCV V2 beta...")
+      const err = await Installation.upgradeMajor(method).catch((err) => err)
+      if (err) {
+        spinner.stop("Upgrade failed", 1)
+        if (err instanceof Error) prompts.log.error(err.message)
+        prompts.log.info(`To install OCV V2 beta manually, see ${Installation.MAJOR_INSTRUCTIONS}`)
+        prompts.outro("Done")
+        return
+      }
+      spinner.stop("OCV V2 beta installed")
+      prompts.outro("Done")
+      return
+    }
+
+    const target = args.target
+      ? args.target.replace(/^v/, "")
+      : await Installation.latest(method).catch(() => undefined)
+    if (!target) {
+      prompts.log.error("Couldn't check for updates")
+      prompts.outro("Done")
+      return
+    }
 
     if (InstallationVersion === target) {
-      prompts.log.warn(`opencode upgrade skipped: ${target} is already installed`)
+      prompts.log.warn(`ocv upgrade skipped: ${target} is already installed`)
+      prompts.log.info("OCV V2 beta is available. Upgrade with `ocv upgrade --major`")
       prompts.outro("Done")
       return
     }
@@ -69,6 +99,7 @@ export const UpgradeCommand = {
       return
     }
     spinner.stop("Upgrade complete")
+    prompts.log.info("OCV V2 beta is available. Upgrade with `ocv upgrade --major`")
     prompts.outro("Done")
   },
 }

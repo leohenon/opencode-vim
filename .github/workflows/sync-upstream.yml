@@ -73,7 +73,7 @@ jobs:
           import json
           import sys
 
-          systems = {"x86_64-linux", "aarch64-linux", "aarch64-darwin", "x86_64-darwin"}
+          systems = {"x86_64-linux", "aarch64-linux", "aarch64-darwin"}
           for path in sys.argv[1:]:
               with open(path) as f:
                   data = json.load(f)

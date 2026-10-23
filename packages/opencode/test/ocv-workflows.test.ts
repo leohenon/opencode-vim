@@ -119,6 +119,29 @@ describe("V1 workflow isolation", () => {
     expect(step(publish, "Upload dry-run artifacts").if).toContain("inputs.dry_run")
   })
 
+  test("release uses the source Bun pin and does not trust upstream-merge Nix hashes", () => {
+    expect(
+      Object.values(publish.jobs)
+        .flatMap((job) => job.steps ?? [])
+        .some((item) => item.uses === "./.github/actions/setup-bun"),
+    ).toBe(true)
+    expect(step(publish, "Detect Nix hash state").run).toContain("git log --first-parent --no-merges")
+    expect(step(publish, "Detect Nix hash state").run).toContain("nix/hashes.json")
+  })
+
+  test("Nix automation follows the three systems supported by the upstream V1 flake", async () => {
+    for (const file of ["publish-ocv.yml", "nix-hashes.yml", "nix-eval.yml"]) {
+      const text = await Bun.file(path.join(root, ".github/workflows", file)).text()
+      expect(text).not.toContain("x86_64-darwin")
+      for (const system of ["x86_64-linux", "aarch64-linux", "aarch64-darwin"]) expect(text).toContain(system)
+    }
+    expect(Object.keys((await Bun.file(path.join(root, "nix/hashes.json")).json()).nodeModules).sort()).toEqual([
+      "aarch64-darwin",
+      "aarch64-linux",
+      "x86_64-linux",
+    ])
+  })
+
   test("V1 Homebrew never stages or edits the V2 formula", () => {
     expect(step(publish, "Update formula").run).toContain("tap/Formula/ocv.rb")
     expect(step(publish, "Update formula").run).toContain('conflicts_with "ocv-v2"')

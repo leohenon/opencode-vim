@@ -7,7 +7,7 @@ MISSING_MODE="${3:-error}"
 
 [ -f "$HASH_FILE" ] || echo '{"nodeModules":{}}' > "$HASH_FILE"
 
-for SYSTEM in x86_64-linux aarch64-linux x86_64-darwin aarch64-darwin; do
+for SYSTEM in x86_64-linux aarch64-linux aarch64-darwin; do
   FILE="$HASH_DIR/hash-${SYSTEM}/hash.txt"
   if [ -f "$FILE" ]; then
     HASH="$(tr -d '[:space:]' < "$FILE")"

@@ -10,6 +10,17 @@ const InterleavedField = Schema.Union([
   Schema.String,
 ])
 
+// models.dev's `reasoning_options`: OpenCode builds the model's reasoning variants from them.
+const ReasoningOption = Schema.Union([
+  Schema.Struct({ type: Schema.Literal("effort"), values: Schema.Array(Schema.NullOr(Schema.String)) }),
+  Schema.Struct({ type: Schema.Literal("toggle") }),
+  Schema.Struct({
+    type: Schema.Literal("budget_tokens"),
+    min: Schema.optional(Schema.Finite),
+    max: Schema.optional(Schema.Finite),
+  }),
+])
+
 export const Model = Schema.Struct({
   id: Schema.optional(Schema.String),
   name: Schema.optional(Schema.String),
@@ -17,6 +28,11 @@ export const Model = Schema.Struct({
   release_date: Schema.optional(Schema.String),
   attachment: Schema.optional(Schema.Boolean),
   reasoning: Schema.optional(Schema.Boolean),
+  reasoning_options: Schema.optional(
+    Schema.Array(ReasoningOption).annotate({
+      description: "Reasoning controls the model accepts, used to build its variants",
+    }),
+  ),
   temperature: Schema.optional(Schema.Boolean),
   tool_call: Schema.optional(Schema.Boolean),
   interleaved: Schema.optional(

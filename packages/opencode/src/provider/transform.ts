@@ -1714,7 +1714,10 @@ export function schema(model: Provider.Model, schema: JSONSchema7): JSONSchema7 
   return schema
 }
 
-export function reasoningVariants(model: ModelsDev.Model, target: Provider.Model): Provider.Model["variants"] {
+export function reasoningVariants(
+  model: Pick<ModelsDev.Model, "reasoning_options">,
+  target: Provider.Model,
+): Provider.Model["variants"] {
   const options = model.reasoning_options
   if (options === undefined) return
   if (options.length === 0) return {}

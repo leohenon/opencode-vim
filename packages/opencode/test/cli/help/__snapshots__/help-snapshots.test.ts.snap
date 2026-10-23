@@ -85,7 +85,6 @@ Options:
   -c, --continue     continue the last session                                             [boolean]
   -s, --session      session id to continue                                                 [string]
       --fork         fork the session before continuing (requires --continue or --session) [boolean]
-      --share        share the session                                                     [boolean]
   -m, --model        model to use in the format of provider/model                           [string]
       --agent        agent to use                                                           [string]
       --format       format: default (formatted) or json (raw JSON events)
@@ -173,7 +172,7 @@ Options:
 exports[`opencode CLI help-text snapshots every documented command emits stable help text: opencode upgrade --help 1`] = `
 "ocv upgrade [target]
 
-upgrade opencode to the latest or a specific version
+upgrade ocv to the latest or a specific version
 
 Positionals:
   target  version to upgrade to, for ex '0.1.48' or 'v0.1.48'                               [string]
@@ -185,7 +184,8 @@ Options:
       --log-level   log level                   [string] [choices: "DEBUG", "INFO", "WARN", "ERROR"]
       --pure        run without external plugins                                           [boolean]
   -m, --method      installation method to use
-                          [string] [choices: "curl", "npm", "pnpm", "bun", "brew", "choco", "scoop"]"
+                          [string] [choices: "curl", "npm", "pnpm", "bun", "brew", "choco", "scoop"]
+      --major       upgrade to OCV V2 beta and remove OCV V1                               [boolean]"
 `;
 
 exports[`opencode CLI help-text snapshots every documented command emits stable help text: opencode uninstall --help 1`] = `
@@ -301,10 +301,10 @@ Options:
 exports[`opencode CLI help-text snapshots every documented command emits stable help text: opencode import --help 1`] = `
 "ocv import <file>
 
-import session data from JSON file or URL
+import session data from JSON file
 
 Positionals:
-  file  path to JSON file or share URL                                           [string] [required]
+  file  path to JSON file                                                        [string] [required]
 
 Options:
   -h, --help        show help                                                              [boolean]

@@ -14,7 +14,7 @@ inputs:
     required: false
 
   share:
-    description: "Share the opencode session (defaults to true for public repos)"
+    description: "Deprecated and ignored: session sharing was discontinued"
     required: false
 
   prompt:
@@ -71,7 +71,6 @@ runs:
       env:
         MODEL: ${{ inputs.model }}
         AGENT: ${{ inputs.agent }}
-        SHARE: ${{ inputs.share }}
         PROMPT: ${{ inputs.prompt }}
         USE_GITHUB_TOKEN: ${{ inputs.use_github_token }}
         MENTIONS: ${{ inputs.mentions }}

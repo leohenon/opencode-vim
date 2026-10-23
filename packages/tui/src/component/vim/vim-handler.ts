@@ -1831,6 +1831,12 @@ export function createVimHandler(input: {
       return true
     }
 
+    if (isCountInput(event, key)) {
+      input.state.appendCountDigit(key)
+      event.preventDefault()
+      return true
+    }
+
     if (input.state.pending() === "" && isShifted(event, "y") && !hasModifier(event)) {
       if (input.copyIsVisual?.()) {
         input.copyYank?.()
@@ -1993,14 +1999,14 @@ export function createVimHandler(input: {
 
     if (pending === "" && key === "n" && !event.shift) {
       clearCopyPending()
-      input.copySearchNext?.()
+      countedMotion(() => input.copySearchNext?.())
       event.preventDefault()
       return true
     }
 
     if (pending === "" && isShifted(event, "n")) {
       clearCopyPending()
-      input.copySearchPrevious?.()
+      countedMotion(() => input.copySearchPrevious?.())
       event.preventDefault()
       return true
     }
@@ -2051,8 +2057,12 @@ export function createVimHandler(input: {
         const forward = pending === "f" || pending === "t"
         const till = pending === "t" || pending === "T"
         const text = input.copyText?.() ?? ""
-        const pos = input.copyCol?.() ?? 0
-        const col = findCharInLine(text, pos, key, forward, till)
+        let col = input.copyCol?.() ?? 0
+        let repeat = false
+        repeatCount(takeCount(), () => {
+          col = findCharInLine(text, col, key, forward, till, repeat)
+          repeat = true
+        })
         input.state.setLastFind({ char: key, forward, till })
         input.state.clearPending()
         copyMotion(col)
@@ -2074,25 +2084,25 @@ export function createVimHandler(input: {
     }
 
     if (key === "j" || key === "down") {
-      input.copy?.("down")
+      countedMotion(() => input.copy?.("down"))
       event.preventDefault()
       return true
     }
 
     if (key === "k" || key === "up") {
-      input.copy?.("up")
+      countedMotion(() => input.copy?.("up"))
       event.preventDefault()
       return true
     }
 
     if (key === "h" || key === "left") {
-      input.copy?.("left")
+      countedMotion(() => input.copy?.("left"))
       event.preventDefault()
       return true
     }
 
     if (key === "l" || key === "right") {
-      input.copy?.("right")
+      countedMotion(() => input.copy?.("right"))
       event.preventDefault()
       return true
     }
@@ -2152,101 +2162,95 @@ export function createVimHandler(input: {
 
     // word motions
     if (key === "w" && !event.shift) {
-      if (input.copyWordNext?.(false)) {
-        event.preventDefault()
-        return true
-      }
-      const text = input.copyText?.() ?? ""
-      const col = nextWordStart(text, pos, false)
-      copyMotion(Math.min(col, Math.max(0, text.length - 1)))
+      countedMotion(() => {
+        if (input.copyWordNext?.(false)) return
+        const text = input.copyText?.() ?? ""
+        const col = nextWordStart(text, input.copyCol?.() ?? 0, false)
+        copyMotion(Math.min(col, Math.max(0, text.length - 1)))
+      })
       event.preventDefault()
       return true
     }
 
     if (key === "b" && !event.shift) {
-      if (input.copyWordPrev?.(false)) {
-        event.preventDefault()
-        return true
-      }
-      const text = input.copyText?.() ?? ""
-      copyMotion(prevWordStart(text, pos, false))
+      countedMotion(() => {
+        if (input.copyWordPrev?.(false)) return
+        const text = input.copyText?.() ?? ""
+        copyMotion(prevWordStart(text, input.copyCol?.() ?? 0, false))
+      })
       event.preventDefault()
       return true
     }
 
     if (key === "e" && !event.shift) {
-      if (input.copyWordEnd?.(false)) {
-        event.preventDefault()
-        return true
-      }
-      const text = input.copyText?.() ?? ""
-      copyMotion(wordEnd(text, pos, false))
+      countedMotion(() => {
+        if (input.copyWordEnd?.(false)) return
+        const text = input.copyText?.() ?? ""
+        copyMotion(wordEnd(text, input.copyCol?.() ?? 0, false))
+      })
       event.preventDefault()
       return true
     }
 
     if (isShifted(event, "w")) {
-      if (input.copyWordNext?.(true)) {
-        event.preventDefault()
-        return true
-      }
-      const text = input.copyText?.() ?? ""
-      const col = nextWordStart(text, pos, true)
-      copyMotion(Math.min(col, Math.max(0, text.length - 1)))
+      countedMotion(() => {
+        if (input.copyWordNext?.(true)) return
+        const text = input.copyText?.() ?? ""
+        const col = nextWordStart(text, input.copyCol?.() ?? 0, true)
+        copyMotion(Math.min(col, Math.max(0, text.length - 1)))
+      })
       event.preventDefault()
       return true
     }
 
     if (isShifted(event, "b")) {
-      if (input.copyWordPrev?.(true)) {
-        event.preventDefault()
-        return true
-      }
-      const text = input.copyText?.() ?? ""
-      copyMotion(prevWordStart(text, pos, true))
+      countedMotion(() => {
+        if (input.copyWordPrev?.(true)) return
+        const text = input.copyText?.() ?? ""
+        copyMotion(prevWordStart(text, input.copyCol?.() ?? 0, true))
+      })
       event.preventDefault()
       return true
     }
 
     if (isShifted(event, "e")) {
-      if (input.copyWordEnd?.(true)) {
-        event.preventDefault()
-        return true
-      }
-      const text = input.copyText?.() ?? ""
-      copyMotion(wordEnd(text, pos, true))
+      countedMotion(() => {
+        if (input.copyWordEnd?.(true)) return
+        const text = input.copyText?.() ?? ""
+        copyMotion(wordEnd(text, input.copyCol?.() ?? 0, true))
+      })
       event.preventDefault()
       return true
     }
 
     // paragraph motions
     if (key === "{" && !hasModifier(event)) {
-      input.copyPreviousParagraph?.()
+      countedMotion(() => input.copyPreviousParagraph?.())
       event.preventDefault()
       return true
     }
 
     if (key === "}" && !hasModifier(event)) {
-      input.copyNextParagraph?.()
+      countedMotion(() => input.copyNextParagraph?.())
       event.preventDefault()
       return true
     }
 
     // find-char pending
     if ((key === "f" || key === "t") && !event.shift) {
-      input.state.setPending(key, key)
+      input.state.setPending(key, input.state.count() + key)
       event.preventDefault()
       return true
     }
 
     if (isShifted(event, "f")) {
-      input.state.setPending("F", "F")
+      input.state.setPending("F", input.state.count() + "F")
       event.preventDefault()
       return true
     }
 
     if (isShifted(event, "t")) {
-      input.state.setPending("T", "T")
+      input.state.setPending("T", input.state.count() + "T")
       event.preventDefault()
       return true
     }

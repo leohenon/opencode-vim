@@ -27,6 +27,9 @@ export function createModalInputControls(input: {
 }) {
   let pending = ""
   const enterNormal = () => {
+    pending = ""
+    motions.clearPending()
+    escapeSequence.clearPending()
     input.setCursor(normalCursor(input.text(), input.cursor()))
     input.setMode("normal")
   }
@@ -136,7 +139,7 @@ export function createModalInputEscapeSequence(input: {
   setText: (text: string) => void
   enterNormal: () => void
 }) {
-  let pending: string | undefined
+  let pending: { value: string; cursor: number } | undefined
   let timer: ReturnType<typeof setTimeout> | undefined
 
   function cancelPending() {
@@ -146,16 +149,15 @@ export function createModalInputEscapeSequence(input: {
     timer = undefined
   }
 
-  function insert(value: string) {
-    const cursor = input.cursor()
-    input.setText(input.text().slice(0, cursor) + value + input.text().slice(cursor))
-    input.setCursor(cursor + value.length)
-  }
-
   function clearPending() {
     const value = pending
     cancelPending()
-    if (value) insert(value)
+    if (!value) return
+    // Managed native bindings may have already moved the cursor before the raw handler runs.
+    const cursor = input.cursor()
+    const anchor = Math.min(value.cursor, input.text().length)
+    input.setText(input.text().slice(0, anchor) + value.value + input.text().slice(anchor))
+    input.setCursor(cursor < anchor ? cursor : cursor + value.value.length)
   }
 
   return {
@@ -168,7 +170,7 @@ export function createModalInputEscapeSequence(input: {
       }
       const key = singleLineVimKeyName(event)
       if (pending) {
-        if (key !== sequence[1] || hasModifier(event)) {
+        if (key !== sequence[1] || hasModifier(event) || input.cursor() !== pending.cursor) {
           clearPending()
           return false
         }
@@ -178,7 +180,7 @@ export function createModalInputEscapeSequence(input: {
         return true
       }
       if (key !== sequence[0] || hasModifier(event)) return false
-      pending = sequence[0]
+      pending = { value: sequence[0], cursor: input.cursor() }
       timer = setTimeout(clearPending, 300)
       event.preventDefault()
       return true

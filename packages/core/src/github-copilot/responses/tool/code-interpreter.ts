@@ -1,4 +1,4 @@
-import { createFactoryWithOutput } from "./factory"
+import { createProviderToolFactoryWithOutputSchema } from "@ai-sdk/provider-utils"
 import { z } from "zod/v4"
 
 export const codeInterpreterInputSchema = z.object({
@@ -37,7 +37,7 @@ type CodeInterpreterArgs = {
   container?: string | { fileIds?: string[] }
 }
 
-export const codeInterpreterToolFactory = createFactoryWithOutput<
+export const codeInterpreterToolFactory = createProviderToolFactoryWithOutputSchema<
   {
     /**
      * The code to run, or null if not available.

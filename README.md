@@ -2,7 +2,7 @@
 
 # OpenCode Vim
 
-[![npm version](https://img.shields.io/npm/v/@leohenon/ocv?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@leohenon/ocv) [![CI](https://img.shields.io/github/actions/workflow/status/leohenon/opencode-vim/ci.yml?branch=ocv&style=flat-square&logo=github&logoColor=white&label=CI)](https://github.com/leohenon/opencode-vim/actions/workflows/ci.yml) [![Upstream sync](https://img.shields.io/github/actions/workflow/status/leohenon/opencode-vim/sync-upstream.yml?branch=ocv&style=flat-square&logo=github&logoColor=white&label=upstream%20sync)](https://github.com/leohenon/opencode-vim/actions/workflows/sync-upstream.yml) [![Website](https://img.shields.io/badge/website-opencode--vim-7fa6a3?style=flat-square)](https://leohenon.github.io/opencode-vim/) [![Bun](https://img.shields.io/badge/runtime-Bun-f9f1e1?style=flat-square&logo=bun&logoColor=white)](https://bun.sh)
+[![v2 version](https://img.shields.io/npm/v/@leohenon/ocv/ocv-v2?style=flat-square&logo=npm&logoColor=white&label=v2)](https://www.npmjs.com/package/@leohenon/ocv) [![v1 version](https://img.shields.io/npm/v/@leohenon/ocv/latest?style=flat-square&logo=npm&logoColor=white&label=v1)](https://www.npmjs.com/package/@leohenon/ocv) [![CI](https://img.shields.io/github/actions/workflow/status/leohenon/opencode-vim/ocv-ci.yml?branch=ocv&style=flat-square&logo=github&logoColor=white&label=CI)](https://github.com/leohenon/opencode-vim/actions/workflows/ocv-ci.yml) [![Upstream sync](https://img.shields.io/github/actions/workflow/status/leohenon/opencode-vim/sync-upstream.yml?branch=ocv&style=flat-square&logo=github&logoColor=white&label=upstream%20sync)](https://github.com/leohenon/opencode-vim/actions/workflows/sync-upstream.yml) [![Website](https://img.shields.io/badge/website-opencode--vim-7fa6a3?style=flat-square)](https://leohenon.github.io/opencode-vim/) [![Bun](https://img.shields.io/badge/runtime-Bun-f9f1e1?style=flat-square&logo=bun&logoColor=white)](https://bun.sh)
 
 Keyboard-first OpenCode with Vim controls across the TUI, kept in sync with upstream releases.
 
@@ -10,17 +10,32 @@ Keyboard-first OpenCode with Vim controls across the TUI, kept in sync with upst
 
 ## Installation
 
+### OpenCode v2 (beta)
+
 ```bash
 # curl
 curl -fsSL https://raw.githubusercontent.com/leohenon/opencode-vim/ocv/install.sh | sh
 
 # Package managers
-npm i -g @leohenon/ocv
+npm i -g @leohenon/ocv@ocv-v2
+brew install leohenon/tap/ocv-v2
+```
+
+### OpenCode v1
+
+```bash
+# curl
+curl -fsSL https://raw.githubusercontent.com/leohenon/opencode-vim/ocv1/install.sh | sh
+
+# Package managers
+npm i -g @leohenon/ocv@latest
 brew install leohenon/tap/ocv
 
-# Arch Linux AUR (community-maintained)
+# Arch Linux AUR (V1 only, community-maintained)
 yay -S opencode-vim-bin
 ```
+
+For V1 usage and configuration, see [v1](https://github.com/leohenon/opencode-vim/blob/ocv1/README.md).
 
 Curl installs to `~/.ocv/bin`. Set `OCV_INSTALL_DIR` to install elsewhere.
 
@@ -36,17 +51,17 @@ ocv
 # built-in updater
 ocv update
 
-# Package managers
-npm i -g @leohenon/ocv@latest
-brew upgrade ocv
+# Package managers (V2 beta)
+npm i -g @leohenon/ocv@ocv-v2
+brew upgrade leohenon/tap/ocv-v2
 ```
 
 ## Prefer a plugin?
 
-The prompt Vim mode is also available as a plugin for the official OpenCode, prompt editing only (no copy mode or session navigation):
+The prompt Vim mode is also available as a plugin for official OpenCode V2 (2.0.25 or newer), prompt editing only (no copy mode or session navigation):
 
 ```bash
-opencode plugin @leohenon/opencode-vim-plugin --global
+opencode plugin add @leohenon/opencode-vim-plugin@beta
 ```
 
 See [opencode-vim-plugin](https://github.com/leohenon/opencode-vim-plugin).
@@ -91,7 +106,7 @@ Toggle via command palette > `Toggle vim mode`.
 Numeric count prefixes are supported for motions and common operators.
 
 > [!NOTE]
-> `<leader>y` copies the prompt selection when present; configure it with `keybinds.prompt_copy_selection`.
+> `<leader>y` copies the prompt selection when present; configure it with `keybinds["prompt.copy_selection"]`.
 > For clipboard sync, see [System clipboard register](#system-clipboard-register).
 
 ### Copy mode
@@ -124,7 +139,7 @@ When in search mode, `Enter` submits the search, and `Escape` clears search high
 > Search uses smartcase, lowercase queries are case-insensitive, and queries containing uppercase letters are case-sensitive.
 
 > [!TIP]
-> Configure the copy mode entry key with `keybinds.copy_mode`.
+> Configure the copy mode entry key with `keybinds["session.copy_mode"]`.
 
 ### Dialog controls
 
@@ -148,13 +163,25 @@ Toggle via command palette > `Toggle minimal ui`.
 
 ## Configuration
 
+V2 TUI settings belong in `~/.config/ocv/cli.json`, rather than V1's `tui.json`. `XDG_CONFIG_HOME` and `OPENCODE_CONFIG_DIR` can override the config location. The JSON examples below use V2 settings and command names.
+
+### Migrating V1 settings
+
+Import supported TUI settings from an existing OpenCode V1 installation:
+
+```bash
+ocv import-v1-settings
+```
+
+The import leaves V1 files untouched, but overwrites overlapping settings in the V2 config. It does not import credentials, databases, or sessions. Legacy keybind names in `cli.json` are also normalized automatically to V2 command names.
+
 ### Options
 
 | Option                          | Purpose                                  |
 | ------------------------------- | ---------------------------------------- |
 | `prompt_max_height`             | Set max prompt input height              |
 | `prompt_scrollbar`              | Show the prompt scrollbar                |
-| `diff_viewer.command`           | Run an external viewer for `/diff`       |
+| `diffs.command`                 | Run an external viewer for `/diff`       |
 | `vim_initial_mode`              | Start in `insert` (default) or `normal`  |
 | `vim_enter_submit`              | Submit with Enter from insert mode       |
 | `vim_insert_after_submit`       | Return to insert mode after submit       |
@@ -186,7 +213,7 @@ For example, use `<space>` as the leader:
   "keybinds": {
     "vim.normal": {
       "leader": "space",
-      "session_list": "<leader>s"
+      "session.list": "<leader>s"
     }
   }
 }
@@ -196,7 +223,7 @@ When `vim.normal.leader` is set without a top-level `leader`, it replaces the im
 
 ### Prompt input height
 
-Configure prompt input height in `tui.json`:
+Configure prompt input height in `cli.json`:
 
 ```json
 {
@@ -232,22 +259,22 @@ To keep newline available:
 ```json
 {
   "keybinds": {
-    "input_newline": "alt+return"
+    "input.newline": "alt+return"
   }
 }
 ```
 
-Or configure a separate submit key:
+Or configure a separate direct-submit key:
 
 ```json
 {
   "keybinds": {
-    "input_force_submit": "alt+return"
+    "prompt.submit": "alt+return"
   }
 }
 ```
 
-`input_force_submit` is unbound by default.
+`prompt.submit` is unbound by default.
 
 ### System clipboard register
 
@@ -348,39 +375,20 @@ Open `/diff` with an external viewer, such as [Diffview.nvim](https://github.com
 
 ```json
 {
-  "diff_viewer": {
+  "diffs": {
     "command": ["nvim", "-c", "DiffviewOpen"]
   },
   "keybinds": {
     "vim.normal": {
-      "diff_open": "<leader>d"
+      "diff.open": "<leader>d"
     }
   }
 }
 ```
 
-### Neovim integration
-
-Compatible with [`opencode.nvim`](https://github.com/nickjvandyke/opencode.nvim). Use the following server config:
-
-```lua
-local ocv_cmd = "bash -c 'exec -a opencode ocv --port'"
-
-vim.g.opencode_opts = {
-  server = {
-    start = function()
-      require("opencode.terminal").open(ocv_cmd)
-    end,
-    toggle = function()
-      require("opencode.terminal").toggle(ocv_cmd)
-    end,
-  },
-}
-```
-
 ### Custom integrations
 
-TUI plugins can access copy-mode selections with `api.copy.selection()`. See the [API types](https://github.com/leohenon/opencode-vim/blob/ocv/packages/plugin/src/tui.ts).
+TUI plugins can access copy-mode selections with `context.copy.selection()`. See the [V2 API types](./packages/plugin/src/tui/context.ts).
 
 ## Thanks to all contributors!
 

@@ -213,7 +213,7 @@ Kontroluj, które narzędzia są dostępne dla LLM, za pomocą opcji `tools`.
   "$schema": "https://opencode.ai/config.json",
   "tools": {
     "write": false,
-    "bash": false
+    "shell": false
   }
 }
 ```
@@ -353,27 +353,6 @@ Dotyczy to wszystkich interfejsów: TUI, CLI (`opencode run`), aplikacji desktop
 
 ---
 
-### Share (Udostępnianie)
-
-Możesz skonfigurować [udostępnianie](/docs/share) za pomocą opcji `share`.
-
-```json title="opencode.json"
-{
-  "$schema": "https://opencode.ai/config.json",
-  "share": "manual"
-}
-```
-
-Opcje:
-
-- `"manual"` – Zezwalaj na ręczne udostępnianie (domyślnie)
-- `"auto"` - Automatycznie udostępniaj nowe rozmowy
-- `"disabled"` - Całkowicie wyłącz udostępnianie
-
-Domyślnie ustawiony jest tryb ręczny, w którym należy jawnie udostępniać rozmowy za pomocą polecenia `/share`.
-
----
-
 ### Commands (Polecenia)
 
 Możesz zdefiniować niestandardowe polecenia dla powtarzalnych zadań za pomocą opcji `command`.
@@ -461,14 +440,14 @@ Możesz skonfigurować formatery kodu za pomocą opcji `formatter`.
 
 Domyślnie OpenCode **zezwala na wszystkie działania** bez konieczności zatwierdzania. Możesz to zmienić za pomocą opcji `permission`.
 
-Na przykład, aby wymagać zatwierdzenia dla narzędzi `edit` i `bash`:
+Na przykład, aby wymagać zatwierdzenia dla narzędzi `edit` i `shell`:
 
 ```json title="opencode.json"
 {
   "$schema": "https://opencode.ai/config.json",
   "permission": {
     "edit": "ask",
-    "bash": "ask"
+    "shell": "ask"
   }
 }
 ```

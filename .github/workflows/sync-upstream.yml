@@ -1,21 +1,31 @@
-name: Sync with upstream
+name: Sync OCV with upstream V2
 
 on:
   schedule:
     - cron: "0 */6 * * *"
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Merge and verify without pushing or publishing"
+        required: true
+        default: true
+        type: boolean
 
 permissions:
-  contents: read
-  issues: write
+  contents: write
+  pull-requests: read
+  actions: write
 
 concurrency:
-  group: sync-upstream
+  group: sync-upstream-v2
   cancel-in-progress: false
 
 jobs:
   sync:
-    runs-on: ubuntu-latest
+    if: github.repository == 'leohenon/opencode-vim' && github.ref == 'refs/heads/ocv'
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ secrets.SYNC_PAT }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -23,260 +33,110 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.SYNC_PAT }}
 
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - run: bun install --frozen-lockfile
+
       - name: Merge upstream/dev
         id: merge
+        shell: bash
         run: |
           set -euo pipefail
-
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git remote add upstream https://github.com/sst/opencode.git
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          echo "before=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          git remote add upstream https://github.com/anomalyco/opencode.git
           git fetch upstream dev
-
-          before=$(git rev-parse HEAD)
-          nix_hash_conflict_resolved=false
-          nix_hash_inputs_changed=false
-
+          base=$(git show upstream/dev:packages/core/package.json | jq -r '.version')
+          [[ "$base" =~ ^2\.[0-9]+\.[0-9]+$ ]] || { echo "Refusing non-V2 upstream source: $base" >&2; exit 1; }
           if ! git merge --no-commit --no-ff upstream/dev; then
             conflicts=$(git diff --name-only --diff-filter=U)
-            other_conflicts=$(printf '%s\n' "$conflicts" | grep -Ev '^(AGENTS\.md|nix/hashes\.json)$' || true)
-
-            if [ -n "$other_conflicts" ]; then
-              printf '%s\n' "$other_conflicts"
-              exit 1
-            fi
-
-            if printf '%s\n' "$conflicts" | grep -qx 'AGENTS.md'; then
-              echo "Resolving AGENTS.md with OCV instructions."
-              git checkout --ours -- AGENTS.md
-              git add AGENTS.md
-            fi
-
-            if printf '%s\n' "$conflicts" | grep -qx 'nix/hashes.json'; then
-              tmp=$(mktemp -d)
-              git show :2:nix/hashes.json > "$tmp/ours.json"
-              git show :3:nix/hashes.json > "$tmp/theirs.json"
-              python3 - "$tmp/ours.json" "$tmp/theirs.json" <<'PY'
-          import json
-          import sys
-
-          systems = {"x86_64-linux", "aarch64-linux", "aarch64-darwin", "x86_64-darwin"}
-          for path in sys.argv[1:]:
-              with open(path) as f:
-                  data = json.load(f)
-              if set(data) != {"nodeModules"}:
-                  raise SystemExit(f"Unsupported nix/hashes.json schema in {path}")
-              hashes = data["nodeModules"]
-              if set(hashes) != systems:
-                  raise SystemExit(f"Unsupported nix/hashes.json systems in {path}")
-              for system, value in hashes.items():
-                  if not isinstance(value, str) or not value.startswith("sha256-"):
-                      raise SystemExit(f"Unsupported nix hash for {system} in {path}")
-          PY
-              rm -rf "$tmp"
-
-              echo "Resolving nix/hashes.json with current OCV hashes; native hash refresh will run after push."
-              git checkout --ours -- nix/hashes.json
-              git add nix/hashes.json
-              nix_hash_conflict_resolved=true
-            fi
+            other=$(printf '%s\n' "$conflicts" | grep -Ev '^(AGENTS\.md|README\.md|install\.sh|\.github/ocv-track|packages/cli/package\.json|bun\.lock)$' || true)
+            [ -z "$other" ] || { printf '%s\n' "$other"; exit 1; }
+            for file in packages/cli/package.json bun.lock; do
+              if printf '%s\n' "$conflicts" | grep -Fxq "$file"; then
+                bun run packages/cli/script/ocv-sync.ts "$file"
+              fi
+            done
+            for file in AGENTS.md README.md install.sh .github/ocv-track; do
+              if printf '%s\n' "$conflicts" | grep -Fxq "$file"; then
+                git checkout --ours -- "$file"
+                git add "$file"
+              fi
+            done
           fi
-
-          if git rev-parse -q --verify MERGE_HEAD >/dev/null && git cat-file -e HEAD:AGENTS.md 2>/dev/null; then
-            echo "Keeping OCV AGENTS.md and ignoring upstream changes."
-            git checkout HEAD -- AGENTS.md
-            git add AGENTS.md
-          fi
-
-          remaining_conflicts=$(git diff --name-only --diff-filter=U)
-          if [ -n "$remaining_conflicts" ]; then
-            printf '%s\n' "$remaining_conflicts"
-            exit 1
-          fi
-
+          [ -z "$(git diff --name-only --diff-filter=U)" ]
           if git rev-parse -q --verify MERGE_HEAD >/dev/null; then
+            # Keep fork documentation and release identity even for clean upstream merges.
+            git restore --source=HEAD --staged --worktree -- AGENTS.md README.md install.sh .github/ocv-track
             git commit -m "chore(upstream): sync upstream dev"
           fi
 
-          after=$(git rev-parse HEAD)
-          if [ "$before" != "$after" ] && ! git diff --quiet "$before" "$after" -- \
-            bun.lock \
-            package.json \
-            'packages/*/package.json' \
-            flake.lock \
-            nix/node_modules.nix \
-            nix/scripts \
-            patches; then
-            nix_hash_inputs_changed=true
-          fi
-
-          # Dependency-input changes pushed to ocv already trigger nix-hashes.yml via
-          # its push paths. Only dispatch manually for a resolved hashes.json conflict
-          # that would otherwise be invisible to that push trigger.
-          nix_hashes_needed=false
-          if [ "$nix_hash_conflict_resolved" = true ] && [ "$nix_hash_inputs_changed" != true ]; then
-            nix_hashes_needed=true
-          fi
-
-          echo "nix_hashes_needed=$nix_hashes_needed" >> "$GITHUB_OUTPUT"
-          echo "nix_hash_inputs_changed=$nix_hash_inputs_changed" >> "$GITHUB_OUTPUT"
-
-      - name: Bump ocv track for ocv PRs
+      - run: bun install --frozen-lockfile
+      - run: bun run check
+      - run: bun run --cwd packages/cli test
+      - run: bun run --cwd packages/tui test
         env:
-          GH_TOKEN: ${{ secrets.SYNC_PAT }}
+          BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0"
+
+      - name: Check V2 releases and fork revision
+        id: release
+        shell: bash
+        env:
+          BEFORE: ${{ steps.merge.outputs.before }}
         run: |
-          previous=$(gh release list --repo ${{ github.repository }} --limit 200 --json tagName -q 'map(.tagName | select(test("^v[0-9]+\\.[0-9]+\\.[0-9]+-ocv\\.[0-9]+\\.[0-9]+$"))) | .[0] // ""')
-          if [ -z "$previous" ]; then
-            echo "No previous ocv release found, skipping track bump"
-            exit 0
-          fi
-          git rev-parse --verify --quiet "$previous^{commit}" >/dev/null || git fetch origin "refs/tags/$previous:refs/tags/$previous"
-
+          set -euo pipefail
+          upstream="$RUNNER_TEMP/upstream-releases.json"
+          releases="$RUNNER_TEMP/ocv-releases.json"
+          gh release list --repo anomalyco/opencode --limit 200 --json tagName,isDraft > "$upstream"
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 --json tagName,isDraft > "$releases"
+          plan=$(bun run packages/cli/script/ocv-release.ts "$upstream" "$releases")
+          previous=$(jq -r '.previous' <<< "$plan")
           track=$(tr -d '[:space:]' < .github/ocv-track)
-          if ! printf '%s' "$track" | grep -Eq '^[0-9]+\.[0-9]+$'; then
-            echo "Invalid ocv track: '$track'"
-            exit 1
-          fi
-
-          previous_track="${previous##*-ocv.}"
-          if [ "$track" != "$previous_track" ]; then
-            echo "ocv track is already bumped from $previous_track to $track"
-            exit 0
-          fi
-
-          prs=$(mktemp)
-          git fetch origin ocv:refs/remotes/origin/ocv
-          scan_ref=$(git rev-parse --verify --quiet origin/ocv >/dev/null && printf origin/ocv || printf HEAD)
-          git log --first-parent --reverse --format='%H' "$previous..$scan_ref" | while read -r sha; do
-            if pull_requests=$(gh api "repos/${{ github.repository }}/commits/$sha/pulls" -q '.[] | select(.base.ref == "ocv") | "#\(.number) \(.title)"' 2>/dev/null); then
-              if [ -n "$pull_requests" ]; then
-                printf '%s\n' "$pull_requests"
+          changed=false
+          if [ -n "$previous" ] && [ "${previous##*-ocv.}" = "$track" ]; then
+            git rev-parse --verify "$previous^{commit}" >/dev/null
+            git merge-base --is-ancestor "$previous" "$BEFORE"
+            while read -r sha; do
+              prs=$(gh api "repos/$GITHUB_REPOSITORY/commits/$sha/pulls" --jq '.[] | select(.base.ref == "ocv" and .merged_at != null) | .number')
+              if [ -n "$prs" ]; then
+                changed=true
+                break
               fi
-            fi
-          done | awk '!seen[$1]++' > "$prs"
-
-          if [ ! -s "$prs" ]; then
-            echo "No ocv PRs merged since $previous"
-            exit 0
+            done < <(git log --first-parent --format='%H' "$previous..$BEFORE")
           fi
-
-          next="${track%.*}.$((10#${track#*.} + 1))"
-          printf '%s\n' "$next" > .github/ocv-track
-          git add .github/ocv-track
-          git commit -m "chore(release): bump ocv track"
-          echo "Bumped ocv track from $track to $next for ocv PRs merged since $previous:"
-          cat "$prs"
-
-      - name: Check for new upstream version
-        id: version
-        env:
-          GH_TOKEN: ${{ secrets.SYNC_PAT }}
-        run: |
-          upstream=$(gh release list --repo sst/opencode --exclude-drafts --exclude-pre-releases --limit 200 --json tagName -q 'map(.tagName | select(test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))) | .[0] // ""' | sed 's/^v//')
-          current=$(gh release list --repo ${{ github.repository }} --limit 200 --json tagName -q 'map(.tagName | sub("^v"; "")) | map(select(test("^[0-9]+\\.[0-9]+\\.[0-9]+-ocv\\.[0-9]+\\.[0-9]+$"))) | .[0] // ""')
-          track=$(tr -d '[:space:]' < .github/ocv-track)
-          upstream_base=$(echo "$upstream" | sed -E 's/-(vim|ocv)\..*$//')
-          current_base=$(echo "$current" | sed -E 's/-(vim|ocv)\..*$//')
-          if ! printf '%s' "$track" | grep -Eq '^[0-9]+\.[0-9]+$'; then
-            echo "Invalid ocv track: '$track'"
-            exit 1
+          plan=$(OCV_FORK_CHANGES="$changed" bun run packages/cli/script/ocv-release.ts "$upstream" "$releases")
+          echo "$plan" | jq .
+          next=$(jq -r '.track' <<< "$plan")
+          if [ "$next" != "$track" ]; then
+            printf '%s\n' "$next" > .github/ocv-track
+            git add .github/ocv-track
+            git commit -m "chore(release): bump ocv track"
           fi
-          release="${upstream_base}-ocv.${track}"
-          exists=$(gh release view "v$release" --repo ${{ github.repository }} >/dev/null 2>&1 && printf true || printf false)
-          echo "upstream=$upstream"
-          echo "current=$current"
-          echo "track=$track"
-          echo "upstream_base=$upstream_base"
-          echo "current_base=$current_base"
-          echo "release=$release"
-          echo "exists=$exists"
-          echo "upstream=$upstream" >> "$GITHUB_OUTPUT"
-          echo "current=$current" >> "$GITHUB_OUTPUT"
-          echo "track=$track" >> "$GITHUB_OUTPUT"
-          echo "upstream_base=$upstream_base" >> "$GITHUB_OUTPUT"
-          echo "current_base=$current_base" >> "$GITHUB_OUTPUT"
-          echo "release=$release" >> "$GITHUB_OUTPUT"
-          echo "exists=$exists" >> "$GITHUB_OUTPUT"
-
-      - name: Mark release-managed Nix refresh
-        if: >-
-          steps.merge.outputs.nix_hash_inputs_changed == 'true' &&
-          steps.version.outputs.upstream_base != '' &&
-          steps.version.outputs.release != steps.version.outputs.current &&
-          steps.version.outputs.exists != 'true'
-        run: |
-          git commit --amend -m "$(git log -1 --format=%B)
-
-          [skip nix-hashes]"
-
-      - name: Push
-        run: git push origin ocv
-
-      - name: Disable upstream workflows
-        env:
-          GH_TOKEN: ${{ secrets.SYNC_PAT }}
-        run: |
-          keep="ci.yml publish-ocv.yml sync-upstream.yml nix-hashes.yml ocv-pages.yml"
-          gh api repos/${{ github.repository }}/actions/workflows --paginate -q '.workflows[] | "\(.id) \(.path)"' | while read id path; do
-            name=$(basename "$path")
-            if echo "$keep" | grep -qw "$name"; then
-              continue
-            fi
-            gh api -X PUT "repos/${{ github.repository }}/actions/workflows/$id/disable" 2>/dev/null || true
-          done
-
-      - name: Trigger Nix hash refresh
-        if: >-
-          steps.merge.outputs.nix_hashes_needed == 'true' &&
-          (steps.version.outputs.upstream_base == '' ||
-           steps.version.outputs.release == steps.version.outputs.current ||
-           steps.version.outputs.exists == 'true')
-        env:
-          GH_TOKEN: ${{ secrets.SYNC_PAT }}
-        run: gh workflow run nix-hashes.yml --repo ${{ github.repository }} --ref ocv
-
-      - name: Trigger release
-        if: steps.version.outputs.upstream_base != '' && steps.version.outputs.release != steps.version.outputs.current && steps.version.outputs.exists != 'true'
-        env:
-          GH_TOKEN: ${{ secrets.SYNC_PAT }}
-          FORCE_NIX_HASH_REFRESH: ${{ steps.merge.outputs.nix_hashes_needed }}
-        run: gh workflow run publish-ocv.yml --repo ${{ github.repository }} --ref ocv -f version=${{ steps.version.outputs.release }} -f force_nix_hash_refresh="$FORCE_NIX_HASH_REFRESH"
-
-      - name: Close failure issue on success
-        if: success()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          issues=$(gh issue list --repo ${{ github.repository }} --state open --limit 1000 --json number,title -q '.[] | select(.title == "[ci]: sync upstream failed" or .title == "[actions]: sync upstream failed") | .number')
-          if [ -z "$issues" ]; then
-            exit 0
+          version=$(jq -r '.version' <<< "$plan")
+          sha=$(git rev-parse HEAD)
+          if jq -e --arg tag "v$version" '.[] | select(.tagName == $tag and .isDraft)' "$releases" >/dev/null; then
+            # A draft may not have a Git tag yet. Resume its exact source commit.
+            sha=$(gh release view "v$version" --repo "$GITHUB_REPOSITORY" --json targetCommitish --jq '.targetCommitish')
+            [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
+            git merge-base --is-ancestor "$sha" HEAD
+          elif git rev-parse --verify "refs/tags/v$version^{commit}" >/dev/null 2>&1; then
+            sha=$(git rev-parse "refs/tags/v$version^{commit}")
+            git merge-base --is-ancestor "$sha" HEAD
           fi
-          printf '%s\n' "$issues" | while read -r number; do
-            gh issue close "$number" --repo ${{ github.repository }} --comment "Closed automatically after a successful sync run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          done
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "publish=$(jq -r '.publish' <<< "$plan")" >> "$GITHUB_OUTPUT"
 
-      - name: Notify on failure
-        if: failure()
+      - name: Push synchronized OCV branch
+        if: github.event_name == 'schedule' || inputs.dry_run == false
+        run: git push origin HEAD:ocv
+
+      - name: Trigger V2 beta release
+        if: steps.release.outputs.publish == 'true' && (github.event_name == 'schedule' || inputs.dry_run == false)
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh label create ci --repo ${{ github.repository }} --color D73A4A --description "Continuous integration" 2>/dev/null || true
-          issues=$(gh issue list --repo ${{ github.repository }} --state open --limit 1000 --json number,title -q '.[] | select(.title == "[ci]: sync upstream failed" or .title == "[actions]: sync upstream failed") | [.number, .title] | @tsv')
-          tracker=$(printf '%s\n' "$issues" | awk -F '\t' '$2 == "[ci]: sync upstream failed" { print $1; exit }')
-          if [ -z "$tracker" ]; then
-            tracker=$(printf '%s\n' "$issues" | awk -F '\t' 'NF { print $1; exit }')
-            if [ -n "$tracker" ]; then
-              gh issue edit "$tracker" --repo ${{ github.repository }} --title "[ci]: sync upstream failed" --add-label ci
-            fi
-          fi
-          if [ -z "$tracker" ]; then
-            gh issue create --repo ${{ github.repository }} \
-              --title "[ci]: sync upstream failed" \
-              --label ci \
-              --body "Sync workflow failed. Likely a merge conflict. [View run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})"
-            exit 0
-          fi
-          gh issue edit "$tracker" --repo ${{ github.repository }} --add-label ci
-          printf '%s\n' "$issues" | awk -F '\t' -v tracker="$tracker" 'NF && $1 != tracker { print $1 }' | while read -r number; do
-            gh issue close "$number" --repo ${{ github.repository }} --comment "Closing duplicate; tracking this failure in #$tracker."
-          done
+          VERSION: ${{ steps.release.outputs.version }}
+          RELEASE_SHA: ${{ steps.release.outputs.sha }}
+        run: gh workflow run publish-ocv.yml --repo "$GITHUB_REPOSITORY" --ref ocv -f version="$VERSION" -f sha="$RELEASE_SHA" -f dry_run=false

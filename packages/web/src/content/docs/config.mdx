@@ -199,8 +199,6 @@ Use the `ai.opencode.managed` PayloadType. The OpenCode config keys go directly 
       <string>GENERATE-YOUR-OWN-UUID</string>
       <key>PayloadVersion</key>
       <integer>1</integer>
-      <key>share</key>
-      <string>disabled</string>
       <key>server</key>
       <dict>
         <key>hostname</key>
@@ -210,7 +208,7 @@ Use the `ai.opencode.managed` PayloadType. The OpenCode config keys go directly 
       <dict>
         <key>*</key>
         <string>ask</string>
-        <key>bash</key>
+        <key>shell</key>
         <dict>
           <key>*</key>
           <string>ask</string>
@@ -289,11 +287,6 @@ Use a dedicated `tui.json` (or `tui.jsonc`) file for TUI-specific settings.
 
 Use `OPENCODE_TUI_CONFIG` to point to a custom TUI config file.
 
-- `scroll_acceleration.enabled` - Enable macOS-style scroll acceleration. **Takes precedence over `scroll_speed`.**
-- `scroll_speed` - Custom scroll speed multiplier (default: `3`, minimum: `1`). Ignored if `scroll_acceleration.enabled` is `true`.
-- `diff_style` - Control diff rendering. `"auto"` adapts to terminal width, `"stacked"` always shows single column.
-- `vim` - Enable vim-style prompt input in the TUI
-
 When `cursor.style` is `"default"`, the terminal default cursor is restored, so `cursor.blinking` has no effect.
 
 Set `attention.enabled` to turn on TUI desktop notifications and sounds. See [TUI attention](/docs/tui#attention).
@@ -355,7 +348,7 @@ You can manage the tools an LLM can use through the `tools` option.
   "$schema": "https://opencode.ai/config.json",
   "tools": {
     "write": false,
-    "bash": false
+    "shell": false
   }
 }
 ```
@@ -398,7 +391,7 @@ Provider options can include `timeout`, `headerTimeout`, `chunkTimeout`, and `se
 
 - `timeout` - Request timeout in milliseconds (default: 300000). Set to `false` to disable.
 - `headerTimeout` - Timeout in milliseconds to wait for response headers (default: 300000, or 5 minutes). This timer stops once headers arrive and does not limit the streamed response body. Set to `false` to disable.
-- `chunkTimeout` - Timeout in milliseconds between streamed response chunks (default: 300000, or 5 minutes). If no chunk arrives in time, the request is aborted. Set to `false` to disable.
+- `chunkTimeout` - Timeout in milliseconds between streamed response chunks (default: 900000, or 15 minutes). If no chunk arrives in time, the request is aborted. Set to `false` to disable.
 - `setCacheKey` - Ensure a cache key is always set for designated provider.
 
 You can also configure [local models](/docs/models#local). [Learn more](/docs/models).
@@ -565,27 +558,6 @@ The default is `1`, which allows primary agents to launch subagents but prevents
 
 ---
 
-### Sharing
-
-You can configure the [share](/docs/share) feature through the `share` option.
-
-```json title="opencode.json"
-{
-  "$schema": "https://opencode.ai/config.json",
-  "share": "manual"
-}
-```
-
-This takes:
-
-- `"manual"` - Allow manual sharing via commands (default)
-- `"auto"` - Automatically share new conversations
-- `"disabled"` - Disable sharing entirely
-
-By default, sharing is set to manual mode where you need to explicitly share conversations using the `/share` command.
-
----
-
 ### Commands
 
 You can configure custom commands for repetitive tasks through the `command` option.
@@ -731,14 +703,14 @@ Use an object to keep built-ins enabled while configuring overrides or custom LS
 
 By default, opencode **allows all operations** without requiring explicit approval. You can change this using the `permission` option.
 
-For example, to ensure that the `edit` and `bash` tools require user approval:
+For example, to ensure that the `edit` and `shell` tools require user approval:
 
 ```json title="opencode.json"
 {
   "$schema": "https://opencode.ai/config.json",
   "permission": {
     "edit": "ask",
-    "bash": "ask"
+    "shell": "ask"
   }
 }
 ```
@@ -776,12 +748,12 @@ You can configure file watcher ignore patterns through the `watcher` option.
 {
   "$schema": "https://opencode.ai/config.json",
   "watcher": {
-    "ignore": ["node_modules/**", "dist/**", ".git/**"]
+    "ignore": ["**/generated/**"]
   }
 }
 ```
 
-Patterns follow glob syntax. Use this to exclude noisy directories from file watching.
+Patterns follow glob syntax. Common dependency, VCS, build, and cache directories are ignored automatically at any depth.
 
 ---
 

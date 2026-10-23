@@ -91,7 +91,7 @@ import { escape } from "shescape"
 export const MyPlugin = async (ctx) => {
   return {
     "tool.execute.before": async (input, output) => {
-      if (input.tool === "bash") {
+      if (input.tool === "shell") {
         output.args.command = escape(output.args.command)
       }
     },
@@ -187,10 +187,6 @@ export const MyPlugin: Plugin = async ({ project, client, $, directory, worktree
 - `session.idle`
 - `session.status`
 - `session.updated`
-
-#### ToDo イベント
-
-- `todo.updated`
 
 #### シェルイベント
 

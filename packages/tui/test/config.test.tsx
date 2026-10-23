@@ -6,21 +6,15 @@ import {
   AttentionSoundName,
   Info,
   LeaderTimeoutDefault,
-  PluginSpec,
   resolve,
   TuiConfigProvider,
   type Info as TuiConfigInfo,
   useTuiConfig,
-} from "../src/config"
-import { TuiKeybind } from "../src/config/keybind"
+} from "../src/config/v1"
 
 const decodeInfo = Schema.decodeUnknownSync(Info)
-const decodePlugin = Schema.decodeUnknownSync(PluginSpec)
 
-test("defines package-owned plugin specs and attention sound names", () => {
-  expect(decodePlugin("example-plugin")).toBe("example-plugin")
-  expect(decodePlugin(["example-plugin", { enabled: true }])).toEqual(["example-plugin", { enabled: true }])
-  expect(() => decodePlugin(["example-plugin"])).toThrow()
+test("defines attention sound names", () => {
   expect(AttentionSoundName.literals).toEqual(["default", "question", "permission", "error", "done", "subagent_done"])
 })
 
@@ -32,15 +26,14 @@ test("validates config constraints", () => {
       prompt: { max_height: 10, max_width: "auto" },
       scroll_speed: 0.001,
       diff_style: "stacked",
-      diff_viewer: { command: ["git", "difftool", "--no-prompt", "HEAD"] },
+      diff_viewer: { command: ["git", "difftool", "HEAD"] },
       cursor: { blinking: false },
-      plugin: ["example-plugin"],
     }),
   ).toMatchObject({
     leader_timeout: 250,
     attention: { volume: 1 },
     diff_style: "stacked",
-    diff_viewer: { command: ["git", "difftool", "--no-prompt", "HEAD"] },
+    diff_viewer: { command: ["git", "difftool", "HEAD"] },
     cursor: { blinking: false },
   })
   expect(() => decodeInfo({ leader_timeout: 0 })).toThrow()
@@ -51,23 +44,6 @@ test("validates config constraints", () => {
   expect(() => decodeInfo({ diff_viewer: { command: "git difftool" } })).toThrow()
   expect(() => decodeInfo({ cursor: { style: "beam" } })).toThrow()
   expect(decodeInfo({ attention: { sounds: { unknown: "sound.wav" } } })).toEqual({ attention: { sounds: {} } })
-  expect(decodeInfo({ keybinds: { "vim.normal": { input_move_down: "j" } } })).toEqual({
-    keybinds: { "vim.normal": { input_move_down: "j" } },
-  })
-  expect(() => decodeInfo({ keybinds: { "vim.normal": "j" } })).toThrow()
-  expect(decodeInfo({ vim_showbreak: true })).toEqual({ vim_showbreak: true })
-  expect(() => decodeInfo({ vim_showbreak: "↪ " })).toThrow()
-})
-
-test("drops unknown keybinds without hiding invalid known scopes", () => {
-  const keybinds = TuiKeybind.dropUnknown({
-    not_a_real_keybind: "ctrl+q",
-    "vim.normal": "j",
-    "vim.unknown": { input_move_down: "j" },
-  })
-
-  expect(keybinds).toEqual({ "vim.normal": "j" })
-  expect(() => decodeInfo({ keybinds })).toThrow()
 })
 
 test("resolves host-neutral defaults", () => {
@@ -83,7 +59,6 @@ test("resolves host-neutral defaults", () => {
   })
   expect(config.leader_timeout).toBe(LeaderTimeoutDefault)
   expect(config.mouse).toBe(true)
-  expect(config.vim_showbreak).toBe(false)
   expect(config.keybinds.has("terminal.suspend")).toBe(true)
   expect(config.keybinds.has("session.list")).toBe(true)
   expect(config.cursor).toBeUndefined()
@@ -124,50 +99,52 @@ test("resolves a session move keybind", () => {
   expect(config.keybinds.get("session.move")).toMatchObject([{ key: "ctrl+o" }])
 })
 
-test("resolves vim normal leader without default global leader", () => {
-  const config = resolve({ keybinds: { "vim.normal": { leader: "space" } } }, { terminalSuspend: true })
+test("resolves message navigation defaults", () => {
+  const config = resolve({}, { terminalSuspend: true })
 
-  expect(config.keybinds.get("leader")).toMatchObject([{ key: "space", cmd: "leader", vimMode: "normal" }])
+  expect(config.keybinds.get("session.first")).toMatchObject([{ key: "ctrl+g,home,alt+home" }])
+  expect(config.keybinds.get("session.message.previous")).toEqual([])
+  expect(config.keybinds.get("session.message.next")).toEqual([])
+  expect(config.keybinds.get("session.message.user.previous")).toEqual([])
+  expect(config.keybinds.get("session.message.user.next")).toEqual([])
+  expect(config.keybinds.get("session.messages_last_user")).toMatchObject([{ key: "alt+end" }])
 })
 
-test("resolves vim mode-scoped keybinds", () => {
-  const config = resolve(
-    {
-      keybinds: {
-        input_move_down: "down",
-        "vim.normal": {
-          input_move_down: "j",
-          input_move_up: [{ key: "k", preventDefault: false }],
-        },
-      },
-    },
-    { terminalSuspend: true },
-  )
+test("reserves home and end for navigation", () => {
+  const config = resolve({}, { terminalSuspend: true })
 
-  expect(config.keybinds.get("input.move.down")).toMatchObject([
-    { key: "down", cmd: "input.move.down" },
-    { key: "j", cmd: "input.move.down", vimMode: "normal" },
-  ])
-  expect(config.keybinds.get("input.move.up")).toMatchObject([
-    { key: "up", cmd: "input.move.up" },
-    { key: "k", cmd: "input.move.up", vimMode: "normal", preventDefault: false },
-  ])
+  expect(config.keybinds.get("input.buffer.home")).toEqual([])
+  expect(config.keybinds.get("input.buffer.end")).toEqual([])
+  expect(config.keybinds.get("input.select.buffer.home")).toMatchObject([{ key: "shift+home" }])
+  expect(config.keybinds.get("input.select.buffer.end")).toMatchObject([{ key: "shift+end" }])
+  expect(config.keybinds.get("input.line.home")).toMatchObject([{ key: "ctrl+a" }])
+  expect(config.keybinds.get("input.line.end")).toMatchObject([{ key: "ctrl+e" }])
+  expect(config.keybinds.get("input.visual.line.home")).toMatchObject([{ key: "alt+a" }])
+  expect(config.keybinds.get("input.visual.line.end")).toMatchObject([{ key: "alt+e" }])
 })
 
-test("vim mode-scoped keybinds re-enable a globally disabled command", () => {
-  const config = resolve(
-    {
-      keybinds: {
-        input_move_down: "none",
-        "vim.normal": {
-          input_move_down: "j",
-        },
-      },
-    },
-    { terminalSuspend: true },
-  )
+test("opens the subagent picker with down", () => {
+  const config = resolve({}, { terminalSuspend: true })
 
-  expect(config.keybinds.get("input.move.down")).toMatchObject([{ key: "j", cmd: "input.move.down", vimMode: "normal" }])
+  expect(config.keybinds.get("session.child.first")).toMatchObject([{ key: "down" }])
+})
+
+test("navigates session tabs with option arrows", () => {
+  const config = resolve({}, { terminalSuspend: true })
+
+  expect(config.keybinds.get("session.tab.next")).toMatchObject([{ key: "ctrl+tab,alt+down" }])
+  expect(config.keybinds.get("session.tab.previous")).toMatchObject([{ key: "ctrl+shift+tab,alt+up" }])
+  expect(config.keybinds.get("session.tab.next_unread")).toMatchObject([{ key: "alt+shift+down" }])
+  expect(config.keybinds.get("session.tab.previous_unread")).toMatchObject([{ key: "alt+shift+up" }])
+})
+
+test("preserves pinned session bindings alongside tab bindings", () => {
+  const config = resolve({}, { terminalSuspend: true })
+
+  expect(config.keybinds.get("session.pin.toggle")).toMatchObject([{ key: "ctrl+f" }])
+  expect(config.keybinds.get("session.quick_switch.1")).toMatchObject([{ key: "<leader>1" }])
+  expect(config.keybinds.get("session.tab.select.1")).toMatchObject([{ key: "<leader>1,ctrl+1" }])
+  expect(config.keybinds.get("session.tab.select.10")).toMatchObject([{ key: "<leader>0,ctrl+0" }])
 })
 
 test("disables suspend and assigns ctrl+z to undo when unsupported", () => {

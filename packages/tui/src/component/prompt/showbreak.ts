@@ -1,7 +1,6 @@
 import type { OptimizedBuffer, RGBA, TextareaRenderable } from "@opentui/core"
 
 const SHOWBREAK_MARKER = "↪ "
-
 type ShowbreakTarget = Pick<TextareaRenderable, "x" | "y" | "height" | "scrollY" | "lineInfo">
 
 export function showbreakRows(info: { lineWraps: number[] }, scroll: number, height: number) {

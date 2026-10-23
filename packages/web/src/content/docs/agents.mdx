@@ -58,13 +58,35 @@ Build is the **default** primary agent with all tools enabled. This is the stand
 
 _Mode_: `primary`
 
-A restricted agent designed for planning and analysis. We use a permission system to give you more control and prevent unintended changes.
-By default, all of the following are set to `ask`:
+A restricted agent designed for planning and analysis. This agent is useful when you want the LLM to analyze code, suggest changes, or create plans without making any actual modifications to your codebase.
 
-- `file edits`: All writes, patches, and edits
-- `bash`: All bash commands
+By default, Plan:
 
-This agent is useful when you want the LLM to analyze code, suggest changes, or create plans without making any actual modifications to your codebase.
+- Denies file edits, writes, and patches outside its plan directory, `~/.opencode/plan/`. These are refused without prompting.
+- Allows the `question` tool, so it can ask you clarifying questions.
+- Does not restrict shell commands. They follow your [permission](/docs/permissions) config.
+
+Plan's defaults are applied before your top-level `permission` config, and the last matching rule wins. A global rule such as `"edit": "allow"` or `"*": "allow"` therefore also applies to Plan. To keep Plan read-only, or to require approval for its shell commands, set its permissions directly:
+
+```json title="opencode.json"
+{
+  "$schema": "https://opencode.ai/config.json",
+  "permission": {
+    "edit": "allow"
+  },
+  "agent": {
+    "plan": {
+      "permission": {
+        "edit": {
+          "*": "deny",
+          "~/.opencode/plan/*": "allow"
+        },
+        "shell": "ask"
+      }
+    }
+  }
+}
+```
 
 ---
 
@@ -72,7 +94,7 @@ This agent is useful when you want the LLM to analyze code, suggest changes, or 
 
 _Mode_: `subagent`
 
-A general-purpose agent for researching complex questions and executing multi-step tasks. Has full tool access (except todo), so it can make file changes when needed. Use this to run multiple units of work in parallel.
+A general-purpose agent for researching complex questions and executing multi-step tasks. Has full tool access, so it can make file changes when needed. Use this to run multiple units of work in parallel.
 
 ---
 
@@ -159,7 +181,7 @@ Configure agents in your `opencode.json` config file:
       "prompt": "{file:./prompts/build.txt}",
       "permission": {
         "edit": "allow",
-        "bash": "allow"
+        "shell": "allow"
       }
     },
     "plan": {
@@ -167,7 +189,7 @@ Configure agents in your `opencode.json` config file:
       "model": "anthropic/claude-haiku-4-20250514",
       "permission": {
         "edit": "deny",
-        "bash": "deny"
+        "shell": "deny"
       }
     },
     "code-reviewer": {
@@ -200,7 +222,7 @@ model: anthropic/claude-sonnet-4-20250514
 temperature: 0.1
 permission:
   edit: deny
-  bash: deny
+  shell: deny
 ---
 
 You are in code review mode. Focus on:
@@ -366,7 +388,7 @@ If you don’t specify a model, primary agents use the [model globally configure
 }
 ```
 
-The model ID in your OpenCode config uses the format `provider/model-id`. For example, if you're using [OpenCode Zen](/docs/zen), you would use `opencode/gpt-5.1-codex` for GPT 5.1 Codex.
+The model ID in your OpenCode config uses the format `provider/model-id`. For example, if you're using [OpenCode Zen](https://opencode.ai/v2/docs/console/), you would use `opencode/gpt-5.1-codex` for GPT 5.1 Codex.
 
 ---
 
@@ -381,13 +403,13 @@ Allows you to control which tools are available in this agent. You can enable or
   "$schema": "https://opencode.ai/config.json",
   "tools": {
     "write": true,
-    "bash": true
+    "shell": true
   },
   "agent": {
     "plan": {
       "tools": {
         "write": false,
-        "bash": false
+        "shell": false
       }
     }
   }
@@ -436,10 +458,9 @@ The available permission keys are:
 | `glob`               | `glob`                                                           |
 | `grep`               | `grep`                                                           |
 | `list`               | `list`                                                           |
-| `bash`               | `bash`                                                           |
+| `shell`              | `shell`                                                          |
 | `task`               | `task`                                                           |
 | `external_directory` | Any tool that reads or writes files outside the project worktree |
-| `todowrite`          | `todowrite`, `todoread`                                          |
 | `webfetch`           | `webfetch`                                                       |
 | `websearch`          | `websearch`                                                      |
 | `lsp`                | `lsp`                                                            |
@@ -447,7 +468,7 @@ The available permission keys are:
 | `question`           | `question`                                                       |
 | `doom_loop`          | Recovery prompts when an agent appears stuck                     |
 
-`read`, `edit`, `glob`, `grep`, `list`, `bash`, `task`, `external_directory`, `lsp`, and `skill` accept either a shorthand action (`"allow" | "ask" | "deny"`) or an object of glob/pattern → action for fine-grained control. The remaining keys accept the shorthand action only.
+`read`, `edit`, `glob`, `grep`, `list`, `shell`, `task`, `external_directory`, `lsp`, and `skill` accept either a shorthand action (`"allow" | "ask" | "deny"`) or an object of glob/pattern → action for fine-grained control. The remaining keys accept the shorthand action only.
 
 :::note
 Permission keys are matched as wildcard patterns against the underlying tool name, so the same syntax works for built-ins, custom tools, and MCP tools — for example `"mymcp_*": "deny"` denies every tool from an MCP server, and `"mymcp_search": "ask"` targets a single one.
@@ -488,7 +509,7 @@ description: Code review without edits
 mode: subagent
 permission:
   edit: deny
-  bash:
+  shell:
     "*": ask
     "git diff": allow
     "git log*": allow
@@ -499,7 +520,7 @@ permission:
 Only analyze code and suggest changes.
 ```
 
-You can set permissions for specific bash commands.
+You can set permissions for specific shell commands.
 
 ```json title="opencode.json" {7}
 {
@@ -507,7 +528,7 @@ You can set permissions for specific bash commands.
   "agent": {
     "build": {
       "permission": {
-        "bash": {
+        "shell": {
           "git push": "ask",
           "grep *": "allow"
         }
@@ -525,7 +546,7 @@ This can take a glob pattern.
   "agent": {
     "build": {
       "permission": {
-        "bash": {
+        "shell": {
           "git *": "ask"
         }
       }
@@ -543,7 +564,7 @@ Since the last matching rule takes precedence, put the `*` wildcard first and sp
   "agent": {
     "build": {
       "permission": {
-        "bash": {
+        "shell": {
           "*": "ask",
           "git status *": "allow"
         }
@@ -699,19 +720,9 @@ Run `opencode models` to see a list of the available models.
 
 ## Create agents
 
-You can create new agents using the following command:
+Create a new agent by adding a markdown file to `.opencode/agents/` for the project or `~/.config/opencode/agents/` globally. The file name becomes the agent name, and the frontmatter configures its description, mode, model, and permissions. See [Markdown](#markdown) above for the file format.
 
-```bash
-opencode agent create
-```
-
-This interactive command will:
-
-1. Ask where to save the agent; global or project-specific.
-2. Description of what the agent should do.
-3. Generate an appropriate system prompt and identifier.
-4. Let you select which permissions the agent should be allowed (anything you don't select is denied).
-5. Finally, create a markdown file with the agent configuration.
+Run `opencode debug agents` to list the agents that OpenCode has loaded.
 
 ---
 
@@ -722,7 +733,7 @@ Here are some common use cases for different agents.
 - **Build agent**: Full development work with all tools enabled
 - **Plan agent**: Analysis and planning without making changes
 - **Review agent**: Code review with read-only access plus documentation tools
-- **Debug agent**: Focused on investigation with bash and read tools enabled
+- **Debug agent**: Focused on investigation with shell and read tools enabled
 - **Docs agent**: Documentation writing with file operations but no system commands
 
 ---
@@ -744,7 +755,7 @@ Do you have an agent you'd like to share? [Submit a PR](https://github.com/anoma
 description: Writes and maintains project documentation
 mode: subagent
 permission:
-  bash: deny
+  shell: deny
 ---
 
 You are a technical writer. Create clear, comprehensive documentation.

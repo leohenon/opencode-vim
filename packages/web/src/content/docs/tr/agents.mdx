@@ -61,7 +61,7 @@ Planlama ve analiz için tasarlanmış kısıtlı bir agent. Size daha fazla kon
 Varsayılan olarak aşağıdakilerin tümü `ask` olarak ayarlanmıştır:
 
 - `file edits`: Tüm yazmalar, yamalar ve düzenler
-- `bash`: Tüm bash komutları
+- `shell`: Tüm shell komutları
 
 Bu agent, LLM'in kodu analiz etmesini, değişiklik önermesini veya kod tabanınızda herhangi bir gerçek değişiklik yapmadan plan oluşturmasını istediğinizde kullanışlıdır.
 
@@ -156,7 +156,7 @@ Agent'ları `opencode.json` yapılandırma dosyanızda yapılandırın:
       "tools": {
         "write": true,
         "edit": true,
-        "bash": true
+        "shell": true
       }
     },
     "plan": {
@@ -165,7 +165,7 @@ Agent'ları `opencode.json` yapılandırma dosyanızda yapılandırın:
       "tools": {
         "write": false,
         "edit": false,
-        "bash": false
+        "shell": false
       }
     },
     "code-reviewer": {
@@ -200,7 +200,7 @@ temperature: 0.1
 tools:
   write: false
   edit: false
-  bash: false
+  shell: false
 ---
 
 You are in code review mode. Focus on:
@@ -366,7 +366,7 @@ Bir model belirtmezseniz, birincil agent'lar [küresel olarak yapılandırılmı
 }
 ```
 
-opencode yapılandırmanızdaki model kimliği `provider/model-id` biçimini kullanır. Örneğin, [OpenCode Zen](/docs/zen) kullanıyorsanız, GPT 5.1 Codex için `opencode/gpt-5.1-codex` kullanırsınız.
+opencode yapılandırmanızdaki model kimliği `provider/model-id` biçimini kullanır. Örneğin, [OpenCode Zen](https://opencode.ai/v2/docs/console/) kullanıyorsanız, GPT 5.1 Codex için `opencode/gpt-5.1-codex` kullanırsınız.
 
 ---
 
@@ -379,13 +379,13 @@ opencode yapılandırmanızdaki model kimliği `provider/model-id` biçimini kul
   "$schema": "https://opencode.ai/config.json",
   "tools": {
     "write": true,
-    "bash": true
+    "shell": true
   },
   "agent": {
     "plan": {
       "tools": {
         "write": false,
-        "bash": false
+        "shell": false
       }
     }
   }
@@ -419,7 +419,7 @@ Aynı anda birden fazla aracı kontrol etmek için joker karakterleri de kullana
 
 ### İzinler
 
-Bir agent'ın gerçekleştirebileceği eylemleri yönetmek için izinleri yapılandırabilirsiniz. Şu anda `edit`, `bash` ve `webfetch` araçlarının izinleri şu şekilde yapılandırılabilir:
+Bir agent'ın gerçekleştirebileceği eylemleri yönetmek için izinleri yapılandırabilirsiniz. Şu anda `edit`, `shell` ve `webfetch` araçlarının izinleri şu şekilde yapılandırılabilir:
 
 - `"ask"` — Agent çalıştırmadan önce onay iste
 - `"allow"` — Onay olmadan tüm işlemlere izin ver
@@ -460,7 +460,7 @@ description: Code review without edits
 mode: subagent
 permission:
   edit: deny
-  bash:
+  shell:
     "*": ask
     "git diff": allow
     "git log*": allow
@@ -471,7 +471,7 @@ permission:
 Only analyze code and suggest changes.
 ```
 
-Belirli bash komutları için izinleri ayarlayabilirsiniz.
+Belirli shell komutları için izinleri ayarlayabilirsiniz.
 
 ```json title="opencode.json" {7}
 {
@@ -479,7 +479,7 @@ Belirli bash komutları için izinleri ayarlayabilirsiniz.
   "agent": {
     "build": {
       "permission": {
-        "bash": {
+        "shell": {
           "git push": "ask",
           "grep *": "allow"
         }
@@ -497,7 +497,7 @@ Bu küresel bir desen alabilir.
   "agent": {
     "build": {
       "permission": {
-        "bash": {
+        "shell": {
           "git *": "ask"
         }
       }
@@ -515,7 +515,7 @@ Son eşleşen kural öncelikli olduğundan, `*` joker karakterini ilk sıraya ve
   "agent": {
     "build": {
       "permission": {
-        "bash": {
+        "shell": {
           "*": "ask",
           "git status *": "allow"
         }
@@ -671,19 +671,9 @@ Mevcut modellerin listesini görmek için `opencode models` komutunu çalıştı
 
 ## Agent Oluşturma
 
-Aşağıdaki komutu kullanarak yeni agent'lar oluşturabilirsiniz:
+Yeni bir agent oluşturmak için proje düzeyinde `.opencode/agents/` dizinine veya global olarak `~/.config/opencode/agents/` dizinine bir Markdown dosyası ekleyin. Dosya adı agent'ın adı olur; frontmatter ise açıklamasını, modunu, modelini ve izinlerini yapılandırır. Dosya biçimi için yukarıdaki [Markdown](#markdown) bölümüne bakın.
 
-```bash
-opencode agent create
-```
-
-Bu etkileşimli komut şunları sağlayacaktır:
-
-1. Agent'ı nereye kaydedeceğinizi sorar; küresel veya projeye özel.
-2. Agent'ın ne yapması gerektiğinin açıklamasını ister.
-3. Uygun bir sistem prompt'u ve tanımlayıcı oluşturur.
-4. Agent'ın hangi araçlara erişebileceğini seçmenize izin verir.
-5. Son olarak agent yapılandırmasıyla bir Markdown dosyası oluşturur.
+OpenCode'un yüklediği agent'ları listelemek için `opencode debug agents` komutunu çalıştırın.
 
 ---
 
@@ -694,7 +684,7 @@ Farklı agent'lara yönelik bazı yaygın kullanım senaryoları aşağıda veri
 - **Build agent**: Tüm araçların etkinleştirildiği tam geliştirme çalışması
 - **Plan agent**: Değişiklik yapmadan analiz ve planlama
 - **Review agent**: Salt okunur erişim ve belgeleme araçlarıyla kod incelemesi
-- **Debug agent**: Bash ve okuma araçları etkinken araştırmaya odaklanmıştır
+- **Debug agent**: Shell ve okuma araçları etkinken araştırmaya odaklanmıştır
 - **Docs agent**: Dosya işlemleriyle ancak sistem komutları olmadan belge yazma
 
 ---
@@ -716,7 +706,7 @@ Paylaşmak istediğiniz bir agent'ınız var mı? [Submit a PR](https://github.c
 description: Writes and maintains project documentation
 mode: subagent
 tools:
-  bash: false
+  shell: false
 ---
 
 You are a technical writer. Create clear, comprehensive documentation.

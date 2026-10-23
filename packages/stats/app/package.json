@@ -1,21 +1,22 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
-  "name": "@opencode-ai/stats-app",
-  "version": "1.18.35",
+  "name": "@opencode/stats-app",
+  "version": "2.1.2",
   "private": true,
   "type": "module",
   "license": "MIT",
   "scripts": {
-    "typecheck": "tsgo --noEmit",
+    "typecheck": "tsc --noEmit",
     "dev": "vite dev --host 0.0.0.0",
     "build": "vite build",
-    "start": "vite start"
+    "start": "vite start",
+    "test": "bun test --only-failures"
   },
   "dependencies": {
     "@ibm/plex": "6.4.1",
     "@kobalte/core": "catalog:",
-    "@opencode-ai/stats-core": "workspace:*",
-    "@opencode-ai/ui": "workspace:*",
+    "@opencode/stats-core": "workspace:*",
+    "@opencode/ui": "workspace:*",
     "@solidjs/meta": "catalog:",
     "@solidjs/router": "catalog:",
     "@solidjs/start": "catalog:",
@@ -31,7 +32,7 @@
     "@cloudflare/workers-types": "catalog:",
     "@types/bun": "catalog:",
     "@types/d3-scale": "4.0.9",
-    "@typescript/native-preview": "catalog:",
+    "@typescript/native": "catalog:",
     "typescript": "catalog:"
   },
   "engines": {

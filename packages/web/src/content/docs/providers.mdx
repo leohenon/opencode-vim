@@ -87,7 +87,7 @@ Both options take an array of model IDs — the same IDs shown in the `/models` 
 ## OpenCode Zen
 
 OpenCode Zen is a list of models provided by the OpenCode team that have been
-tested and verified to work well with OpenCode. [Learn more](/docs/zen).
+tested and verified to work well with OpenCode. [Learn more](https://opencode.ai/v2/docs/console/).
 
 :::tip
 If you are new, we recommend starting with OpenCode Zen.
@@ -1042,13 +1042,12 @@ to store token in opencode auth storage.
 OpenCode uses a small model for some AI tasks like generating the session title.
 It is configured to use gpt-5-nano by default, hosted by Zen. To lock OpenCode
 to only use your own GitLab-hosted instance, add the following to your
-`opencode.json` file. It is also recommended to disable session sharing.
+`opencode.json` file.
 
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "small_model": "gitlab/duo-chat-haiku-4-5",
-  "share": "disabled"
+  "small_model": "gitlab/duo-chat-haiku-4-5"
 }
 ```
 
@@ -1088,21 +1087,16 @@ Your GitLab administrator must:
 
 ##### OAuth for Self-Hosted instances
 
-In order to make Oauth working for your self-hosted instance, you need to create
-a new application (Settings → Applications) with the
-callback URL `http://127.0.0.1:8080/callback` and following scopes:
+OpenCode's bundled GitLab OAuth application only exists on gitlab.com. To use
+OAuth with a self-hosted instance, create your own application (Settings →
+Applications) with the callback URL `http://127.0.0.1:8080/callback`, the
+`api` scope, and **Confidential** unchecked (PKCE requires a public client).
 
-- api (Access the API on your behalf)
-- read_user (Read your personal information)
-- read_repository (Allows read-only access to the repository)
-
-Then expose application ID as environment variable:
+Then expose the application ID as an environment variable:
 
 ```bash
 export GITLAB_OAUTH_CLIENT_ID=your_application_id_here
 ```
-
-More documentation on [opencode-gitlab-auth](https://www.npmjs.com/package/opencode-gitlab-auth) homepage.
 
 ##### Configuration
 
@@ -1134,6 +1128,12 @@ When a `duo-workflow-*` model is selected, OpenCode will:
 
 Available DAP workflow models follow the `duo-workflow-*` naming convention and
 are dynamically discovered from your GitLab instance.
+
+:::note
+Workflow model discovery only runs for a login stored with `/connect` (OAuth or
+a personal access token). A `GITLAB_TOKEN` environment variable on its own does
+not trigger discovery.
+:::
 
 ##### GitLab API Tools (Optional, but highly recommended)
 
@@ -1809,7 +1809,7 @@ If you already have an API key, you can select **Manually enter API Key** and pa
 
 ### OpenCode Zen
 
-OpenCode Zen is a list of tested and verified models provided by the OpenCode team. [Learn more](/docs/zen).
+OpenCode Zen is a list of tested and verified models provided by the OpenCode team. [Learn more](https://opencode.ai/v2/docs/console/).
 
 1. Sign in to **<a href={console}>OpenCode Zen</a>** and click **Create API Key**.
 

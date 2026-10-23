@@ -1,19 +1,31 @@
 import { expect, test } from "bun:test"
 import type { CliRenderer } from "@opentui/core"
-import { openExternalDiffViewer } from "../src/feature-plugins/system/external-diff-viewer"
+import { externalDiffSpawnOptions, openExternalDiffViewer } from "../src/feature-plugins/system/external-diff-viewer"
 
 function renderer() {
   const events: string[] = []
   return {
     events,
     value: {
-      suspend: () => events.push("suspend"),
-      resume: () => events.push("resume"),
+      suspend: async () => {
+        events.push("suspend")
+      },
+      resume: async () => {
+        events.push("resume")
+      },
       requestRender: () => events.push("render"),
       currentRenderBuffer: { clear: () => events.push("clear") },
     } as unknown as CliRenderer,
   }
 }
+
+test("uses argument-array spawning without a shell on every platform", () => {
+  expect(externalDiffSpawnOptions("C:\\workspace")).toEqual({
+    cwd: "C:\\workspace",
+    stdio: "inherit",
+    shell: false,
+  })
+})
 
 test("runs the configured command and restores the renderer", async () => {
   const output = renderer()
@@ -24,10 +36,9 @@ test("runs the configured command and restores the renderer", async () => {
     directory: process.cwd(),
     renderer: output.value,
   })
-  expect(process.listenerCount("SIGINT")).toBe(sigintListeners + 1)
   await pending
 
-  expect(output.events).toEqual(["suspend", "clear", "clear", "resume", "render"])
+  expect(output.events).toEqual(["suspend", "resume", "render"])
   expect(process.listenerCount("SIGINT")).toBe(sigintListeners)
 })
 
@@ -43,7 +54,7 @@ test("restores the renderer when the configured command fails", async () => {
     }),
   ).rejects.toThrow("code 7")
 
-  expect(output.events).toEqual(["suspend", "clear", "clear", "resume", "render"])
+  expect(output.events).toEqual(["suspend", "resume", "render"])
   expect(process.listenerCount("SIGINT")).toBe(sigintListeners)
 })
 
@@ -59,7 +70,7 @@ test("restores the renderer when the executable is missing", async () => {
     }),
   ).rejects.toThrow()
 
-  expect(output.events).toEqual(["suspend", "clear", "clear", "resume", "render"])
+  expect(output.events).toEqual(["suspend", "resume", "render"])
   expect(process.listenerCount("SIGINT")).toBe(sigintListeners)
 })
 
@@ -75,4 +86,42 @@ test("rejects an inaccessible diff directory before suspending", async () => {
   ).rejects.toThrow("Diff directory does not exist")
 
   expect(output.events).toEqual([])
+})
+
+test("waits for terminal suspension and resumption before advancing the handoff", async () => {
+  const output = renderer()
+  const suspended = Promise.withResolvers<void>()
+  const resumeStarted = Promise.withResolvers<void>()
+  const resumed = Promise.withResolvers<void>()
+  const sigintListeners = process.listenerCount("SIGINT")
+  output.value.suspend = async () => {
+    output.events.push("suspend")
+    await suspended.promise
+  }
+  output.value.resume = async () => {
+    output.events.push("resume")
+    resumeStarted.resolve()
+    await resumed.promise
+  }
+  const pending = openExternalDiffViewer({
+    command: [process.execPath, "-e", "process.exit(0)"],
+    directory: process.cwd(),
+    renderer: output.value,
+  })
+  try {
+    expect(output.events).toEqual(["suspend"])
+    expect(process.listenerCount("SIGINT")).toBe(sigintListeners)
+    suspended.resolve()
+    await resumeStarted.promise
+    expect(output.events).toEqual(["suspend", "resume"])
+    expect(process.listenerCount("SIGINT")).toBe(sigintListeners + 1)
+    resumed.resolve()
+    await pending
+    expect(output.events).toEqual(["suspend", "resume", "render"])
+    expect(process.listenerCount("SIGINT")).toBe(sigintListeners)
+  } finally {
+    suspended.resolve()
+    resumed.resolve()
+    await pending
+  }
 })

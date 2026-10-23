@@ -218,7 +218,7 @@ opencode run "Hello world"
   "$schema": "https://opencode.ai/config.json",
   "tools": {
     "write": false,
-    "bash": false
+    "shell": false
   }
 }
 ```
@@ -358,27 +358,6 @@ Bearer Token（`AWS_BEARER_TOKEN_BEDROCK` 或 `/connect`）優先於基於設定
 
 ---
 
-### 分享
-
-您可以透過 `share` 選項設定[分享](/docs/share)功能。
-
-```json title="opencode.json"
-{
-  "$schema": "https://opencode.ai/config.json",
-  "share": "manual"
-}
-```
-
-該選項接受：
-
-- `"manual"` - 允許透過指令手動分享（預設）
-- `"auto"` - 自動分享新工作階段
-- `"disabled"` - 完全停用分享
-
-預設情況下，分享設定為手動模式，您需要使用 `/share` 指令明確分享工作階段。
-
----
-
 ### 指令
 
 您可以透過 `command` 選項為重複任務設定自訂指令。
@@ -466,14 +445,14 @@ OpenCode 啟動時會自動下載新版本。您可以使用 `autoupdate` 選項
 
 預設情況下，OpenCode **允許所有操作**，無需明確批准。您可以使用 `permission` 選項變更此行為。
 
-例如，要讓 `edit` 和 `bash` 工具需要使用者確認：
+例如，要讓 `edit` 和 `shell` 工具需要使用者確認：
 
 ```json title="opencode.json"
 {
   "$schema": "https://opencode.ai/config.json",
   "permission": {
     "edit": "ask",
-    "bash": "ask"
+    "shell": "ask"
   }
 }
 ```

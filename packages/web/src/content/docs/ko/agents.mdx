@@ -61,7 +61,7 @@ Plan은 계획과 분석에 특화된 제한형 agent입니다. 더 높은 제�
 기본값으로 아래 항목은 모두 `ask`로 설정됩니다.
 
 - `file edits`: 모든 write, patch, edit
-- `bash`: 모든 bash 명령
+- `shell`: 모든 shell 명령
 
 코드베이스를 실제로 수정하지 않고 LLM 분석, 변경 제안, 계획 수립만 진행하고 싶을 때 유용합니다.
 
@@ -71,7 +71,7 @@ Plan은 계획과 분석에 특화된 제한형 agent입니다. 더 높은 제�
 
 _Mode_: `subagent`
 
-복잡한 질문을 조사하고 다단계 작업을 수행하기 위한 범용 agent입니다. todo를 제외한 모든 tool 접근이 가능하므로 필요하면 파일 수정도 할 수 있습니다. 여러 작업 단위를 병렬로 처리할 때 사용하세요.
+복잡한 질문을 조사하고 다단계 작업을 수행하기 위한 범용 agent입니다. 모든 tool 접근이 가능하므로 필요하면 파일 수정도 할 수 있습니다. 여러 작업 단위를 병렬로 처리할 때 사용하세요.
 
 ---
 
@@ -156,7 +156,7 @@ _Mode_: `primary`
       "tools": {
         "write": true,
         "edit": true,
-        "bash": true
+        "shell": true
       }
     },
     "plan": {
@@ -165,7 +165,7 @@ _Mode_: `primary`
       "tools": {
         "write": false,
         "edit": false,
-        "bash": false
+        "shell": false
       }
     },
     "code-reviewer": {
@@ -200,7 +200,7 @@ temperature: 0.1
 tools:
   write: false
   edit: false
-  bash: false
+  shell: false
 ---
 
 You are in code review mode. Focus on:
@@ -366,7 +366,7 @@ model을 지정하지 않으면 primary agent는 [전역으로 설정한 model](
 }
 ```
 
-OpenCode config의 model ID는 `provider/model-id` 형식을 사용합니다. 예를 들어 [OpenCode Zen](/docs/zen)을 사용한다면 GPT 5.1 Codex에 `opencode/gpt-5.1-codex`를 사용합니다.
+OpenCode config의 model ID는 `provider/model-id` 형식을 사용합니다. 예를 들어 [OpenCode Zen](https://opencode.ai/v2/docs/console/)을 사용한다면 GPT 5.1 Codex에 `opencode/gpt-5.1-codex`를 사용합니다.
 
 ---
 
@@ -379,13 +379,13 @@ OpenCode config의 model ID는 `provider/model-id` 형식을 사용합니다. �
   "$schema": "https://opencode.ai/config.json",
   "tools": {
     "write": true,
-    "bash": true
+    "shell": true
   },
   "agent": {
     "plan": {
       "tools": {
         "write": false,
-        "bash": false
+        "shell": false
       }
     }
   }
@@ -419,7 +419,7 @@ agent별 config는 전역 config를 override합니다.
 
 ### Permissions
 
-permission을 설정해 agent가 수행할 수 있는 action을 제어할 수 있습니다. 현재 `edit`, `bash`, `webfetch` tool의 permission은 다음 값으로 설정할 수 있습니다.
+permission을 설정해 agent가 수행할 수 있는 action을 제어할 수 있습니다. 현재 `edit`, `shell`, `webfetch` tool의 permission은 다음 값으로 설정할 수 있습니다.
 
 - `"ask"` — tool 실행 전에 승인 요청
 - `"allow"` — 승인 없이 모든 작업 허용
@@ -460,7 +460,7 @@ description: Code review without edits
 mode: subagent
 permission:
   edit: deny
-  bash:
+  shell:
     "*": ask
     "git diff": allow
     "git log*": allow
@@ -471,7 +471,7 @@ permission:
 Only analyze code and suggest changes.
 ```
 
-특정 bash 명령에 대해서도 permission을 설정할 수 있습니다.
+특정 shell 명령에 대해서도 permission을 설정할 수 있습니다.
 
 ```json title="opencode.json" {7}
 {
@@ -479,7 +479,7 @@ Only analyze code and suggest changes.
   "agent": {
     "build": {
       "permission": {
-        "bash": {
+        "shell": {
           "git push": "ask",
           "grep *": "allow"
         }
@@ -497,7 +497,7 @@ Only analyze code and suggest changes.
   "agent": {
     "build": {
       "permission": {
-        "bash": {
+        "shell": {
           "git *": "ask"
         }
       }
@@ -515,7 +515,7 @@ Only analyze code and suggest changes.
   "agent": {
     "build": {
       "permission": {
-        "bash": {
+        "shell": {
           "*": "ask",
           "git status *": "allow"
         }
@@ -671,19 +671,9 @@ agent config에 지정한 나머지 옵션은 모델 옵션으로 provider에 **
 
 ## 에이전트 생성
 
-아래 명령으로 새 agent를 만들 수 있습니다.
+새 agent를 만들려면 프로젝트용은 `.opencode/agents/`, 전역용은 `~/.config/opencode/agents/`에 Markdown 파일을 추가하세요. 파일 이름이 agent 이름이 되고, frontmatter에서 설명, 모드, 모델, 권한을 설정합니다. 파일 형식은 위의 [Markdown](#markdown)을 참고하세요.
 
-```bash
-opencode agent create
-```
-
-이 인터랙티브 명령은 다음을 수행합니다.
-
-1. agent 저장 위치를 묻습니다(전역/프로젝트).
-2. agent가 수행할 작업의 설명을 받습니다.
-3. 적절한 시스템 prompt와 식별자를 생성합니다.
-4. agent가 접근할 tool을 선택하게 합니다.
-5. 마지막으로 agent config가 담긴 Markdown 파일을 생성합니다.
+`opencode debug agents`를 실행하면 OpenCode가 로드한 agent 목록을 볼 수 있습니다.
 
 ---
 
@@ -694,7 +684,7 @@ opencode agent create
 - **Build agent**: 모든 tool을 활성화한 전체 개발 작업
 - **Plan agent**: 코드 변경 없이 분석과 계획 수행
 - **Review agent**: 읽기 전용 접근 + 문서화 tool 기반 코드 리뷰
-- **Debug agent**: bash/read tool 중심의 조사 작업
+- **Debug agent**: shell/read tool 중심의 조사 작업
 - **Docs agent**: 파일 작업은 가능하지만 시스템 명령은 없는 문서 작성 작업
 
 ---
@@ -716,7 +706,7 @@ opencode agent create
 description: Writes and maintains project documentation
 mode: subagent
 tools:
-  bash: false
+  shell: false
 ---
 
 You are a technical writer. Create clear, comprehensive documentation.

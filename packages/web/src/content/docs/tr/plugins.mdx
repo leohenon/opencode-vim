@@ -90,7 +90,7 @@ import { escape } from "shescape"
 export const MyPlugin = async (ctx) => {
   return {
     "tool.execute.before": async (input, output) => {
-      if (input.tool === "bash") {
+      if (input.tool === "shell") {
         output.args.command = escape(output.args.command)
       }
     },
@@ -186,10 +186,6 @@ Eklentiler aşağıdaki Örnekler bölümünde görüldüğü gibi etkinliklere 
 - `session.idle`
 - `session.status`
 - `session.updated`
-
-#### Yapılacaklar Olayları
-
-- `todo.updated`
 
 #### Kabuk Olayları
 

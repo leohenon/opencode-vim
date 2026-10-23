@@ -1,10 +1,10 @@
-export * as PtyTicket from "./ticket"
+export * as PtyTicket from "./ticket.js"
 
-import { WorkspaceV2 } from "../workspace"
-import { PtyTicket } from "@opencode-ai/schema/pty-ticket"
-import { PtyID } from "./schema"
+import type { Workspace } from "@opencode/schema/workspace"
+import { PtyTicket } from "@opencode/schema/pty-ticket"
+import type { Pty } from "@opencode/schema/pty"
 import { Cache, Context, Duration, Effect, Layer } from "effect"
-import { makeGlobalNode } from "../effect/app-node"
+import { makeGlobalNode } from "@opencode/util/effect/app-node"
 
 const DEFAULT_TTL = Duration.seconds(60)
 const CAPACITY = 10_000
@@ -12,9 +12,9 @@ const CAPACITY = 10_000
 export const ConnectToken = PtyTicket.ConnectToken
 
 export type Scope = {
-  readonly ptyID: PtyID
+  readonly ptyID: Pty.ID
   readonly directory?: string
-  readonly workspaceID?: WorkspaceV2.ID
+  readonly workspaceID?: Workspace.ID
 }
 
 export interface Interface {
@@ -32,7 +32,7 @@ function matches(record: Scope, input: Scope) {
 
 // Tickets are inserted via Cache.set and removed atomically via invalidateWhen. The lookup is
 // never invoked; it dies if it ever is, which would signal a misuse of the Service interface.
-const noLookup = () => Effect.die("PtyTicket cache must be used via set/invalidateWhen, never get")
+const noLookup = () => Effect.die(new Error("PtyTicket cache must be used via set/invalidateWhen, never get"))
 
 // Visible for tests so the TTL can be shortened. Production uses `layer` with the default TTL.
 export const make = (ttl: Duration.Input = DEFAULT_TTL) =>

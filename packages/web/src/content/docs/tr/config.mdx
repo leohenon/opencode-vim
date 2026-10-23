@@ -217,7 +217,7 @@ Bir LLM'nin kullanabileceği araçları `tools` seçeneği aracılığıyla yön
   "$schema": "https://opencode.ai/config.json",
   "tools": {
     "write": false,
-    "bash": false
+    "shell": false
   }
 }
 ```
@@ -330,7 +330,7 @@ opencode yapılandırmanızda kullanmak istediğiniz temayı `theme` seçeneği 
         // Disable file modification tools for review-only agent
         "write": false,
         "edit": false,
-        "bash": true,
+        "shell": true,
       },
     },
   },
@@ -355,27 +355,6 @@ Agent'ları `~/.config/opencode/agents/` veya `.opencode/agents/` içindeki Mark
 Varsayılan agent, birincil agent olmalıdır (alt agent değil). Bu, `"build"` veya `"plan"` gibi yerleşik bir agent ya da tanımladığınız bir [özel agent](/docs/agents) olabilir. Belirtilen agent mevcut değilse veya bir alt agent ise, opencode bir uyarıyla birlikte `"build"`'ye geri döner.
 
 Bu ayar tüm arayüzler için geçerlidir: TUI, CLI (`opencode run`), masaüstü uygulaması ve GitHub Action.
-
----
-
-### Paylaşma
-
-[share](/docs/share) özelliğini `share` seçeneği aracılığıyla yapılandırabilirsiniz.
-
-```json title="opencode.json"
-{
-  "$schema": "https://opencode.ai/config.json",
-  "share": "manual"
-}
-```
-
-Bu şunları gerektirir:
-
-- `"manual"` - Komutlar aracılığıyla manuel paylaşıma izin ver (varsayılan)
-- `"auto"` - Yeni konuşmaları otomatik olarak paylaş
-- `"disabled"` - Paylaşımı tamamen devre dışı bırak
-
-Varsayılan olarak paylaşım, `/share` komutunu kullanarak konuşmaları açıkça paylaşmanız gereken manuel moda ayarlanmıştır.
 
 ---
 
@@ -466,14 +445,14 @@ Kod formatlayıcılarını `formatter` seçeneği aracılığıyla yapılandıra
 
 Varsayılan olarak, opencode açık bir onay gerektirmeden **tüm işlemlere izin verir**. `permission` seçeneğini kullanarak bunu değiştirebilirsiniz.
 
-Örneğin, `edit` ve `bash` araçlarının kullanıcı onayı gerektirdiğinden emin olmak için:
+Örneğin, `edit` ve `shell` araçlarının kullanıcı onayı gerektirdiğinden emin olmak için:
 
 ```json title="opencode.json"
 {
   "$schema": "https://opencode.ai/config.json",
   "permission": {
     "edit": "ask",
-    "bash": "ask"
+    "shell": "ask"
   }
 }
 ```

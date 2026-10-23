@@ -1,7 +1,14 @@
-import { describe, expect, test } from "bun:test"
-import { createModalInputControls, type ModalInputKeyEvent, type ModalInputMode } from "../src/component/vim/modal-input-controls"
+import { describe, expect, jest, test } from "bun:test"
+import {
+  createModalInputControls,
+  type ModalInputKeyEvent,
+  type ModalInputMode,
+} from "../src/component/vim/modal-input-controls"
 
-function key(name: string, input?: { sequence?: string; shift?: boolean; ctrl?: boolean; option?: boolean; hyper?: boolean }) {
+function key(
+  name: string,
+  input?: { sequence?: string; shift?: boolean; ctrl?: boolean; option?: boolean; hyper?: boolean },
+) {
   let prevented = false
   return {
     name,
@@ -50,7 +57,15 @@ function createControls(input?: {
     cursor += value.length
   }
 
-  return { controls, moves, mode: () => mode, cursor: () => cursor, text: () => text, insert }
+  return {
+    controls,
+    moves,
+    mode: () => mode,
+    cursor: () => cursor,
+    text: () => text,
+    insert,
+    setCursor: (next: number) => (cursor = next),
+  }
 }
 
 describe("modal input controls", () => {
@@ -253,4 +268,42 @@ describe("modal input controls", () => {
     expect(next.cursor()).toBe(5)
     expect(next.mode()).toBe("insert")
   })
+})
+
+test.each([0, 1, 4, 5])(
+  "escape prefix timeout keeps its insertion anchor after native cursor movement to %i",
+  (offset) => {
+    jest.useFakeTimers()
+    const state = createControls({ mode: "insert", text: "alpha", cursor: 2, vimEscapeSequence: "jk" })
+    try {
+      state.controls.handleKey(key("j"))
+      // Managed textarea bindings can move before the raw modal key handler runs.
+      state.setCursor(offset)
+      jest.advanceTimersByTime(300)
+      expect(state.text()).toBe("aljpha")
+      expect(state.cursor()).toBe(offset < 2 ? offset : offset + 1)
+    } finally {
+      state.controls.clearPending()
+      jest.useRealTimers()
+    }
+  },
+)
+
+test("public normal entry flushes a pending escape prefix before moving the cursor", () => {
+  jest.useFakeTimers()
+  const state = createControls({ mode: "insert", text: "draft", cursor: 5, vimEscapeSequence: "jk" })
+  try {
+    state.controls.handleKey(key("j"))
+    expect(state.text()).toBe("draft")
+    state.controls.enterNormal()
+    expect(state.mode()).toBe("normal")
+    expect(state.text()).toBe("draftj")
+    expect(state.cursor()).toBe(5)
+    jest.advanceTimersByTime(300)
+    expect(state.text()).toBe("draftj")
+    expect(state.cursor()).toBe(5)
+  } finally {
+    state.controls.clearPending()
+    jest.useRealTimers()
+  }
 })

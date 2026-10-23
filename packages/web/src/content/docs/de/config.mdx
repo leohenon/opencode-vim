@@ -217,7 +217,7 @@ Sie können die Tools, die ein LLM verwenden kann, über die Option `tools` verw
   "$schema": "https://opencode.ai/config.json",
   "tools": {
     "write": false,
-    "bash": false
+    "shell": false
   }
 }
 ```
@@ -357,27 +357,6 @@ Diese Einstellung gilt für alle Schnittstellen: TUI, CLI (`opencode run`), Desk
 
 ---
 
-### Teilen
-
-Sie können die Funktion [share](/docs/share) über die Option `share` konfigurieren.
-
-```json title="opencode.json"
-{
-  "$schema": "https://opencode.ai/config.json",
-  "share": "manual"
-}
-```
-
-Dazu braucht es:
-
-- `"manual"` – Manuelles Teilen über Befehle zulassen (Standard)
-- `"auto"` – Neue Konversationen automatisch teilen
-- `"disabled"` – Teile vollständig deaktivieren
-
-Standardmäßig ist die Freigabe auf den manuellen Modus eingestellt, in dem Sie Konversationen explizit mit dem Befehl `/share` teilen müssen.
-
----
-
 ### Befehle
 
 Sie können benutzerdefinierte Befehle für sich wiederholende Aufgaben über die Option `command` konfigurieren.
@@ -465,14 +444,14 @@ Sie können Codeformatierer über die Option `formatter` konfigurieren.
 
 OpenCode erlaubt standardmäßig alle Vorgänge, ohne dass eine ausdrückliche Genehmigung erforderlich ist. Sie können dies mit der Option `permission` ändern.
 
-Um beispielsweise sicherzustellen, dass die Tools `edit` und `bash` eine Benutzergenehmigung erfordern:
+Um beispielsweise sicherzustellen, dass die Tools `edit` und `shell` eine Benutzergenehmigung erfordern:
 
 ```json title="opencode.json"
 {
   "$schema": "https://opencode.ai/config.json",
   "permission": {
     "edit": "ask",
-    "bash": "ask"
+    "shell": "ask"
   }
 }
 ```

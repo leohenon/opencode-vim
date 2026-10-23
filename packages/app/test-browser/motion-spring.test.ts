@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { useSpring } from "@opencode-ai/ui/motion-spring"
+import { useSpring } from "@opencode/ui/motion-spring"
 import { createRoot, createSignal } from "solid-js"
 
 test("snaps spring progress when the session changes", async () => {
@@ -7,6 +7,7 @@ test("snaps spring progress when the session changes", async () => {
     const [target, setTarget] = createSignal(0)
     const [session, setSession] = createSignal("session-a")
     const progress = useSpring(target, { visualDuration: 0.3, bounce: 0 }, session)
+
     return { dispose, progress, setTarget, setSession }
   })
 

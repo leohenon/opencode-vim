@@ -217,7 +217,7 @@ Vous pouvez gérer les outils qu'un LLM peut utiliser via l'option `tools`.
   "$schema": "https://opencode.ai/config.json",
   "tools": {
     "write": false,
-    "bash": false
+    "shell": false
   }
 }
 ```
@@ -357,27 +357,6 @@ Ce paramètre s'applique à toutes les interfaces : TUI, CLI (`opencode run`), a
 
 ---
 
-### Partage
-
-Vous pouvez configurer la fonctionnalité [share](/docs/share) via l'option `share`.
-
-```json title="opencode.json"
-{
-  "$schema": "https://opencode.ai/config.json",
-  "share": "manual"
-}
-```
-
-Elle accepte :
-
-- `"manual"` – Autoriser le partage manuel via des commandes (par défaut)
-- `"auto"` – Partager automatiquement de nouvelles conversations
-- `"disabled"` – Désactiver complètement le partage
-
-Par défaut, le partage est défini en mode manuel où vous devez partager explicitement les conversations à l'aide de la commande `/share`.
-
----
-
 ### Commandes
 
 Vous pouvez configurer des commandes personnalisées pour les tâches répétitives via l'option `command`.
@@ -465,14 +444,14 @@ Vous pouvez configurer les formateurs de code via l'option `formatter`.
 
 Par défaut, opencode **autorise toutes les opérations** sans nécessiter d'approbation explicite. Vous pouvez modifier cela en utilisant l'option `permission`.
 
-Par exemple, pour garantir que les outils `edit` et `bash` nécessitent l'approbation de l'utilisateur :
+Par exemple, pour garantir que les outils `edit` et `shell` nécessitent l'approbation de l'utilisateur :
 
 ```json title="opencode.json"
 {
   "$schema": "https://opencode.ai/config.json",
   "permission": {
     "edit": "ask",
-    "bash": "ask"
+    "shell": "ask"
   }
 }
 ```

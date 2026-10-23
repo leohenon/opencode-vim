@@ -1,7 +1,7 @@
-import { For, Show, createMemo } from "solid-js"
+import { For, Show } from "solid-js"
 import { RGBA } from "@opentui/core"
-import { selectedForeground, useTheme } from "../../context/theme"
-import type { CopyHighlight, CopyRow } from "./copy-mode"
+import { useTheme } from "../../context/theme"
+import type { CopyHighlight } from "./copy-mode"
 
 export type CopyPosition = {
   line: number
@@ -15,21 +15,16 @@ export type CopyPosition = {
     text: string
   }
 }
-export type CopyContext = CopyRow & CopyPosition
+export type CopyContext = CopyPosition
 
-export function CopyOverlay(props: { copy?: CopyPosition; topOffset?: number; highlights?: CopyHighlight[] }) {
-  const { theme } = useTheme()
-  const top = (line: number) => line + (props.topOffset ?? 0)
-  const highlightFg = createMemo(() => selectedForeground(theme, theme.secondary))
-  const searchHighlightFg = createMemo(() => selectedForeground(theme, theme.textMuted))
-  const currentHighlightFg = createMemo(() => selectedForeground(theme, theme.primary))
-  const cursorFg = createMemo(() => selectedForeground(theme, theme.text))
+export function CopyOverlay(props: { copy?: CopyPosition; highlights?: CopyHighlight[] }) {
+  const theme = useTheme()
   return (
     <>
       <Show when={props.copy && !props.copy.visual}>
         <box
           position="absolute"
-          top={top(props.copy!.line)}
+          top={props.copy!.line}
           left={0}
           width="100%"
           height={1}
@@ -37,27 +32,32 @@ export function CopyOverlay(props: { copy?: CopyPosition; topOffset?: number; hi
         />
       </Show>
       <For each={props.highlights ?? []}>
-        {(highlight) => {
-          const background = () =>
-            highlight.kind === "search" ? (highlight.current ? theme.primary : theme.textMuted) : theme.secondary
-          const foreground = () =>
-            highlight.kind === "search"
-              ? highlight.current
-                ? currentHighlightFg()
-                : searchHighlightFg()
-              : highlightFg()
-          return (
-            <box position="absolute" top={top(highlight.line)} left={highlight.left}>
-              <text bg={background()} fg={foreground()}>
-                {highlight.text || " "}
-              </text>
-            </box>
-          )
-        }}
+        {(highlight) => (
+          <box position="absolute" top={highlight.line} left={highlight.left}>
+            <text
+              bg={
+                highlight.kind === "search"
+                  ? highlight.current
+                    ? theme.background.selection.current
+                    : theme.background.selection.search
+                  : theme.background.selection.base
+              }
+              fg={
+                highlight.kind === "search"
+                  ? highlight.current
+                    ? theme.text.selection.current
+                    : theme.text.selection.search
+                  : theme.text.selection.base
+              }
+            >
+              {highlight.text || " "}
+            </text>
+          </box>
+        )}
       </For>
       <Show when={props.copy}>
-        <box position="absolute" top={top(props.copy!.line)} left={props.copy!.col} width={1} height={1}>
-          <text bg={theme.text} fg={cursorFg()}>
+        <box position="absolute" top={props.copy!.line} left={props.copy!.col} width={1} height={1}>
+          <text bg={theme.text.base} fg={theme.background.base}>
             {props.copy!.cursorText}
           </text>
         </box>

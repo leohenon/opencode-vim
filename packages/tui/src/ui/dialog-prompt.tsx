@@ -1,10 +1,11 @@
-import { TextareaRenderable, TextAttributes } from "@opentui/core"
+import { TextareaRenderable } from "@opentui/core"
+import { Keymap } from "../context/keymap"
 import { useTheme } from "../context/theme"
-import { useDialog, type DialogContext } from "./dialog"
+import { DialogFooter, DialogHeader, DialogLayout, useDialog, type DialogSize } from "./dialog"
 import { Show, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js"
 import { Spinner } from "../component/spinner"
-import { useTuiConfig } from "../config"
-import { OPENCODE_VIM_MODE_KEY, useBindings, useCommandShortcut, useOpencodeKeymap } from "../keymap"
+import { useConfig, useNewDesigns } from "../config"
+import { useRenderer } from "@opentui/solid"
 import { useVimEnabled } from "../component/vim"
 import {
   createModalInputControls,
@@ -13,37 +14,49 @@ import {
 } from "../component/vim/modal-input-controls"
 import { vimCursorStyle } from "../component/vim/cursor-style"
 
+export type DialogPromptAction = {
+  title: string
+  /** Keymap command id, bound while the prompt input is focused and shown in the footer. */
+  command: string
+  /** Keymap command title, e.g. for help listings. Defaults to `title`. */
+  commandTitle?: string
+  onTrigger: (prompt: { setValue: (value: string) => void }) => void
+}
+
 export type DialogPromptProps = {
   title: string
+  size?: DialogSize
+  /** Faint line below the title, under the "new-designs" experiment. */
+  subtitle?: string
   description?: () => JSX.Element
   placeholder?: string
   value?: string
   busy?: boolean
   busyText?: string
+  actions?: DialogPromptAction[]
   onConfirm?: (value: string) => void
   onCancel?: () => void
 }
 
 export function DialogPrompt(props: DialogPromptProps) {
   const dialog = useDialog()
-  const { theme } = useTheme()
-  const tuiConfig = useTuiConfig()
-  const keymap = useOpencodeKeymap()
+  const renderer = useRenderer()
+  const theme = useTheme().surface("dialog")
+  const config = useConfig().data
+  const keymap = Keymap.use()
   const vimEnabled = useVimEnabled()
-  const previousVimMode = keymap.getData(OPENCODE_VIM_MODE_KEY)
-  const submitShortcut = useCommandShortcut("dialog.prompt.submit")
+  const newDesigns = useNewDesigns()
   const [textareaTarget, setTextareaTarget] = createSignal<TextareaRenderable>()
   const [inputMode, setInputMode] = createSignal<ModalInputMode>("insert")
-  const modalInputEnabled = createMemo(() => vimEnabled() && tuiConfig.vim_modal_input)
+  const modalInputEnabled = createMemo(() => vimEnabled() && config.vim_modal_input)
   let textarea: TextareaRenderable
 
-  createEffect(() => {
-    keymap.setData(OPENCODE_VIM_MODE_KEY, modalInputEnabled() ? inputMode() : undefined)
-  })
-
-  onCleanup(() => {
-    keymap.setData(OPENCODE_VIM_MODE_KEY, previousVimMode)
-  })
+  onCleanup(
+    keymap.vim.register(
+      () => (modalInputEnabled() ? inputMode() : undefined),
+      () => keymap.mode.current() === "modal",
+    ),
+  )
 
   const modalInput = createModalInputControls({
     mode: inputMode,
@@ -59,21 +72,16 @@ export function DialogPrompt(props: DialogPromptProps) {
       if (!textarea || textarea.isDestroyed) return
       textarea.setText(text)
     },
-    langmap: () => tuiConfig.vim_langmap,
-    vimEscapeSequence: () => tuiConfig.vim_escape_sequence,
+    langmap: () => config.vim_langmap,
+    vimEscapeSequence: () => config.vim_escape_sequence,
   })
-
-  const cursorStyle = createMemo(() => vimCursorStyle(modalInputEnabled() ? inputMode() : undefined, tuiConfig.cursor))
+  onCleanup(() => modalInput.clearPending())
+  const cursorStyle = createMemo(() => vimCursorStyle(modalInputEnabled() ? inputMode() : undefined, config.cursor))
 
   createEffect(() => {
     if (!textarea || textarea.isDestroyed) return
     textarea.cursorStyle = cursorStyle()
   })
-
-  function enterNormalMode() {
-    modalInput.clearPending()
-    modalInput.enterNormal()
-  }
 
   function confirm() {
     if (props.busy) return
@@ -81,36 +89,81 @@ export function DialogPrompt(props: DialogPromptProps) {
     props.onConfirm?.(textarea.plainText)
   }
 
-  useBindings(() => ({
+  const handle = {
+    setValue(value: string) {
+      textarea.setText(value)
+      textarea.gotoLineEnd()
+    },
+  }
+
+  function triggerAction(action: DialogPromptAction) {
+    if (props.busy) return
+    modalInput.clearPending()
+    action.onTrigger(handle)
+  }
+
+  const extraActions = () =>
+    (props.actions ?? []).map((action) => ({
+      title: action.title,
+      command: action.command,
+      disabled: props.busy,
+      onTrigger: () => triggerAction(action),
+    }))
+
+  Keymap.createLayer(() => ({
+    mode: "modal",
     target: textareaTarget,
     enabled: textareaTarget() !== undefined && !props.busy,
     // Dialog form semantics must win over the global managed textarea input layer.
-    priority: 1,
+    priority: modalInputEnabled() && inputMode() === "insert" ? 2 : 1,
     commands: [
       {
-        name: "dialog.prompt.submit",
+        id: "dialog.prompt.submit",
         title: "Submit dialog prompt",
-        category: "Dialog",
+        group: "Dialog",
         run: confirm,
       },
-    ],
-    bindings: [
-      ...tuiConfig.keybinds.gather("dialog.prompt", ["dialog.prompt.submit"]),
       ...(modalInputEnabled() && inputMode() === "insert"
         ? [
             {
-              key: "escape",
-              desc: "Enter normal mode",
+              bind: "escape",
+              title: "Enter normal mode",
               group: "Dialog",
-              cmd: enterNormalMode,
+              run: () => modalInput.enterNormal(),
             },
           ]
         : []),
+      ...(props.actions ?? []).map((action) => ({
+        id: action.command,
+        title: action.commandTitle ?? action.title,
+        group: "Dialog",
+        run: () => triggerAction(action),
+      })),
+    ],
+  }))
+
+  Keymap.createLayer(() => ({
+    mode: "modal",
+    enabled: props.onCancel !== undefined,
+    priority: 1,
+    commands: [
+      {
+        bind: "escape",
+        title: "Back",
+        group: "Dialog",
+        run: () => {
+          if (renderer.getSelection()) {
+            renderer.clearSelection()
+            return
+          }
+          if (!props.busy) props.onCancel?.()
+        },
+      },
     ],
   }))
 
   onMount(() => {
-    dialog.setSize("medium")
+    dialog.setSize(props.size ?? "medium")
     setTimeout(() => {
       if (!textarea || textarea.isDestroyed) return
       if (props.busy) return
@@ -136,58 +189,59 @@ export function DialogPrompt(props: DialogPromptProps) {
   })
 
   return (
-    <box paddingLeft={2} paddingRight={2} gap={1}>
-      <box flexDirection="row" justifyContent="space-between">
-        <text attributes={TextAttributes.BOLD} fg={theme.text}>
-          {props.title}
-        </text>
-        <text fg={theme.textMuted} onMouseUp={() => dialog.clear()}>
-          esc
-        </text>
-      </box>
+    <DialogLayout
+      footerGap={2}
+      header={
+        <DialogHeader
+          title={props.title}
+          description={props.subtitle}
+          onClose={() => {
+            if (!props.busy) (props.onCancel ?? dialog.clear)()
+          }}
+        />
+      }
+      footer={{
+        actions: {
+          primary: [
+            ...extraActions(),
+            { title: "submit", command: "dialog.prompt.submit", disabled: props.busy, onTrigger: confirm },
+          ],
+        },
+      }}
+      legacyFooter={
+        <Show when={!props.busy} fallback={<text fg={theme.text.muted}>processing…</text>}>
+          <DialogFooter
+            actions={{
+              secondary: [{ title: "submit", command: "dialog.prompt.submit", onTrigger: confirm }, ...extraActions()],
+            }}
+          />
+        </Show>
+      }
+    >
       <box gap={1}>
         {props.description?.()}
         <textarea
-          height={3}
+          height={1}
+          wrapMode="none"
           ref={(val: TextareaRenderable) => {
             textarea = val
             setTextareaTarget(val)
           }}
           initialValue={props.value}
           placeholder={props.placeholder ?? "Enter text"}
-          placeholderColor={theme.textMuted}
-          textColor={props.busy ? theme.textMuted : theme.text}
-          focusedTextColor={props.busy ? theme.textMuted : theme.text}
-          cursorColor={props.busy ? theme.backgroundElement : theme.primary}
+          placeholderColor={newDesigns() ? theme.text.faint : theme.text.muted}
+          textColor={props.busy ? theme.text.formfield.disabled : theme.text.formfield.base}
+          focusedTextColor={props.busy ? theme.text.formfield.disabled : theme.text.formfield.base}
+          cursorColor={props.busy ? theme.background.formfield.disabled : theme.text.base}
           cursorStyle={cursorStyle()}
           onKeyDown={(event: ModalInputKeyEvent) => {
-            if (modalInputEnabled() && !props.busy && modalInput.handleKey(event)) return
+            if (modalInputEnabled() && !props.busy) modalInput.handleKey(event)
           }}
         />
         <Show when={props.busy}>
-          <Spinner color={theme.textMuted}>{props.busyText ?? "Working…"}</Spinner>
+          <Spinner color={theme.text.muted}>{props.busyText ?? "Working…"}</Spinner>
         </Show>
       </box>
-      <box paddingBottom={1} gap={1} flexDirection="row">
-        <Show when={!props.busy} fallback={<text fg={theme.textMuted}>processing…</text>}>
-          <Show when={submitShortcut()}>
-            <text fg={theme.text}>
-              {submitShortcut()} <span style={{ fg: theme.textMuted }}>submit</span>
-            </text>
-          </Show>
-        </Show>
-      </box>
-    </box>
+    </DialogLayout>
   )
-}
-
-DialogPrompt.show = (dialog: DialogContext, title: string, options?: Omit<DialogPromptProps, "title">) => {
-  return new Promise<string | null>((resolve) => {
-    dialog.replace(
-      () => (
-        <DialogPrompt title={title} {...options} onConfirm={(value) => resolve(value)} onCancel={() => resolve(null)} />
-      ),
-      () => resolve(null),
-    )
-  })
 }

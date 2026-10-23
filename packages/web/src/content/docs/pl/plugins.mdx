@@ -91,7 +91,7 @@ import { escape } from "shescape"
 export const MyPlugin = async (ctx) => {
   return {
     "tool.execute.before": async (input, output) => {
-      if (input.tool === "bash") {
+      if (input.tool === "shell") {
         output.args.command = escape(output.args.command)
       }
     },
@@ -187,10 +187,6 @@ Wtyczki mogą subskrybować zdarzenia, jak zastosować poniżej sekcji Przykład
 - `session.idle`
 - `session.status`
 - `session.updated`
-
-#### Wydarzenia do zrobienia
-
-- `todo.updated`
 
 #### Wydarzenia shell
 

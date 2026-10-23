@@ -1,18 +1,23 @@
-export * as AgentV2 from "./agent"
+export * as Agent from "./agent.js"
 
-import { makeLocationNode } from "./effect/app-node"
+import { makeLocationNode } from "@opencode/util/effect/app-node"
 import { Array, Context, Effect, Layer, Types } from "effect"
-import { Agent } from "@opencode-ai/schema/agent"
-import { State } from "./state"
+import { Agent } from "@opencode/schema/agent"
+import { Bus } from "./bus.js"
+import { State } from "./state.js"
 
 export const ID = Agent.ID
 export type ID = typeof ID.Type
+export const Name = Agent.Name
+export type Name = Agent.Name
 export const defaultID = ID.make("build")
 
 export const Color = Agent.Color
 
 export const Info = Agent.Info
 export type Info = Agent.Info
+
+export { Event } from "@opencode/schema/agent"
 
 export interface Selection {
   readonly id: ID
@@ -24,7 +29,7 @@ type Data = {
   default?: ID
 }
 
-export type Draft = {
+export type Editor = {
   list: () => readonly Info[]
   get: (id: ID) => Info | undefined
   default: (id: ID | undefined) => void
@@ -32,37 +37,39 @@ export type Draft = {
   remove: (id: ID) => void
 }
 
-export interface Interface extends State.Transformable<Draft> {
+export interface Interface extends State.Transformable<Editor> {
   readonly get: (id: ID) => Effect.Effect<Info | undefined>
-  readonly default: () => Effect.Effect<Info | undefined>
   readonly resolve: (id?: ID | string) => Effect.Effect<Info | undefined>
   readonly select: (id?: ID | string) => Effect.Effect<Selection>
-  readonly all: () => Effect.Effect<Info[]>
+  readonly list: () => Effect.Effect<Info[]>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@opencode/v2/Agent") {}
+export class Service extends Context.Service<Service, Interface>()("@opencode/Agent") {}
 
 const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
-    const state = State.create<Data, Draft>({
+    const bus = yield* Bus.Service
+    const state = State.create<Data, Editor>({
+      name: "agent",
       initial: () => ({ agents: new Map() }),
-      draft: (draft) => ({
-        list: () => Array.fromIterable(draft.agents.values()) as Info[],
-        get: (id) => draft.agents.get(id),
+      editor: (editor) => ({
+        list: () => Array.fromIterable(editor.agents.values()) as Info[],
+        get: (id) => editor.agents.get(id),
         default: (id) => {
-          draft.default = id
+          editor.default = id
         },
         update: (id, fn) => {
-          const current = draft.agents.get(id) ?? (Info.empty(id) as Types.DeepMutable<Info>)
-          if (!draft.agents.has(id)) draft.agents.set(id, current)
+          const current = editor.agents.get(id) ?? (Info.default(id) as Types.DeepMutable<Info>)
+          if (!editor.agents.has(id)) editor.agents.set(id, current)
           fn(current)
           current.id = id
         },
         remove: (id) => {
-          draft.agents.delete(id)
+          editor.agents.delete(id)
         },
       }),
+      notify: () => bus.publish(Agent.Event.Updated, {}).pipe(Effect.asVoid),
     })
     const selectable = (agent: Info | undefined) =>
       agent && agent.mode !== "subagent" && !agent.hidden ? agent : undefined
@@ -81,17 +88,14 @@ const layer = Layer.effect(
     return Service.of({
       transform: state.transform,
       reload: state.reload,
-      get: Effect.fn("AgentV2.get")(function* (id) {
+      get: Effect.fn("Agent.get")(function* (id) {
         return state.get().agents.get(id)
       }),
-      default: Effect.fn("AgentV2.default")(function* () {
-        return selectedDefault()
-      }),
-      resolve: Effect.fn("AgentV2.resolve")(function* (id) {
+      resolve: Effect.fnUntraced(function* (id) {
         if (id !== undefined) return state.get().agents.get(ID.make(id))
         return selectedDefault()
       }),
-      select: Effect.fn("AgentV2.select")(function* (id) {
+      select: Effect.fn("Agent.select")(function* (id) {
         if (id !== undefined) {
           const selected = ID.make(id)
           return { id: selected, info: state.get().agents.get(selected) }
@@ -99,13 +103,14 @@ const layer = Layer.effect(
         const info = selectedDefault()
         return { id: info?.id ?? defaultID, info }
       }),
-      all: Effect.fn("AgentV2.all")(function* () {
-        return Array.fromIterable(state.get().agents.values())
+      list: Effect.fn("Agent.list")(function* () {
+        const agents = Array.fromIterable(state.get().agents.values())
+        const selected = selectedDefault()
+        if (!selected) return agents
+        return [selected, ...agents.filter((agent) => agent.id !== selected.id)]
       }),
     })
   }),
 )
 
-export const locationLayer = layer
-
-export const node = makeLocationNode({ service: Service, layer, deps: [] })
+export const node = makeLocationNode({ service: Service, layer, deps: [Bus.node] })

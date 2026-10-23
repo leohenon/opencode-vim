@@ -90,7 +90,7 @@ import { escape } from "shescape"
 export const MyPlugin = async (ctx) => {
   return {
     "tool.execute.before": async (input, output) => {
-      if (input.tool === "bash") {
+      if (input.tool === "shell") {
         output.args.command = escape(output.args.command)
       }
     },
@@ -186,10 +186,6 @@ Plugins podem se inscrever em eventos como visto abaixo na seção Exemplos. Aqu
 - `session.idle`
 - `session.status`
 - `session.updated`
-
-#### Eventos de Todo
-
-- `todo.updated`
 
 #### Eventos de Shell
 

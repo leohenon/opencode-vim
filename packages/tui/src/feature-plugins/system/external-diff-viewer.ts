@@ -2,6 +2,10 @@ import type { CliRenderer } from "@opentui/core"
 import { existsSync } from "node:fs"
 import { spawn } from "node:child_process"
 
+export function externalDiffSpawnOptions(directory: string) {
+  return { cwd: directory, stdio: "inherit" as const, shell: false }
+}
+
 export async function openExternalDiffViewer(input: {
   command: ReadonlyArray<string>
   directory: string
@@ -12,16 +16,11 @@ export async function openExternalDiffViewer(input: {
   if (!existsSync(input.directory)) throw new Error(`Diff directory does not exist: ${input.directory}`)
 
   const ignoreSigint = () => {}
-  input.renderer.suspend()
-  input.renderer.currentRenderBuffer.clear()
+  await input.renderer.suspend()
   process.on("SIGINT", ignoreSigint)
   try {
     await new Promise<void>((resolve, reject) => {
-      const child = spawn(executable, args, {
-        cwd: input.directory,
-        stdio: "inherit",
-        shell: process.platform === "win32",
-      })
+      const child = spawn(executable, args, externalDiffSpawnOptions(input.directory))
       child.once("error", reject)
       child.once("close", (code, signal) => {
         if (code === 0) return resolve()
@@ -32,8 +31,7 @@ export async function openExternalDiffViewer(input: {
     })
   } finally {
     try {
-      input.renderer.currentRenderBuffer.clear()
-      input.renderer.resume()
+      await input.renderer.resume()
       input.renderer.requestRender()
     } finally {
       process.off("SIGINT", ignoreSigint)

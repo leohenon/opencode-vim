@@ -1,7 +1,7 @@
 import { batch, createEffect, createMemo, createSignal, onCleanup, type Accessor } from "solid-js"
+import type { CopySelection } from "@opencode/plugin/tui/context"
 import type { ScrollBoxRenderable } from "@opentui/core"
-import type { Part } from "@opencode-ai/sdk/v2"
-import type { TuiCopySelection } from "@opencode-ai/plugin/tui"
+import { copyHeaders, copyIdentities } from "./copy-geometry"
 import {
   copyMatchingBracket,
   copyNextParagraph,
@@ -12,19 +12,35 @@ import {
   firstNonWhitespace,
 } from "../../component/vim/vim-motions"
 import type { CopyModeAdapter, CopySearchDirection, CopyVisualMode } from "../../component/vim/copy-adapter"
-import { write as writeClipboard } from "../../clipboard"
+import {
+  cellAt,
+  cellSegments,
+  cellToOffset,
+  cellWidth,
+  nextCell,
+  offsetToCell,
+  padCells,
+  previousCell,
+  sliceCells,
+} from "./copy-text"
 
-export type CopyRow = {
+export type CopyTarget = {
   key: string
   id: string
-  messageID?: string
   role: "user" | "assistant"
   kind: "user" | "text" | "reasoning" | "tool"
   part?: string
+  messageID?: string
+  action?: string
+  header?: boolean
   tool?: string
+  toggle?: boolean
+  col: number
+}
+
+export type CopyRow = CopyTarget & {
   line: number
   y: number
-  col: number
 }
 
 export type CopyHighlight = {
@@ -48,6 +64,7 @@ type CopyState = {
 type CopySearchOrigin = {
   idx: number
   col: number
+  point?: CopyPoint
 }
 
 type CopySearch = {
@@ -59,6 +76,7 @@ type CopySearch = {
 type CopySearchMatch = {
   idx: number
   col: number
+  width: number
 }
 
 const empty: CopyState = {
@@ -70,12 +88,30 @@ const empty: CopyState = {
   anchor: undefined,
 }
 
-const segmenter = new Intl.Segmenter()
-type RenderableEntry = { node: any; y: number; x: number; gutter: number; table?: TableCopy }
+type RenderableEntry = {
+  node: any
+  y: number
+  x: number
+  gutter: number
+  table?: TableCopy
+  target?: CopyTarget
+  header?: string
+}
 type CopyLineResult = { text: string; col: number; copyable?: boolean }
 type TableCopy = {
   line: (localY: number) => CopyLineResult | undefined
   display: (localY: number) => CopyLineResult | undefined
+}
+
+type CopyPoint = {
+  id: string
+  line: number
+  col: number
+  node?: object
+  entry?: number
+  part?: string
+  source?: number
+  offset?: number
 }
 
 type Endpoint = { idx: number; col: number }
@@ -86,22 +122,49 @@ function orderEndpoints(a: Endpoint, b: Endpoint): { start: Endpoint; end: Endpo
 
 export function createCopyMode(input: {
   scroll: () => ScrollBoxRenderable
-  messages: Accessor<{ id: string; role: string }[]>
-  parts: (id: string) => Part[]
-  thinking: () => boolean
-  details: () => boolean
+  targets: Accessor<CopyTarget[]>
   session: Accessor<string>
   toBottom: () => void
+  canToggle?: (id: string) => boolean
   toggleCollapsed?: (id: string) => boolean
   activate?: (row: CopyRow) => boolean
+  prepare?: (continuation: () => void) => void
+  cleanup?: () => void
+  write: (text: string) => Promise<void>
 }) {
-  const [state, setState] = createSignal<CopyState>({ ...empty })
+  const [layoutVersion, setLayoutVersion] = createSignal(0)
+  const [stored, setStored] = createSignal<{ value: CopyState; cursor?: CopyPoint; anchor?: CopyPoint }>({
+    value: { ...empty },
+  })
+  // Display-row indices are transient. Keep endpoints attached to the underlying
+  // renderable's logical line/cell so preceding growth and wrapping cannot retarget a yank.
+  function state(): CopyState {
+    const current = stored()
+    if (!current.value.active) return current.value
+    const list = rows()
+    const cursor = resolvePoint(current.cursor, current.value, list)
+    const anchor = current.value.anchor
+      ? resolvePoint(current.anchor, current.value.anchor, list, current.value.visual === "block")
+      : undefined
+    return { ...current.value, ...cursor, anchor }
+  }
+  function setState(update: CopyState | ((current: CopyState) => CopyState)) {
+    const value = typeof update === "function" ? update(state()) : update
+    const list = rows()
+    setStored({
+      value,
+      cursor: capturePoint(list[value.idx], value.col),
+      anchor: value.anchor ? capturePoint(list[value.anchor.idx], value.anchor.col) : undefined,
+    })
+  }
   const [unified, setUnified] = createSignal(false)
   const [yankLineFlash, setYankLineFlash] = createSignal<number | undefined>(undefined)
   const [yankRangeFlash, setYankRangeFlash] = createSignal<{ start: Endpoint; end: Endpoint } | undefined>(undefined)
   const [activeSearch, setActiveSearch] = createSignal<CopySearch | undefined>(undefined)
   const [lastSearch, setLastSearch] = createSignal<CopySearch | undefined>(undefined)
   let yankFlashTimer: ReturnType<typeof setTimeout> | undefined
+  let enterTimer: ReturnType<typeof setTimeout> | undefined
+  let enterGeneration = 0
   let lastCursor: CopyRow | undefined
 
   function flashYankRange(start: Endpoint, end: Endpoint) {
@@ -112,89 +175,165 @@ export function createCopyMode(input: {
 
   onCleanup(() => {
     if (yankFlashTimer) clearTimeout(yankFlashTimer)
+    cancelEnter()
   })
 
   // --- row building ---
 
   function rows(): CopyRow[] {
+    layoutVersion()
     const scroll = input.scroll()
     if (!scroll) return []
-
-    const meta = new Map<
-      string,
-      {
-        messageID: string
-        role: "user" | "assistant"
-        kind: "user" | "text" | "reasoning" | "tool"
-        part?: string
-        tool?: string
-      }
-    >()
-
-    for (const msg of input.messages()) {
-      const parts = input.parts(msg.id)
-      if (msg.role === "user") continue
-
-      for (const part of parts) {
-        const partKey =
-          "messageID" in part && typeof part.messageID === "string" ? `${part.messageID}-${part.id}` : part.id
-        if (part.type === "text")
-          meta.set(`text-${partKey}`, { messageID: msg.id, role: "assistant", kind: "text", part: part.id })
-        if (part.type === "reasoning") {
-          if (!input.thinking()) continue
-          if (state().active) continue
-          meta.set(`text-${partKey}`, { messageID: msg.id, role: "assistant", kind: "reasoning", part: part.id })
-        }
-        if (part.type === "tool") {
-          if (!input.details() && part.state.status === "completed") continue
-          meta.set(`tool-${partKey}`, {
-            messageID: msg.id,
-            role: "assistant",
-            kind: "tool",
-            part: part.id,
-            tool: part.tool,
-          })
-        }
-      }
-    }
-
+    const targets = new Map(input.targets().map((target) => [target.id, target]))
     return scroll
       .getChildren()
       .toSorted((a, b) => a.y - b.y)
       .flatMap((child) => {
         if (!child.id) return []
-        const m = meta.get(child.id)
-        if (!m) return []
-
-        const total = Math.max(1, Math.floor(child.height))
-        const start = m.kind === "user" ? 1 : 0
-        const end = m.kind === "user" ? Math.max(start, total - 1) : total
-        return Array.from({ length: Math.max(0, end - start) }, (_, i) => ({
-          key: `${m.kind}:${child.id}:${i}`,
-          id: child.id,
-          messageID: m.messageID,
-          role: m.role,
-          kind: m.kind,
-          part: m.part,
-          tool: m.tool,
-          line: i,
-          y: child.y + start + i,
-          col: m.kind === "user" ? 2 : 3,
-        }))
+        const target = targets.get(child.id)
+        if (!target) return []
+        const entries = findRenderables(child)
+        return Array.from({ length: Math.max(1, Math.floor(child.height)) }, (_, line) => {
+          const match = matchingEntry(entries, { line } as CopyRow)
+          const identity = match?.target ?? target
+          const actionID = match?.header ?? identity.part ?? identity.id
+          const first = entries.find((entry) =>
+            match?.header ? entry.header === match.header : (entry.target?.part ?? target.part) === identity.part,
+          )
+          const action = match && first?.y === line && input.canToggle?.(actionID) ? actionID : undefined
+          return {
+            ...identity,
+            id: target.id,
+            key: `${target.key}:${line}`,
+            action,
+            header: !!match && first?.y === line,
+            line,
+            y: child.y + line,
+            col: 0,
+          }
+        })
       })
+  }
+
+  function logicalStart(entry: RenderableEntry, local: number) {
+    const info = entry.node.lineInfo
+    const source = info?.lineSources?.[local] ?? local
+    let first = local
+    while (first > 0 && info?.lineSources?.[first - 1] === source) first--
+    return { source, start: (info?.lineStartCols?.[local] ?? 0) - (info?.lineStartCols?.[first] ?? 0) }
+  }
+
+  function capturePoint(row: CopyRow | undefined, col: number): CopyPoint | undefined {
+    if (!row) return
+    const child = childById(row.id)
+    const entries = child ? findRenderables(child) : []
+    const entry = matchingEntry(entries, row)
+    const point: CopyPoint = { id: row.id, line: row.line, col }
+    if (!entry || entry.table) return point
+    const location = logicalStart(entry, row.line - entry.y)
+    return {
+      ...point,
+      node: entry.node,
+      entry: entries.indexOf(entry),
+      part: entry.target?.part,
+      source: location.source,
+      offset: location.start + Math.max(0, col - motionMin(row)),
+    }
+  }
+
+  function resolvePoint(point: CopyPoint | undefined, fallback: Endpoint, list: CopyRow[], virtual = false): Endpoint {
+    if (!point) return fallback
+    const child = childById(point.id)
+    if (!child) return { idx: Math.max(0, Math.min(fallback.idx, list.length - 1)), col: fallback.col }
+    const entries = findRenderables(child)
+    const entry = entries.find((entry) => entry.node === point.node) ?? entries[point.entry ?? -1]
+    const candidates = list.flatMap((row, idx) => {
+      if (row.id !== point.id) return []
+      if (!entry || point.source === undefined || point.offset === undefined) return [{ row, idx, start: 0 }]
+      if (matchingEntry(entries, row) !== entry || entry.target?.part !== point.part) return []
+      const location = logicalStart(entry, row.line - entry.y)
+      return location.source === point.source ? [{ row, idx, start: location.start }] : []
+    })
+    if (!candidates.length) return { idx: Math.max(0, Math.min(fallback.idx, list.length - 1)), col: fallback.col }
+    if (!entry || point.offset === undefined) {
+      const candidate = candidates.reduce((a, b) =>
+        Math.abs(a.row.line - point.line) <= Math.abs(b.row.line - point.line) ? a : b,
+      )
+      return { idx: candidate.idx, col: point.col }
+    }
+    const candidate = candidates.findLast((candidate) => candidate.start <= point.offset!) ?? candidates[0]!
+    const line = motionLine(candidate.row)
+    return {
+      idx: candidate.idx,
+      col:
+        line.min +
+        Math.max(
+          0,
+          virtual
+            ? point.offset - candidate.start
+            : Math.min(Math.max(0, cellWidth(line.text) - 1), point.offset - candidate.start),
+        ),
+    }
+  }
+
+  let layoutSignature = ""
+  function refresh() {
+    if (!stored().value.active) return
+    const scroll = input.scroll()
+    if (!scroll || scroll.isDestroyed) return
+    const signature = JSON.stringify(
+      scroll
+        .getChildren()
+        .map((child) => [
+          child.id,
+          child.y,
+          child.width,
+          child.height,
+          findRenderables(child).map((entry) => [
+            entry.x,
+            entry.y,
+            entry.node.width,
+            entry.node.height,
+            entry.node.plainText,
+            entry.node.lineInfo?.lineSources,
+            entry.node.lineInfo?.lineStartCols,
+            entry.node.lineInfo?.lineWidthCols,
+            entry.node._layout?.rowOffsets,
+            entry.node._layout?.rowHeights,
+            entry.node._layout?.columnOffsets,
+            entry.table &&
+              Array.from({ length: tableHeight(entry.node._layout) }, (_, row) => entry.table!.display(row)),
+          ]),
+        ]),
+    )
+    if (signature === layoutSignature) return
+    layoutSignature = signature
+    setLayoutVersion((version) => version + 1)
   }
 
   // --- renderable tree helpers ---
 
-  function findRenderables(node: any, y = 0, x = 0, gutter = 0): RenderableEntry[] {
-    if (node.lineInfo && node.plainText !== undefined) return [{ node, y, x, gutter }]
+  function findRenderables(
+    node: any,
+    y = 0,
+    x = 0,
+    gutter = 0,
+    target?: CopyTarget,
+    header?: string,
+  ): RenderableEntry[] {
+    target = copyIdentities.get(node)?.() ?? target
+    header = copyHeaders.get(node)?.() ?? header
+    if (node.lineInfo && node.plainText !== undefined) return [{ node, y, x, gutter, target, header }]
     const table = tableCopy(node)
-    if (table) return [{ node, y, x, gutter, table }]
+    if (table) return [{ node, y, x, gutter, table, target, header }]
     const width = gutter || ("gutter" in node && node.gutter ? node.gutter.calculateWidth() : 0)
     const result: RenderableEntry[] = []
     for (const child of node.getChildren?.() ?? []) {
-      if (child._positionType === "absolute") continue
-      result.push(...findRenderables(child, y + Math.floor(child._y ?? 0), x + Math.floor(child._x ?? 0), width))
+      if (child._positionType === "absolute" || child.visible === false || child.isDestroyed) continue
+      const layout = child.getLayout()
+      result.push(
+        ...findRenderables(child, y + Math.floor(layout.top), x + Math.floor(layout.left), width, target, header),
+      )
     }
     return result
   }
@@ -206,11 +345,7 @@ export function createCopyMode(input: {
     const rows = Array.isArray(node._cells) ? node._cells : []
     node.ensureLayoutReady?.()
     const layout = node._layout
-    if (
-      !Array.isArray(layout.rowOffsets) ||
-      !Array.isArray(layout.rowHeights) ||
-      !Array.isArray(layout.columnOffsets)
-    )
+    if (!Array.isArray(layout.rowOffsets) || !Array.isArray(layout.rowHeights) || !Array.isArray(layout.columnOffsets))
       return undefined
     return {
       line(localY) {
@@ -233,9 +368,12 @@ export function createCopyMode(input: {
         for (const [colIdx, cell] of (rows[rowIdx] ?? []).entries()) {
           const start = (layout.columnOffsets?.[colIdx] ?? 0) + 1 + Math.max(0, Math.floor(node._cellPaddingX ?? 0))
           const text = cellLine(cell?.textBufferView, cellY)
-          for (const seg of segmenter.segment(text)) {
-            const index = start + Bun.stringWidth(text.slice(0, seg.index))
-            if (index >= 0 && index < chars.length) chars[index] = seg.segment
+          for (const segment of cellSegments(text)) {
+            const index = start + segment.cell
+            if (index < 0 || index >= chars.length) continue
+            chars[index] = segment.text
+            for (let offset = 1; offset < segment.width && index + offset < chars.length; offset++)
+              chars[index + offset] = ""
           }
         }
         const text = chars.join("").trimEnd()
@@ -288,21 +426,7 @@ export function createCopyMode(input: {
   }
 
   function sliceCols(text: string, start: number, width: number): string {
-    if (start === 0 && width >= Bun.stringWidth(text)) return text
-    let col = 0
-    let begin = -1
-    let end = text.length
-    for (const seg of segmenter.segment(text)) {
-      const w = Bun.stringWidth(seg.segment)
-      if (begin < 0 && col + w > start) begin = seg.index
-      col += w
-      if (col >= start + width) {
-        end = seg.index + seg.segment.length
-        break
-      }
-    }
-    if (begin < 0) begin = 0
-    return text.slice(begin, end)
+    return sliceCells(text, start, start + width)
   }
 
   function sourceLine(node: any, src: number): string | undefined {
@@ -383,7 +507,7 @@ export function createCopyMode(input: {
     const entries = findRenderables(child)
     if (!entries.length) return false
     const match = matchingEntry(entries, row)
-    if (match.table) return false
+    if (!match || match.table) return false
     if (typeof match.node.plainText !== "string") return false
     const local = row.line - match.y
     const info = match.node.lineInfo
@@ -397,7 +521,7 @@ export function createCopyMode(input: {
     const before = entries
       .filter((entry) => entry !== match && entry.y === row.line && entry.x < match.x)
       .toSorted((a, b) => a.x - b.x)
-    const base = Math.min(row.col, before[0]?.x ?? match.x, match.x)
+    const base = Math.min(before[0]?.x ?? match.x, match.x)
     const result = before.reduce(
       (acc, entry) => {
         const gap = Math.max(0, entry.x - base - acc.width)
@@ -413,13 +537,19 @@ export function createCopyMode(input: {
     return result.text + " ".repeat(Math.max(0, match.x - base - result.width))
   }
 
-  function matchingEntry(entries: RenderableEntry[], row: CopyRow): RenderableEntry {
-    let match = entries[0]
-    for (const entry of entries) {
-      if (entry.y > row.line) break
-      match = entry
-    }
-    return match
+  function matchingEntry(entries: RenderableEntry[], row: CopyRow): RenderableEntry | undefined {
+    return entries.findLast((entry) => {
+      const lines = entry.table
+        ? tableHeight(entry.node._layout)
+        : (entry.node.lineInfo?.lineSources?.length ?? entry.node.plainText?.split("\n").length ?? 0)
+      const height = Math.min(entry.node.height ?? lines, lines)
+      return row.line >= entry.y && row.line < entry.y + height
+    })
+  }
+
+  function tableHeight(layout: any): number {
+    const offsets = layout.rowOffsets ?? []
+    return (offsets.at(-1) ?? 0) + (layout.rowHeights?.at(-1) ?? 0) + 2
   }
 
   function taskSpinnerOffset(row: CopyRow, prefix: string, text: string) {
@@ -430,9 +560,8 @@ export function createCopyMode(input: {
     if (/^[✓│~]/.test(trimmed)) return { text, col: 0 }
     const marker = trimmed.match(/^[⋯⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\s*/)?.[0]
     if (marker) return { text: text.slice(0, leading) + trimmed.slice(marker.length), col: Bun.stringWidth(marker) }
-    // Spinner renderables are not text renderables, so copy mode reserves their
-    // visual width without making the transient frame part of copyable text.
-    return { text, col: 2 }
+    // Separate spinner nodes are already accounted for by the text node's x.
+    return { text, col: 0 }
   }
 
   function taskCopyResult(row: CopyRow, raw: string | undefined, prefix: string, text: string, col: number) {
@@ -442,13 +571,15 @@ export function createCopyMode(input: {
 
   function copyLine(row: CopyRow, child: any): CopyLineResult {
     const entries = findRenderables(child)
-    if (!entries.length) return { text: "", col: 0 }
+    if (!entries.length) return { text: "", col: 0, copyable: false }
     const match = matchingEntry(entries, row)
+    if (!match) return { text: "", col: 0, copyable: false }
+    const origin = Math.min(match.x, ...entries.filter((entry) => entry.y === row.line).map((entry) => entry.x))
     if (match.table) {
       const line = match.table.line(row.line - match.y)
-      return line ? { ...line, col: match.gutter + line.col } : { text: "", col: match.gutter, copyable: false }
+      return line ? { ...line, col: origin + line.col } : { text: "", col: origin, copyable: false }
     }
-    if (typeof match.node.plainText !== "string") return { text: "", col: 0 }
+    if (typeof match.node.plainText !== "string") return { text: "", col: 0, copyable: false }
     const local = row.line - match.y
     let prefix = rowPrefix(entries, match, row)
     const lines = match.node.plainText.split("\n")
@@ -456,9 +587,8 @@ export function createCopyMode(input: {
     if (info?.lineSources && local < info.lineSources.length) {
       const src = info.lineSources[local]
       const source = lines[src] ?? ""
-      const wrapped =
-        info.lineSources[local - 1] === src || info.lineSources[local + 1] === src
-      if (!wrapped) return taskCopyResult(row, sourceLine(match.node, src), prefix, source, match.gutter)
+      const wrapped = info.lineSources[local - 1] === src || info.lineSources[local + 1] === src
+      if (!wrapped) return taskCopyResult(row, sourceLine(match.node, src), prefix, source, origin)
       const lineStart = info.lineStartCols?.[local] ?? 0
       let base = lineStart
       for (let i = local - 1; i >= 0; i--) {
@@ -472,19 +602,12 @@ export function createCopyMode(input: {
         offset === 0 ? sourceLine(match.node, src) : undefined,
         prefix,
         sliceCols(source, offset, width),
-        match.gutter,
+        origin,
       )
     }
-    if (local >= lines.length) return { text: "", col: match.gutter }
+    if (local >= lines.length) return { text: "", col: origin, copyable: false }
     const text = lines[local] ?? ""
-    return taskCopyResult(row, sourceLine(match.node, local), prefix, text, match.gutter)
-  }
-
-  function shift(row?: CopyRow, gutter?: number) {
-    if (row?.kind !== "tool") return 0
-    if (row.tool !== "edit" && row.tool !== "apply_patch") return 0
-    if (!gutter) return 0
-    return 1
+    return taskCopyResult(row, sourceLine(match.node, local), prefix, text, origin)
   }
 
   function copySign(row: CopyRow, cache?: Map<string, any>): string | undefined {
@@ -495,6 +618,7 @@ export function createCopyMode(input: {
     const entries = findRenderables(child)
     if (!entries.length) return undefined
     const match = matchingEntry(entries, row)
+    if (!match) return undefined
     const local = row.line - match.y
     const info = match.node.lineInfo
     const src = info?.lineSources ? (info.lineSources[local] ?? local) : local
@@ -504,30 +628,25 @@ export function createCopyMode(input: {
     return sign?.after?.trim()
   }
 
-  function taskDetailIndent(row: CopyRow, text: string) {
-    if (row.kind !== "tool" || row.tool !== "task") return 0
-    // Task detail rows render under the title text, after the icon/gap.
-    return text.trimStart().startsWith("↳") ? 2 : 0
-  }
-
   function copyMin(row?: CopyRow, cache?: Map<string, any>): number {
     if (!row) return 0
     const child = childById(row.id, cache)
     if (!child) return row.col
     const line = copyLine(row, child)
-    return row.col + line.col + taskDetailIndent(row, line.text) + shift(row, line.col)
+    return row.col + line.col
   }
 
   function motionLine(row: CopyRow, cache?: Map<string, any>): { text: string; min: number; copyable?: boolean } {
     const child = childById(row.id, cache)
     if (!child) return { text: "", min: row.col, copyable: false }
     const entries = findRenderables(child)
-    if (!entries.length) return { text: "", min: row.col }
+    if (!entries.length) return { text: "", min: row.col, copyable: false }
     const match = matchingEntry(entries, row)
+    if (!match) return { text: "", min: row.col, copyable: false }
     const line = match.table?.display(row.line - match.y) ?? copyLine(row, child)
-    const col = match.table ? match.gutter + line.col : line.col
+    const col = match.table ? match.x + line.col : line.col
     const text = line.text ?? ""
-    return { text, min: row.col + col + taskDetailIndent(row, text) + shift(row, col), copyable: line.copyable }
+    return { text, min: row.col + col, copyable: line.copyable }
   }
 
   function motionMin(row?: CopyRow, cache?: Map<string, any>): number {
@@ -548,7 +667,7 @@ export function createCopyMode(input: {
     const child = childById(row.id, cache)
     if (!child) return ""
     const line = copyLine(row, child)
-    return " ".repeat(row.col + line.col + taskDetailIndent(row, line.text) + shift(row, line.col)) + line.text
+    return " ".repeat(row.col + line.col) + line.text
   }
 
   function rowText(row: CopyRow, cache?: Map<string, any>): string {
@@ -583,7 +702,8 @@ export function createCopyMode(input: {
     const scroll = input.scroll()
     const min = motionMin(row, cache)
     const text = motionPadded(row, cache)
-    const max = text.length > 0 ? Math.min(scroll.width - 2, text.length - 1) : min
+    const width = cellWidth(text)
+    const max = width > 0 ? Math.min(scroll.width - 2, width - 1) : min
     if (stick === "start") return min
     if (stick === "first") return Math.max(min, Math.min(max, firstNonWhitespace(text, 0)))
     if (stick === "end") return max
@@ -604,11 +724,13 @@ export function createCopyMode(input: {
   }
 
   function setCol(offset: number) {
+    cancelCompensation()
     const scroll = input.scroll()
     const row = rows()[state().idx]
     const min = motionMin(row)
     const text = motionPadded(row)
-    const max = text.length > 0 ? Math.min(scroll.width - 2, text.length - 1) : min
+    const width = cellWidth(text)
+    const max = width > 0 ? Math.min(scroll.width - 2, width - 1) : min
     const c = Math.max(min, Math.min(max, offset))
     setState((s) => ({ ...s, col: c, stick: c - min }))
   }
@@ -620,6 +742,10 @@ export function createCopyMode(input: {
   // --- scroll compensation ---
 
   let compensateTimer: ReturnType<typeof setTimeout> | undefined
+  let compensateGeneration = 0
+  onCleanup(() => {
+    if (compensateTimer) clearTimeout(compensateTimer)
+  })
 
   function scrollOffset(scroll: ScrollBoxRenderable) {
     return scroll.scrollTop ?? scroll.y ?? 0
@@ -634,11 +760,6 @@ export function createCopyMode(input: {
     else scroll.scrollBy(top - scrollOffset(scroll))
   }
 
-  function scrollByScreenDelta(scroll: ScrollBoxRenderable, delta: number) {
-    if (delta === 0) return
-    scrollToOffset(scroll, scrollOffset(scroll) + delta)
-  }
-
   function snapshotScroll() {
     const scr = input.scroll()
     if (!scr) return undefined
@@ -651,8 +772,16 @@ export function createCopyMode(input: {
     return { id: ref.id, childY: ref.y - top, scrollY, atBottom }
   }
 
-  function compensateScroll(snap: ReturnType<typeof snapshotScroll>, afterSettle?: () => void, fast = false) {
+  function cancelCompensation() {
+    compensateGeneration++
     if (compensateTimer) clearTimeout(compensateTimer)
+    compensateTimer = undefined
+  }
+
+  function compensateScroll(snap: ReturnType<typeof snapshotScroll>, afterSettle?: () => void, fast = false) {
+    cancelCompensation()
+    const compensation = compensateGeneration
+    const generation = enterGeneration
     if (!snap) {
       afterSettle?.()
       return
@@ -666,10 +795,9 @@ export function createCopyMode(input: {
       const oldAbsolute = snap.scrollY + snap.childY
       const newAbsolute = scrollOffset(scr) + child.y - viewportY(scr)
       const contentDelta = newAbsolute - oldAbsolute
-      const cappedDelta = Math.max(-scr.height, Math.min(scr.height, contentDelta))
       if (contentDelta !== 0) {
         if (snap.atBottom) scrollToOffset(scr, scr.scrollHeight)
-        else scrollToOffset(scr, snap.scrollY + cappedDelta)
+        else scrollToOffset(scr, snap.scrollY + contentDelta)
       }
       return true
     }
@@ -677,6 +805,7 @@ export function createCopyMode(input: {
     let attempts = 0
     let settled = false
     const poll = () => {
+      if (generation !== enterGeneration || compensation !== compensateGeneration) return
       attempts++
       const compensated = tryCompensate()
       if (compensated && !settled && attempts >= 2) {
@@ -687,14 +816,16 @@ export function createCopyMode(input: {
         if (!settled) afterSettle?.()
         return
       }
-      compensateTimer = setTimeout(poll, fast && attempts < 4 ? 4 : 16)
+      if (generation === enterGeneration && compensation === compensateGeneration)
+        compensateTimer = setTimeout(poll, fast && attempts < 4 ? 4 : 16)
     }
     compensateTimer = setTimeout(poll, 0)
   }
 
   // --- navigation ---
 
-  function sync(next: number) {
+  function sync(next: number, settling = false) {
+    if (!settling) cancelCompensation()
     const scroll = input.scroll()
     const list = rows()
     if (!list.length) {
@@ -738,12 +869,15 @@ export function createCopyMode(input: {
 
   function matchingTarget(list: CopyRow[], target: CopyRow) {
     const exact = list.map((row, idx) => ({ row, idx })).filter((x) => x.row.key === target.key)
-    if (exact.length) return exact.reduce((a, b) => (Math.abs(a.row.y - target.y) < Math.abs(b.row.y - target.y) ? a : b)).idx
+    if (exact.length)
+      return exact.reduce((a, b) => (Math.abs(a.row.y - target.y) < Math.abs(b.row.y - target.y) ? a : b)).idx
     const candidates = list
       .map((row, idx) => ({ row, idx }))
       .filter((x) => x.row.id === target.id && x.row.kind === target.kind && x.row.role === target.role)
     if (!candidates.length) return -1
-    return candidates.reduce((a, b) => (Math.abs(a.row.line - target.line) < Math.abs(b.row.line - target.line) ? a : b)).idx
+    return candidates.reduce((a, b) =>
+      Math.abs(a.row.line - target.line) < Math.abs(b.row.line - target.line) ? a : b,
+    ).idx
   }
 
   function enterTarget(list: CopyRow[], preferVisible = false, preferBottom = false, visibleTarget?: CopyRow) {
@@ -767,21 +901,39 @@ export function createCopyMode(input: {
     const text = motionPadded(row)
     return {
       idx,
-      col: Math.max(min, Math.min(previous.col, text.length > 0 ? Math.min(input.scroll().width - 2, text.length - 1) : min)),
+      col: Math.max(
+        min,
+        Math.min(previous.col, cellWidth(text) > 0 ? Math.min(input.scroll().width - 2, cellWidth(text) - 1) : min),
+      ),
       stick: previous.stick,
     }
   }
 
   function enter() {
+    cancelEnter()
+    const generation = enterGeneration
+    let attempts = 0
+    const session = input.session()
+    const valid = () => generation === enterGeneration && input.session() === session
+    // Preparation can mount hundreds of previously hidden rows. Capture the reader's
+    // logical viewport before that changes render geometry or scroll height.
+    const originalRows = rows()
+    const originalScroll = snapshotScroll()
     const init = () => {
-      const beforeRows = rows()
+      if (!valid()) return true
+      const beforeRows = originalRows.length ? originalRows : rows()
       const previousTarget = lastCursor
       const initial = state().idx < 0 && !previousTarget
       const previousVisible = previousTarget
         ? hasVisibleRow(beforeRows[matchingTarget(beforeRows, previousTarget)])
         : hasVisibleRow(beforeRows[state().idx])
       const preEnterTarget = (preferBottom = false) => beforeRows[pickVisibleTarget(beforeRows, preferBottom)]
-      const selectTarget = (preferVisible = false, preferBottom = false, usePreEnterTarget = false, ensureVisible = true) => {
+      const selectTarget = (
+        preferVisible = false,
+        preferBottom = false,
+        usePreEnterTarget = false,
+        ensureVisible = true,
+      ) => {
         const list = rows()
         if (!list.length) {
           setState({ ...empty })
@@ -805,13 +957,13 @@ export function createCopyMode(input: {
           visual: undefined,
           anchor: undefined,
         }))
-        if (ensureVisible) sync(target.idx)
+        if (ensureVisible) sync(target.idx, true)
         else setState((s) => ({ ...s, active: true, idx: target.idx }))
         return true
       }
 
       if (!unified()) {
-        const snap = snapshotScroll()
+        const snap = originalScroll ?? snapshotScroll()
         batch(() => {
           setUnified(true)
           setState((s) => ({ ...s, active: true }))
@@ -819,7 +971,8 @@ export function createCopyMode(input: {
         const preferBottom = initial && snap?.atBottom
         selectTarget(initial || !previousVisible, preferBottom, true, false)
         compensateScroll(snap, () => {
-          if (!selectTarget(initial || !previousVisible, preferBottom, true)) setTimeout(() => init(), 0)
+          if (!valid()) return
+          if (!selectTarget(initial || !previousVisible, preferBottom, true)) start()
         })
         return true
       }
@@ -827,8 +980,26 @@ export function createCopyMode(input: {
       setState((s) => ({ ...s, active: true }))
       return selectTarget(initial || !previousVisible, false, true, true)
     }
-    if (init()) return
-    setTimeout(() => init(), 0)
+    const start = () => {
+      if (!valid() || init()) return
+      if (++attempts >= 20) {
+        exitPreserveScroll()
+        return
+      }
+      enterTimer = setTimeout(start, 16)
+    }
+    if (input.prepare) {
+      input.prepare(start)
+      return
+    }
+    start()
+  }
+
+  function cancelEnter() {
+    enterGeneration++
+    if (enterTimer) clearTimeout(enterTimer)
+    enterTimer = undefined
+    cancelCompensation()
   }
 
   function clearSearchState() {
@@ -837,6 +1008,7 @@ export function createCopyMode(input: {
   }
 
   function exit(scrollToBottom?: boolean) {
+    cancelEnter()
     if (scrollToBottom === false) {
       exitPreserveScroll()
       return
@@ -847,10 +1019,12 @@ export function createCopyMode(input: {
       setState({ ...empty })
       setUnified(false)
     })
+    input.cleanup?.()
     input.toBottom()
   }
 
   function exitPreserveScroll() {
+    cancelEnter()
     lastCursor = row()
     const snap = snapshotScroll()
     batch(() => {
@@ -858,6 +1032,7 @@ export function createCopyMode(input: {
       setState((s) => ({ ...s, active: false, visual: undefined, anchor: undefined }))
       setUnified(false)
     })
+    input.cleanup?.()
     compensateScroll(snap, undefined, true)
   }
 
@@ -891,6 +1066,7 @@ export function createCopyMode(input: {
   }
 
   function move(action: "up" | "down" | "left" | "right") {
+    cancelCompensation()
     const scroll = input.scroll()
     const s = state()
     if (!s.active) return
@@ -905,7 +1081,7 @@ export function createCopyMode(input: {
     if (action === "left") {
       const row = rows()[s.idx]
       const min = motionMin(row)
-      const c = Math.max(min, Math.min(scroll.width - 2, s.col - 1))
+      const c = Math.max(min, Math.min(scroll.width - 2, min + previousCell(motionText(row), s.col - min)))
       if (c === s.col) return
       setState((prev) => ({ ...prev, col: c, stick: c - min }))
       return
@@ -913,8 +1089,9 @@ export function createCopyMode(input: {
     const row = rows()[s.idx]
     const min = motionMin(row)
     const text = motionPadded(row)
-    const max = text.length > 0 ? Math.min(scroll.width - 2, text.length - 1) : min
-    const c = Math.max(min, Math.min(max, s.col + 1))
+    const width = cellWidth(text)
+    const max = width > 0 ? Math.min(scroll.width - 2, width - 1) : min
+    const c = Math.max(min, Math.min(max, min + nextCell(motionText(row), s.col - min)))
     if (c === s.col) return
     setState((prev) => ({ ...prev, col: c, stick: c - min }))
   }
@@ -932,65 +1109,58 @@ export function createCopyMode(input: {
         idx: anchor.idx,
         col,
         stick: blockEnd ? "end" : col - motionMin(row),
-        anchor: { idx: prev.idx, col: blockEnd ? anchor.col : prev.visual === "block" ? blockHeadCol(prev, list) : prev.col },
+        anchor: {
+          idx: prev.idx,
+          col: blockEnd ? anchor.col : prev.visual === "block" ? blockHeadCol(prev, list) : prev.col,
+        },
       }
     })
   }
 
-  function wordRows(list: CopyRow[], cache: Map<string, any>) {
-    return list.map((row) => ({ col: motionMin(row, cache) }))
+  function textMotion(
+    motion: (
+      rows: { col: number }[],
+      get: (idx: number) => string,
+      idx: number,
+      col: number,
+    ) => { idx: number; col: number },
+  ) {
+    const s = state()
+    if (!s.active) return false
+    const list = rows()
+    if (!list.length) return false
+    const cache = childCache()
+    const get = (idx: number) => motionText(list[idx]!, cache)
+    const current = get(s.idx)
+    const next = motion(
+      list.map(() => ({ col: 0 })),
+      get,
+      s.idx,
+      cellToOffset(current, Math.max(0, s.col - motionMin(list[s.idx], cache))),
+    )
+    const row = list[next.idx]
+    if (!row) return false
+    const col = motionMin(row, cache) + offsetToCell(get(next.idx), next.col)
+    if (next.idx === s.idx && col === s.col) return false
+    if (next.idx !== s.idx) sync(next.idx)
+    setCol(col)
+    return true
   }
 
   function wordNext(big: boolean) {
-    const s = state()
-    if (!s.active) return false
-    const list = rows()
-    if (!list.length) return false
-    const cache = new Map(input.scroll().getChildren().map((c) => [c.id, c]))
-    const next = copyWordNext(wordRows(list, cache), (idx) => motionText(list[idx]!, cache), s.idx, s.col, big)
-    if (next.idx === s.idx && next.col === s.col) return false
-    if (next.idx !== s.idx) sync(next.idx)
-    setCol(next.col)
-    return true
+    return textMotion((list, get, idx, col) => copyWordNext(list, get, idx, col, big))
   }
 
   function wordPrev(big: boolean) {
-    const s = state()
-    if (!s.active) return false
-    const list = rows()
-    if (!list.length) return false
-    const cache = new Map(input.scroll().getChildren().map((c) => [c.id, c]))
-    const prev = copyWordPrev(wordRows(list, cache), (idx) => motionText(list[idx]!, cache), s.idx, s.col, big)
-    if (prev.idx === s.idx && prev.col === s.col) return false
-    if (prev.idx !== s.idx) sync(prev.idx)
-    setCol(prev.col)
-    return true
+    return textMotion((list, get, idx, col) => copyWordPrev(list, get, idx, col, big))
   }
 
   function wordEnd(big: boolean) {
-    const s = state()
-    if (!s.active) return false
-    const list = rows()
-    if (!list.length) return false
-    const cache = new Map(input.scroll().getChildren().map((c) => [c.id, c]))
-    const next = copyWordEnd(wordRows(list, cache), (idx) => motionText(list[idx]!, cache), s.idx, s.col, big)
-    if (next.idx === s.idx && next.col === s.col) return false
-    if (next.idx !== s.idx) sync(next.idx)
-    setCol(next.col)
-    return true
+    return textMotion((list, get, idx, col) => copyWordEnd(list, get, idx, col, big))
   }
 
   function matchingBracket() {
-    const s = state()
-    if (!s.active) return false
-    const list = rows()
-    if (!list.length) return false
-    const cache = new Map(input.scroll().getChildren().map((c) => [c.id, c]))
-    const next = copyMatchingBracket(wordRows(list, cache), (idx) => motionText(list[idx]!, cache), s.idx, s.col)
-    if (next.idx === s.idx && next.col === s.col) return false
-    if (next.idx !== s.idx) sync(next.idx)
-    setCol(next.col)
-    return true
+    return textMotion(copyMatchingBracket)
   }
 
   function paragraphColumn(
@@ -1031,7 +1201,7 @@ export function createCopyMode(input: {
   function rowEndCol(row: CopyRow, cache?: Map<string, any>) {
     const min = motionMin(row, cache)
     const text = motionText(row, cache)
-    return text.length > 0 ? min + text.length - 1 : min
+    return cellWidth(text) > 0 ? min + cellWidth(text) - 1 : min
   }
 
   function blockHeadCol(s: CopyState, list = rows(), cache?: Map<string, any>) {
@@ -1044,7 +1214,12 @@ export function createCopyMode(input: {
   // --- search ---
 
   function childCache() {
-    return new Map(input.scroll().getChildren().map((c) => [c.id, c]))
+    return new Map(
+      input
+        .scroll()
+        .getChildren()
+        .map((c) => [c.id, c]),
+    )
   }
 
   function searchMatches(query: string, list: CopyRow[], cache: Map<string, any>): CopySearchMatch[] {
@@ -1061,7 +1236,8 @@ export function createCopyMode(input: {
       while (from <= haystack.length) {
         const found = haystack.indexOf(target, from)
         if (found < 0) break
-        matches.push({ idx, col: min + found })
+        const matched = text.slice(found, found + target.length)
+        matches.push({ idx, col: min + offsetToCell(text, found), width: Math.max(1, cellWidth(matched)) })
         from = found + Math.max(1, target.length)
       }
       return matches
@@ -1074,7 +1250,10 @@ export function createCopyMode(input: {
 
   function pickSearchMatch(matches: CopySearchMatch[], direction: CopySearchDirection, origin: CopySearchOrigin) {
     if (direction === "forward") {
-      return matches.find((match) => match.idx > origin.idx || (match.idx === origin.idx && match.col > origin.col)) ?? matches[0]
+      return (
+        matches.find((match) => match.idx > origin.idx || (match.idx === origin.idx && match.col > origin.col)) ??
+        matches[0]
+      )
     }
     return (
       matches.findLast((match) => match.idx < origin.idx || (match.idx === origin.idx && match.col < origin.col)) ??
@@ -1098,13 +1277,14 @@ export function createCopyMode(input: {
   }
 
   function restoreSearchOrigin(search: CopySearch) {
-    sync(search.origin.idx)
-    setCol(search.origin.col)
+    const origin = resolvePoint(search.origin.point, search.origin, rows())
+    sync(origin.idx)
+    setCol(origin.col)
   }
 
   function search(query: string, direction: CopySearchDirection, origin: CopySearchOrigin = state(), commit = true) {
     const matches = currentSearchMatches(query)
-    const match = pickSearchMatch(matches, direction, origin)
+    const match = pickSearchMatch(matches, direction, resolvePoint(origin.point, origin, rows()))
     if (!match) return false
     if (commit) setLastSearch({ query, direction, origin })
     return moveToSearchMatch(match)
@@ -1112,7 +1292,11 @@ export function createCopyMode(input: {
 
   function startSearch(direction: CopySearchDirection) {
     const s = state()
-    setActiveSearch({ query: "", direction, origin: { idx: s.idx, col: s.col } })
+    setActiveSearch({
+      query: "",
+      direction,
+      origin: { idx: s.idx, col: s.col, point: capturePoint(rows()[s.idx], s.col) },
+    })
   }
 
   function updateSearch(query: string) {
@@ -1134,7 +1318,8 @@ export function createCopyMode(input: {
   }
 
   function backspaceSearch() {
-    return updateSearch((activeSearch()?.query ?? "").slice(0, -1))
+    const query = activeSearch()?.query ?? ""
+    return updateSearch(query.slice(0, cellSegments(query).at(-1)?.start ?? 0))
   }
 
   function submitSearch() {
@@ -1180,6 +1365,7 @@ export function createCopyMode(input: {
   // --- visual ---
 
   function visual(mode: CopyVisualMode) {
+    cancelCompensation()
     const s = state()
     if (!s.active) return
     if (s.visual === mode) {
@@ -1225,12 +1411,14 @@ export function createCopyMode(input: {
           const text = motionText(row, cache)
           const min = motionMin(row, cache)
           const rowRight = endMode ? rowEndCol(row, cache) : right
-          const rowLeft = endMode && rowRight < anchor.col ? anchor.col : endMode ? Math.min(anchor.col, rowRight) : left
-          const selected = `${rowLeft < min ? " ".repeat(min - rowLeft) : ""}${text.slice(
+          const rowLeft =
+            endMode && rowRight < anchor.col ? anchor.col : endMode ? Math.min(anchor.col, rowRight) : left
+          const selected = `${rowLeft < min ? " ".repeat(min - rowLeft) : ""}${sliceCells(
+            text,
             Math.max(0, rowLeft - min),
             Math.max(0, rowRight - min + 1),
           )}`
-          return endMode ? selected : selected.padEnd(right - left + 1, " ")
+          return endMode ? selected : padCells(selected, right - left + 1)
         })
         .join("\n")
     }
@@ -1239,9 +1427,12 @@ export function createCopyMode(input: {
       if (!row) return ""
       const text = motionText(row, cache)
       const min = motionMin(row, cache)
-      return text.slice(Math.max(0, start.col - min), Math.max(0, end.col - min + 1))
+      return sliceCells(text, Math.max(0, start.col - min), Math.max(0, end.col - min + 1))
     }
-    const charItems = Array.from({ length: end.idx - start.idx + 1 }, (_, i) => ({ row: list[start.idx + i], i: start.idx + i }))
+    const charItems = Array.from({ length: end.idx - start.idx + 1 }, (_, i) => ({
+      row: list[start.idx + i],
+      i: start.idx + i,
+    }))
       .filter((x): x is { row: CopyRow; i: number } => !!x.row)
       .filter((x) => rowCopyable(x.row, cache))
     return charItems
@@ -1249,8 +1440,8 @@ export function createCopyMode(input: {
         const text = motionText(x.row, cache)
         const min = motionMin(x.row, cache)
         let segment: string
-        if (x.i === start.idx) segment = text.slice(Math.max(0, start.col - min))
-        else if (x.i === end.idx) segment = text.slice(0, Math.max(0, end.col - min + 1))
+        if (x.i === start.idx) segment = sliceCells(text, Math.max(0, start.col - min), cellWidth(text))
+        else if (x.i === end.idx) segment = sliceCells(text, 0, Math.max(0, end.col - min + 1))
         else segment = signedMotionText(x.row, cache)
         return (j > 0 ? (isWrappedContinuation(x.row, cache) ? "" : "\n") : "") + segment
       })
@@ -1263,29 +1454,37 @@ export function createCopyMode(input: {
     return rangeText(s.anchor, { idx: s.idx, col: s.visual === "block" ? blockHeadCol(s) : s.col }, s.visual)
   }
 
+  function selection(): CopySelection | undefined {
+    const s = state()
+    if (!s.active || !s.visual || !s.anchor) return
+    const text = selectionText()
+    if (!text.trim()) return
+    const { start, end } = orderEndpoints(s.anchor, { idx: s.idx, col: s.col })
+    const cache = new Map(
+      input
+        .scroll()
+        .getChildren()
+        .map((child) => [child.id, child]),
+    )
+    const references = new Map<string, CopySelection["references"][number]>()
+    for (const row of rows().slice(start.idx, end.idx + 1)) {
+      if (!row.messageID || !rowCopyable(row, cache)) continue
+      const key = JSON.stringify([row.messageID, row.part])
+      if (references.has(key)) continue
+      references.set(key, Object.freeze({ messageID: row.messageID, partID: row.part, role: row.role }))
+    }
+    return Object.freeze({
+      sessionID: input.session(),
+      text,
+      mode: s.visual,
+      references: Object.freeze([...references.values()]),
+    })
+  }
+
   function yank() {
     const text = selectionText()
     if (!text) return null
     return { text, linewise: false }
-  }
-
-  function selection(): TuiCopySelection | undefined {
-    const s = state()
-    const text = selectionText()
-    if (!s.active || !s.visual || !s.anchor || !text.trim()) return
-    const { start, end } = orderEndpoints(s.anchor, { idx: s.idx, col: s.col })
-    const references = [
-      ...new Map(
-        rows()
-          .slice(start.idx, end.idx + 1)
-          .filter((row) => row.messageID)
-          .map((row) => [
-            `${row.messageID}:${row.part ?? ""}`,
-            { messageID: row.messageID!, partID: row.part, role: row.role },
-          ]),
-      ).values(),
-    ]
-    return { sessionID: input.session(), text, mode: s.visual, references }
   }
 
   function yankLine() {
@@ -1302,7 +1501,8 @@ export function createCopyMode(input: {
     if (!rowCopyable(row, cache)) return null
     const text = signedText(row, cache)
     setYankLineFlash(s.idx)
-    setTimeout(() => setYankLineFlash(undefined), 70)
+    if (yankFlashTimer) clearTimeout(yankFlashTimer)
+    yankFlashTimer = setTimeout(() => setYankLineFlash(undefined), 70)
     return { text, linewise: false }
   }
 
@@ -1317,7 +1517,18 @@ export function createCopyMode(input: {
         .getChildren()
         .map((c) => [c.id, c]),
     )
-    const next = copyMatchingBracket(wordRows(list, cache), (idx) => motionText(list[idx]!, cache), s.idx, s.col)
+    const get = (idx: number) => motionText(list[idx]!, cache)
+    const source = list[s.idx]
+    if (!source) return null
+    const found = copyMatchingBracket(
+      list.map(() => ({ col: 0 })),
+      get,
+      s.idx,
+      cellToOffset(get(s.idx), Math.max(0, s.col - motionMin(source, cache))),
+    )
+    const target = list[found.idx]
+    if (!target) return null
+    const next = { idx: found.idx, col: motionMin(target, cache) + offsetToCell(get(found.idx), found.col) }
     if (next.idx === s.idx && next.col === s.col) return null
     const current = { idx: s.idx, col: s.col }
     const text = rangeText(current, next, "char")
@@ -1329,88 +1540,18 @@ export function createCopyMode(input: {
   async function copy() {
     const text = selectionText()
     if (!text) return
-    await writeClipboard(text)
+    await input.write(text)
   }
 
   function isToolToggleRow(row: CopyRow) {
-    if (row.kind !== "tool") return false
-    const text = rowText(row).trim().toLowerCase()
-    return text === "click to expand" || text === "click to collapse"
-  }
-
-  function toolToggleText(row: CopyRow) {
-    if (row.kind !== "tool") return undefined
-    const text = rowText(row).trim().toLowerCase()
-    if (text === "click to expand" || text === "click to collapse") return text
-    return undefined
-  }
-
-  function lastToolToggleIndex(list: CopyRow[], id: string, expectedText?: string) {
-    return list.findLastIndex((candidate) => {
-      if (candidate.id !== id) return false
-      const text = toolToggleText(candidate)
-      return expectedText ? text === expectedText : !!text
-    })
-  }
-
-  function settleToolToggle(
-    id: string,
-    expectedText: string,
-    apply: (idx: number, row: CopyRow) => void,
-    afterSettle?: () => void,
-  ) {
-    if (compensateTimer) clearTimeout(compensateTimer)
-
-    const tryApply = () => {
-      const scr = input.scroll()
-      if (!scr || scr.isDestroyed) return false
-      const list = rows()
-      const idx = lastToolToggleIndex(list, id, expectedText)
-      const next = list[idx]
-      if (!next) return false
-      apply(idx, next)
-      return true
-    }
-
-    let attempts = 0
-    let settled = false
-    const poll = () => {
-      attempts++
-      const applied = tryApply()
-      if (applied && !settled && attempts >= 2) {
-        settled = true
-        afterSettle?.()
-      }
-      if (attempts >= 10) {
-        if (!settled) afterSettle?.()
-        return
-      }
-      compensateTimer = setTimeout(poll, attempts < 4 ? 4 : 16)
-    }
-    compensateTimer = setTimeout(poll, 0)
-  }
-
-  function revealToolToggle(id: string, expectedText: string, afterSettle?: () => void) {
-    settleToolToggle(id, expectedText, (idx) => sync(idx), afterSettle)
-  }
-
-  function preserveToolToggleOffset(id: string, expectedText: string, offset: number, afterSettle?: () => void) {
-    settleToolToggle(
-      id,
-      expectedText,
-      (_, row) => {
-        const scr = input.scroll()
-        scrollByScreenDelta(scr, row.y - viewportY(scr) - offset)
-      },
-      afterSettle,
-    )
+    return !!row.action
   }
 
   function activate() {
     const s = state()
     if (!s.active) return false
     const row = rows()[s.idx]
-    if (!row || !rowText(row).trim()) return false
+    if (!row?.header || row.action || !rowText(row).trim()) return false
     return input.activate?.(row) ?? false
   }
 
@@ -1420,27 +1561,17 @@ export function createCopyMode(input: {
     const list = rows()
     const row = list[s.idx]
     if (!row || !isToolToggleRow(row)) return false
-    if (lastToolToggleIndex(list, row.id) !== s.idx) return false
-    const text = rowText(row).trim().toLowerCase()
-    const expanding = text === "click to expand"
-    const offset = row.y - viewportY(input.scroll())
-    const targetID = row.id
-    const expectedText = expanding ? "click to collapse" : "click to expand"
-    const toggled = Boolean(input.toggleCollapsed?.(row.id) || (row.part ? input.toggleCollapsed?.(row.part) : false))
-    if (toggled) {
-      const restoreCursor = () => {
-        const list = rows()
-        const idx = lastToolToggleIndex(list, targetID, expectedText)
-        const next = list[idx]
-        if (!next) return
-        if (expanding) sync(idx)
-        else setState((prev) => ({ ...prev, active: true, idx }))
-        setState((prev) => ({ ...prev, col: copyMin(next), stick: "first" }))
-      }
-      if (expanding) revealToolToggle(targetID, expectedText, restoreCursor)
-      else preserveToolToggleOffset(targetID, expectedText, offset, restoreCursor)
+    if (row.action) {
+      const snap = snapshotScroll()
+      const toggled = Boolean(input.toggleCollapsed?.(row.action))
+      if (toggled)
+        compensateScroll(snap, () => {
+          const next = rows().findIndex((candidate) => candidate.key === row.key)
+          if (next >= 0) sync(next)
+        })
+      return toggled
     }
-    return toggled
+    return false
   }
 
   // --- jumps ---
@@ -1563,13 +1694,13 @@ export function createCopyMode(input: {
       options?: Pick<CopyHighlight, "kind" | "current"> & { placeholder?: boolean },
     ) => {
       if (left > right) return
-      const selected = text.slice(Math.max(0, left - min), Math.max(0, right - min + 1))
+      const selected = sliceCells(text, Math.max(0, left - min), Math.max(0, right - min + 1))
       if (!selected && !options?.placeholder) return
       const start = Math.max(left, min)
       const entry: CopyHighlight = {
         line: row.line,
         left: start,
-        right: start + Math.max(1, selected.length) - 1,
+        right: start + Math.max(1, cellWidth(selected)) - 1,
         text: selected || " ",
         ...(options?.kind ? { kind: options.kind } : {}),
         ...(options?.current ? { current: true } : {}),
@@ -1590,7 +1721,7 @@ export function createCopyMode(input: {
         if (!row) continue
         const line = motionLine(row, cache)
         if (line.copyable === false) continue
-        addHighlight(row, line.min, line.text, match.col, match.col + searchQuery.length - 1, {
+        addHighlight(row, line.min, line.text, match.col, match.col + match.width - 1, {
           kind: "search",
           current: match.idx === s.idx && match.col === s.col,
         })
@@ -1602,7 +1733,7 @@ export function createCopyMode(input: {
       if (row) {
         const line = motionLine(row, cache)
         if (line.copyable !== false) {
-          const max = line.text.length > 0 ? line.min + line.text.length - 1 : line.min
+          const max = cellWidth(line.text) > 0 ? line.min + cellWidth(line.text) - 1 : line.min
           addHighlight(row, line.min, line.text, line.min, max)
         }
       }
@@ -1614,7 +1745,7 @@ export function createCopyMode(input: {
         if (!r) continue
         const line = motionLine(r, cache)
         if (line.copyable === false) continue
-        const max = line.text.length > 0 ? line.min + line.text.length - 1 : line.min
+        const max = cellWidth(line.text) > 0 ? line.min + cellWidth(line.text) - 1 : line.min
         addHighlight(
           r,
           line.min,
@@ -1637,7 +1768,7 @@ export function createCopyMode(input: {
       if (!r) continue
       const line = motionLine(r, cache)
       if (line.copyable === false) continue
-      const max = line.text.length > 0 ? line.min + line.text.length - 1 : line.min
+      const max = cellWidth(line.text) > 0 ? line.min + cellWidth(line.text) - 1 : line.min
       const left =
         s.visual === "line"
           ? line.min
@@ -1662,15 +1793,16 @@ export function createCopyMode(input: {
             : i === start.idx && i === end.idx
               ? end.col
               : i === end.idx
-              ? end.col
-              : max
+                ? end.col
+                : max
       if (i !== h.idx) {
         addHighlight(r, line.min, line.text, left, right, { placeholder: true })
         continue
       }
-      // cursor cell is painted separately by CopyOverlay so the cursor keeps its theme.text color
+      // The cursor paints the whole grapheme separately so wide cells keep one consistent style.
+      const cursorWidth = Math.max(1, cellWidth(cellAt(line.text, h.col - line.min)))
       addHighlight(r, line.min, line.text, left, h.col - 1, { placeholder: true })
-      addHighlight(r, line.min, line.text, h.col + 1, right, { placeholder: true })
+      addHighlight(r, line.min, line.text, h.col + cursorWidth, right, { placeholder: true })
     }
     return out
   })
@@ -1681,7 +1813,7 @@ export function createCopyMode(input: {
     const row = rows()[s.idx]
     if (!row) return s.col
     const line = motionLine(row)
-    const max = line.text.length > 0 ? line.min + line.text.length - 1 : line.min
+    const max = cellWidth(line.text) > 0 ? line.min + cellWidth(line.text) - 1 : line.min
     return Math.max(line.min, Math.min(max, s.col))
   })
 
@@ -1691,13 +1823,7 @@ export function createCopyMode(input: {
     const row = rows()[s.idx]
     if (!row) return " "
     const line = motionLine(row)
-    const cursor = cursorCol()
-    let col = 0
-    for (const seg of segmenter.segment(line.text)) {
-      if (line.min + col >= cursor) return seg.segment
-      col += Bun.stringWidth(seg.segment)
-    }
-    return " "
+    return cellAt(line.text, cursorCol() - line.min)
   })
 
   const action = createMemo(() => {
@@ -1705,7 +1831,7 @@ export function createCopyMode(input: {
     if (!s.active || s.visual) return undefined
     const list = rows()
     const row = list[s.idx]
-    if (row && isToolToggleRow(row) && lastToolToggleIndex(list, row.id) === s.idx) {
+    if (row && isToolToggleRow(row)) {
       const text = rowText(row).trim()
       if (text) return { kind: "tool-toggle" as const, left: copyMin(row), text }
     }
@@ -1772,5 +1898,6 @@ export function createCopyMode(input: {
     cursorCol,
     cursorText,
     action,
+    refresh,
   }
 }

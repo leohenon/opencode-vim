@@ -61,7 +61,7 @@ _الوضع_: `primary`
 افتراضيا، يتم ضبط كل ما يلي على `ask`:
 
 - `file edits`: جميع عمليات الكتابة والتصحيح (patches) والتحرير
-- `bash`: جميع أوامر bash
+- `shell`: جميع أوامر shell
 
 يفيد هذا الوكيل عندما تريد من LLM تحليل الشفرة أو اقتراح تغييرات أو إنشاء خطط بدون إجراء أي تعديلات فعلية على قاعدة الشفرة.
 
@@ -71,7 +71,7 @@ _الوضع_: `primary`
 
 _الوضع_: `subagent`
 
-وكيل عام الغرض للبحث في أسئلة معقدة وتنفيذ مهام متعددة الخطوات. لديه وصول كامل للأدوات (باستثناء todo)، لذا يمكنه إجراء تغييرات على الملفات عند الحاجة. استخدمه لتشغيل عدة وحدات عمل بالتوازي.
+وكيل عام الغرض للبحث في أسئلة معقدة وتنفيذ مهام متعددة الخطوات. لديه وصول كامل للأدوات، لذا يمكنه إجراء تغييرات على الملفات عند الحاجة. استخدمه لتشغيل عدة وحدات عمل بالتوازي.
 
 ---
 
@@ -156,7 +156,7 @@ _الوضع_: `primary`
       "tools": {
         "write": true,
         "edit": true,
-        "bash": true
+        "shell": true
       }
     },
     "plan": {
@@ -165,7 +165,7 @@ _الوضع_: `primary`
       "tools": {
         "write": false,
         "edit": false,
-        "bash": false
+        "shell": false
       }
     },
     "code-reviewer": {
@@ -200,7 +200,7 @@ temperature: 0.1
 tools:
   write: false
   edit: false
-  bash: false
+  shell: false
 ---
 
 You are in code review mode. Focus on:
@@ -366,7 +366,7 @@ Provide constructive feedback without making direct changes.
 }
 ```
 
-يستخدم معرّف النموذج في إعدادات OpenCode الصيغة `provider/model-id`. على سبيل المثال، إذا كنت تستخدم [OpenCode Zen](/docs/zen)، فستستخدم `opencode/gpt-5.1-codex` لـ GPT 5.1 Codex.
+يستخدم معرّف النموذج في إعدادات OpenCode الصيغة `provider/model-id`. على سبيل المثال، إذا كنت تستخدم [OpenCode Zen](https://opencode.ai/v2/docs/console/)، فستستخدم `opencode/gpt-5.1-codex` لـ GPT 5.1 Codex.
 
 ---
 
@@ -379,13 +379,13 @@ Provide constructive feedback without making direct changes.
   "$schema": "https://opencode.ai/config.json",
   "tools": {
     "write": true,
-    "bash": true
+    "shell": true
   },
   "agent": {
     "plan": {
       "tools": {
         "write": false,
-        "bash": false
+        "shell": false
       }
     }
   }
@@ -419,7 +419,7 @@ Provide constructive feedback without making direct changes.
 
 ### الأذونات
 
-يمكنك تهيئة الأذونات لإدارة الإجراءات التي يستطيع الوكيل تنفيذها. حاليا، يمكن تهيئة أذونات أدوات `edit` و `bash` و `webfetch` إلى:
+يمكنك تهيئة الأذونات لإدارة الإجراءات التي يستطيع الوكيل تنفيذها. حاليا، يمكن تهيئة أذونات أدوات `edit` و `shell` و `webfetch` إلى:
 
 - `"ask"` — طلب الموافقة قبل تشغيل الأداة
 - `"allow"` — السماح بكل العمليات بدون موافقة
@@ -460,7 +460,7 @@ description: Code review without edits
 mode: subagent
 permission:
   edit: deny
-  bash:
+  shell:
     "*": ask
     "git diff": allow
     "git log*": allow
@@ -471,7 +471,7 @@ permission:
 Only analyze code and suggest changes.
 ```
 
-يمكنك ضبط الأذونات لأوامر bash محددة.
+يمكنك ضبط الأذونات لأوامر shell محددة.
 
 ```json title="opencode.json" {7}
 {
@@ -479,7 +479,7 @@ Only analyze code and suggest changes.
   "agent": {
     "build": {
       "permission": {
-        "bash": {
+        "shell": {
           "git push": "ask",
           "grep *": "allow"
         }
@@ -497,7 +497,7 @@ Only analyze code and suggest changes.
   "agent": {
     "build": {
       "permission": {
-        "bash": {
+        "shell": {
           "git *": "ask"
         }
       }
@@ -515,7 +515,7 @@ Only analyze code and suggest changes.
   "agent": {
     "build": {
       "permission": {
-        "bash": {
+        "shell": {
           "*": "ask",
           "git status *": "allow"
         }
@@ -671,19 +671,9 @@ Only analyze code and suggest changes.
 
 ## إنشاء وكلاء
 
-يمكنك إنشاء وكلاء جدد باستخدام الأمر التالي:
+أنشئ وكيلا جديدا بإضافة ملف Markdown إلى `.opencode/agents/` للمشروع أو إلى `~/.config/opencode/agents/` على المستوى العام. يصبح اسم الملف اسم الوكيل، وتضبط الواجهة الأمامية (frontmatter) وصفه ووضعه ونموذجه وصلاحياته. راجع [Markdown](#markdown) أعلاه لمعرفة تنسيق الملف.
 
-```bash
-opencode agent create
-```
-
-سيقوم هذا الأمر التفاعلي بما يلي:
-
-1. سيسألك أين تريد حفظ الوكيل: عام (global) أو خاص بالمشروع.
-2. سيطلب وصفا لما ينبغي أن يفعله الوكيل.
-3. سيولّد موجّها نظاميا ومعرّفا مناسبا.
-4. سيتيح لك اختيار الأدوات التي يمكن للوكيل الوصول إليها.
-5. أخيرا، سينشئ ملف Markdown يحتوي تهيئة الوكيل.
+شغّل `opencode debug agents` لعرض الوكلاء الذين حمّلهم OpenCode.
 
 ---
 
@@ -694,7 +684,7 @@ opencode agent create
 - **Build agent**: أعمال تطوير كاملة مع تفعيل جميع الأدوات
 - **Plan agent**: تحليل وتخطيط بدون إجراء تغييرات
 - **Review agent**: مراجعة الشفرة مع وصول للقراءة فقط بالإضافة إلى أدوات التوثيق
-- **Debug agent**: يركز على التحقيق مع تفعيل أدوات bash والقراءة
+- **Debug agent**: يركز على التحقيق مع تفعيل أدوات shell والقراءة
 - **Docs agent**: كتابة التوثيق مع عمليات الملفات بدون أوامر النظام
 
 ---
@@ -716,7 +706,7 @@ opencode agent create
 description: Writes and maintains project documentation
 mode: subagent
 tools:
-  bash: false
+  shell: false
 ---
 
 You are a technical writer. Create clear, comprehensive documentation.

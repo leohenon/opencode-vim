@@ -84,7 +84,7 @@ import { escape } from "shescape"
 export const MyPlugin = async (ctx) => {
   return {
     "tool.execute.before": async (input, output) => {
-      if (input.tool === "bash") {
+      if (input.tool === "shell") {
         output.args.command = escape(output.args.command)
       }
     },
@@ -180,10 +180,6 @@ Dodaci se mogu pretplatiti na događaje kao što je prikazano ispod u odjeljku P
 - `session.idle`
 - `session.status`
 - `session.updated`
-
-#### Todo događaji
-
-- `todo.updated`
 
 #### Shell događaji
 

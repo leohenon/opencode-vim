@@ -18,7 +18,7 @@ Brug feltet `permission` for at kontrollere verktøyets oppførsel. Du kan tilla
   "$schema": "https://opencode.ai/config.json",
   "permission": {
     "edit": "deny",
-    "bash": "ask",
+    "shell": "ask",
     "webfetch": "allow"
   }
 }
@@ -45,7 +45,7 @@ Her er alle de innebygde verktøyene som er tilgængelige i OpenCode.
 
 ---
 
-### bash
+### shell
 
 Utfør shellkommandoer i prosjektmiljøet ditt.
 
@@ -53,7 +53,7 @@ Utfør shellkommandoer i prosjektmiljøet ditt.
 {
   "$schema": "https://opencode.ai/config.json",
   "permission": {
-    "bash": "allow"
+    "shell": "allow"
   }
 }
 ```
@@ -207,27 +207,6 @@ Last inn en [ferdighet](/docs/skills) (en `SKILL.md` fil) og returner innholdet 
   }
 }
 ```
-
----
-
-### todowrite
-
-Administrer to-doslister under kodingssessioner.
-
-```json title="opencode.json" {4}
-{
-  "$schema": "https://opencode.ai/config.json",
-  "permission": {
-    "todowrite": "allow"
-  }
-}
-```
-
-Opreter og opdaterer oppgavelister for at spore fremdrift under komplekse operasjoner. LLM bruger dette til at organisere flertrinnsoppgaver.
-
-:::note
-Dette verktøyet er deaktivert for subagenter som standard, men du kan aktivere det manuelt. [Finn ut mer](/docs/agents/#permissions)
-:::
 
 ---
 

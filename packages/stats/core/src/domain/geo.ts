@@ -9,7 +9,6 @@ import {
   collapseRows,
   DATA_SITE_TIERS,
   inserted,
-  isMissingUniqueUsersColumn,
   omitUniqueUsers,
   rankRowsWithMarketShare,
   statPeriodKey,
@@ -17,6 +16,7 @@ import {
   synthesizeAllTierRows,
   toStatBaseRow,
   UPSERT_CHUNK_SIZE,
+  withUniqueUsersFallback,
   type StatBaseAggregate,
 } from "./stat"
 
@@ -143,14 +143,7 @@ export class GeoStatRepo extends Context.Service<GeoStatRepo, GeoStatRepo.Servic
           chunks(rows, UPSERT_CHUNK_SIZE),
           (chunk) =>
             Effect.tryPromise({
-              try: async () => {
-                try {
-                  return await upsertGeoChunk(chunk, true)
-                } catch (cause) {
-                  if (!isMissingUniqueUsersColumn(cause)) throw cause
-                  return upsertGeoChunk(chunk, false)
-                }
-              },
+              try: () => withUniqueUsersFallback((includeUniqueUsers) => upsertGeoChunk(chunk, includeUniqueUsers)),
               catch: (cause) => DatabaseError.make({ cause }),
             }),
           { discard: true },

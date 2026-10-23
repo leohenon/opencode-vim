@@ -17,9 +17,4 @@ if (process.versions.bun !== expectedBunVersion) {
   console.warn(`Warning: Bun version ${process.versions.bun} differs from expected ${expectedBunVersion}`);
 }
 '
-
-cd packages/opencode
-bun typecheck
-
-cd ../tui
-bun test ./test/cli/tui/vim-*.test.ts
+bun run check

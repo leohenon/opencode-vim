@@ -22,7 +22,7 @@ function createEvent(name: string): VimEvent {
 }
 
 async function createWrappedTextarea(text: string) {
-  const setup = await createTestRenderer({ width: 20, height: 12, useThread: false })
+  const setup = await createTestRenderer({ width: 20, height: 12 })
   const textarea = new TextareaRenderable(setup.renderer as any, { width: 20, height: 10 })
   setup.renderer.root.add(textarea)
   textarea.setText(text)

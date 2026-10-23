@@ -91,7 +91,7 @@ import { escape } from "shescape"
 export const MyPlugin = async (ctx) => {
   return {
     "tool.execute.before": async (input, output) => {
-      if (input.tool === "bash") {
+      if (input.tool === "shell") {
         output.args.command = escape(output.args.command)
       }
     },
@@ -187,10 +187,6 @@ Plugins kan abonnere på begivenheder som vist nedenfor i afsnittet Eksempler. H
 - `session.idle`
 - `session.status`
 - `session.updated`
-
-#### Todo-hændelser
-
-- `todo.updated`
 
 #### Shell-hændelser
 

@@ -1,14 +1,9 @@
 import { createMemo } from "solid-js"
-import { useKV } from "../../context/kv"
-import { useTuiConfig } from "../../config"
+import { useConfig } from "../../config"
+import { useUIStateOptional } from "../../context/ui-state"
 
 export function useVimEnabled() {
-  const kv = useKV()
-  const config = useTuiConfig()
-
-  return createMemo(() => {
-    const stored = kv.get("input_vim_mode")
-    if (stored !== undefined) return stored
-    return config.vim ?? true
-  })
+  const config = useConfig().data
+  const ui = useUIStateOptional()
+  return createMemo(() => ui?.[0].vim ?? config.vim ?? true)
 }

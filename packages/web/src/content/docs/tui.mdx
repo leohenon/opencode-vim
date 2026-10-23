@@ -49,7 +49,7 @@ Compare our setup with @docs/README.md
 
 ---
 
-## Bash commands
+## Shell commands
 
 Start a message with `!` to run a shell command.
 
@@ -218,16 +218,6 @@ List and switch between sessions. _Aliases_: `/resume`, `/continue`
 
 ---
 
-### share
-
-Share current session. [Learn more](/docs/share).
-
-```bash frame="none"
-/share
-```
-
----
-
 ### themes
 
 List available themes.
@@ -270,16 +260,6 @@ be a Git repository**.
 ```
 
 **Keybind:** `ctrl+x u`
-
----
-
-### unshare
-
-Unshare current session. [Learn more](/docs/share#un-sharing).
-
-```bash frame="none"
-/unshare
-```
 
 ---
 
@@ -421,32 +401,6 @@ The TUI can request attention for questions, permissions, session errors, and co
 ## Customization
 
 You can customize various aspects of the TUI view using the command palette (`ctrl+p`). These settings persist across restarts.
-
----
-
-## Vim mode
-
-Optional Vim-style prompt mode for the TUI. Disabled by default.
-Enable it from the command palette or in your config.
-
-```json title="opencode.json"
-{
-  "$schema": "https://opencode.ai/config.json",
-  "tui": {
-    "vim": true
-  }
-}
-```
-
-**Supported keys:**
-
-**Movement:** `h`, `j`, `k`, `l`, `0`, `^`/`_`, `$`; `w`, `b`, `e`, `W`, `B`, `E`; `f`, `F`, `t`, `T`, `;`, `,`; `{`, `}`
-
-**Insert / edit:** `i`, `I`, `a`, `A`, `o`, `O`; `x`; `S`, `J`, `cc`, `cw`; `dd`, `dw`
-
-**Navigation:** `gg`, `G`
-
-**Scrolling:** `Ctrl+e`, `Ctrl+y`; `Ctrl+d`, `Ctrl+u`; `Ctrl+f`, `Ctrl+b`
 
 ---
 

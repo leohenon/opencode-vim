@@ -62,7 +62,7 @@ _Mode_: `primary`
 เครื่องมือต่อไปนี้จะถูกตั้งค่าเป็น `ask` (ต้องขออนุญาต):
 
 - `file edits`: การแก้ไขไฟล์, patch, และการเขียนไฟล์
-- `bash`: คำสั่ง bash ทั้งหมด
+- `shell`: คำสั่ง shell ทั้งหมด
 
 เอเจนต์นี้มีประโยชน์เมื่อต้องการให้ LLM ตรวจสอบโค้ด หรือสร้างแผนงานก่อนที่จะลงมือทำจริง
 
@@ -155,7 +155,7 @@ _Mode_: `primary`
       "tools": {
         "write": true,
         "edit": true,
-        "bash": true
+        "shell": true
       }
     },
     "plan": {
@@ -164,7 +164,7 @@ _Mode_: `primary`
       "tools": {
         "write": false,
         "edit": false,
-        "bash": false
+        "shell": false
       }
     },
     "code-reviewer": {
@@ -199,7 +199,7 @@ temperature: 0.1
 tools:
   write: false
   edit: false
-  bash: false
+  shell: false
 ---
 
 You are in code review mode. Focus on:
@@ -378,13 +378,13 @@ ID ของโมเดลใช้รูปแบบ `provider/model-id`
   "$schema": "https://opencode.ai/config.json",
   "tools": {
     "write": true,
-    "bash": true
+    "shell": true
   },
   "agent": {
     "plan": {
       "tools": {
         "write": false,
-        "bash": false
+        "shell": false
       }
     }
   }
@@ -418,7 +418,7 @@ ID ของโมเดลใช้รูปแบบ `provider/model-id`
 
 ### Permissions (สิทธิ์)
 
-กำหนดสิทธิ์สำหรับเครื่องมือที่มีความละเอียดอ่อน เช่น `edit`, `bash` และ `webfetch`:
+กำหนดสิทธิ์สำหรับเครื่องมือที่มีความละเอียดอ่อน เช่น `edit`, `shell` และ `webfetch`:
 
 - `"ask"` — ต้องขออนุมัติจากผู้ใช้ก่อน
 - `"allow"` — อนุญาตให้ทำงานได้โดยไม่ต้องถาม
@@ -459,7 +459,7 @@ description: Code review without edits
 mode: subagent
 permission:
   edit: deny
-  bash:
+  shell:
     "*": ask
     "git diff": allow
     "git log*": allow
@@ -470,7 +470,7 @@ permission:
 Only analyze code and suggest changes.
 ```
 
-คุณสามารถกำหนดสิทธิ์สำหรับคำสั่ง bash เฉพาะได้:
+คุณสามารถกำหนดสิทธิ์สำหรับคำสั่ง shell เฉพาะได้:
 
 ```json title="opencode.json" {7}
 {
@@ -478,7 +478,7 @@ Only analyze code and suggest changes.
   "agent": {
     "build": {
       "permission": {
-        "bash": {
+        "shell": {
           "git push": "ask",
           "grep *": "allow"
         }
@@ -496,7 +496,7 @@ Only analyze code and suggest changes.
   "agent": {
     "build": {
       "permission": {
-        "bash": {
+        "shell": {
           "git *": "ask"
         }
       }
@@ -513,7 +513,7 @@ Only analyze code and suggest changes.
   "agent": {
     "build": {
       "permission": {
-        "bash": {
+        "shell": {
           "*": "ask",
           "git status *": "allow"
         }
@@ -663,19 +663,9 @@ Only analyze code and suggest changes.
 
 ## การสร้างเอเจนต์
 
-สร้างเอเจนต์ใหม่ด้วยคำสั่ง:
+สร้างเอเจนต์ใหม่โดยเพิ่มไฟล์ Markdown ไว้ใน `.opencode/agents/` สำหรับโปรเจ็กต์ หรือ `~/.config/opencode/agents/` สำหรับระดับผู้ใช้ (Global) ชื่อไฟล์จะกลายเป็นชื่อเอเจนต์ และ frontmatter ใช้กำหนดคำอธิบาย โหมด โมเดล และสิทธิ์ของเอเจนต์ ดูรูปแบบไฟล์ได้ที่ [Markdown](#markdown) ด้านบน
 
-```bash
-opencode agent create
-```
-
-คำสั่งแบบโต้ตอบจะถาม:
-
-1. สถานที่บันทึก (Global หรือ Project)
-2. คำอธิบายหน้าที่ของเอเจนต์
-3. สร้างพรอมต์และเลือกไอคอนที่เหมาะสม
-4. เลือกเครื่องมือที่เอเจนต์สามารถใช้ได้
-5. สร้างไฟล์ Markdown ของเอเจนต์
+รัน `opencode debug agents` เพื่อแสดงรายการเอเจนต์ที่ OpenCode โหลดไว้
 
 ---
 
@@ -706,7 +696,7 @@ opencode agent create
 description: Writes and maintains project documentation
 mode: subagent
 tools:
-  bash: false
+  shell: false
 ---
 
 You are a technical writer. Create clear, comprehensive documentation.

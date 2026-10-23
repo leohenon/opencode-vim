@@ -1,22 +1,82 @@
-import { Duration, Effect, Schema, Semaphore, Stream } from "effect"
-import type { Scope } from "effect"
-import type { IntegrationOAuthMethodRegistration } from "@opencode-ai/plugin/v2/effect/integration"
-import { define } from "@opencode-ai/plugin/v2/effect/plugin"
-import type { CredentialValue } from "@opencode-ai/sdk/v2/types"
-import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
-import { EventV2 } from "../../event"
-import { Credential } from "../../credential"
-import { Integration } from "../../integration"
-import { ModelV2 } from "../../model"
-import { ProviderV2 } from "../../provider"
-import { ConfigProviderV1 } from "../../v1/config/provider"
-import { ConfigProviderOptionsV1 } from "../../v1/config/provider-options"
-import { ConfigV1 } from "../../v1/config/config"
+import {
+  Clock,
+  Duration,
+  Effect,
+  Equal,
+  FiberHandle,
+  Option,
+  Schema,
+  SchemaGetter,
+  Scope,
+  Semaphore,
+  Stream,
+} from "effect"
+import type { IntegrationOAuthMethodRegistration } from "@opencode/plugin/effect/integration"
+import { define } from "@opencode/plugin/effect/plugin"
+import type { SessionHttpResponse } from "@opencode/plugin/effect/session"
+import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http"
+import { App } from "../../app.js"
+import { Bus } from "../../bus.js"
+import { Credential } from "../../credential.js"
+import { Integration } from "../../integration.js"
+import { IntegrationConnection } from "../../integration/connection.js"
+import { ManagedPolicy } from "../../managed-policy.js"
+import { Model } from "../../model.js"
+import { Provider } from "../../provider.js"
+import { Variant } from "../../variant.js"
+import { Voice } from "../../voice.js"
+import { WebSearch } from "../../websearch.js"
+import { ConfigPolicy } from "@opencode/schema/config/policy"
+import { ConfigProvider } from "@opencode/schema/config/provider"
+import { Mcp } from "@opencode/schema/mcp"
+import { Money } from "@opencode/schema/money"
 
 const defaultServer = "https://opencode.ai/console"
 const clientID = "opencode-cli"
 const methodID = Integration.MethodID.make("device")
-const RemoteResponse = Schema.Struct({ config: ConfigV1.Info })
+// Drop statements whose action or effect is a value this version does not know, so a newer Console can
+// extend either enum. Malformed statements still fail validation.
+const RemotePolicies = Schema.Array(Schema.Unknown).pipe(
+  Schema.decodeTo(Schema.Unknown, {
+    decode: SchemaGetter.transform((policies) =>
+      policies.filter((policy) => {
+        const action = Schema.decodeUnknownOption(Schema.Struct({ action: Schema.String }))(policy)
+        if (Option.isSome(action) && !Schema.is(ConfigPolicy.Info.fields.action)(action.value.action)) return false
+        const effect = Schema.decodeUnknownOption(Schema.Struct({ effect: Schema.String }))(policy)
+        return Option.isNone(effect) || Schema.is(ConfigPolicy.Effect)(effect.value.effect)
+      }),
+    ),
+    encode: SchemaGetter.passthrough({ strict: false }),
+  }),
+  Schema.decodeTo(Schema.Array(ConfigPolicy.Info)),
+  Schema.optional,
+)
+const RemoteResponse = Schema.Struct({
+  providers: Schema.Record(Schema.String, ConfigProvider.Info),
+  websearch: Schema.Struct({
+    providerID: WebSearch.ID,
+  }).pipe(Schema.optional),
+  // MCP servers by name, in the same shape as a remote server in local config. Only remote servers are
+  // accepted so the Console can never make the client run a command. `auth: "console"` asks the client
+  // to attach its own Console credential to that server's requests.
+  mcp: Schema.Struct({
+    servers: Schema.Record(
+      Schema.String,
+      Schema.Struct({ ...Mcp.RemoteConfig.fields, auth: Schema.Literal("console").pipe(Schema.optional) }),
+    ),
+  }).pipe(Schema.optional),
+  // Hosted voice models the Console starts for the caller's workspace, the inference base that creates them, and the
+  // workspace's display name, which older Consoles omit.
+  voice: Schema.Struct({
+    baseURL: Schema.String,
+    models: Schema.Array(Schema.String),
+    workspace: Schema.String.pipe(Schema.optional),
+  }).pipe(Schema.optional),
+  // Organization policy compiled for the authenticated caller; omitted when there is none.
+  // `experimental.policies` remains accepted alongside top-level `policies`.
+  policies: RemotePolicies,
+  experimental: Schema.Struct({ policies: RemotePolicies }).pipe(Schema.optional),
+})
 const Device = Schema.Struct({
   device_code: Schema.String,
   user_code: Schema.String,
@@ -28,11 +88,44 @@ const Token = Schema.Struct({
   access_token: Schema.String,
   refresh_token: Schema.String,
   expires_in: Schema.Number,
+  org_id: Schema.optional(Schema.NullOr(Schema.String)),
 })
 const TokenPending = Schema.Struct({ error: Schema.String })
 const DeviceToken = Schema.Union([Token, TokenPending])
 const User = Schema.Struct({ id: Schema.String, email: Schema.String })
 const Org = Schema.Struct({ id: Schema.String, name: Schema.String })
+// Console's 403 when the organization enforces SSO and the user's SSO proof is missing or expired.
+const SsoRequired = Schema.Struct({
+  _tag: Schema.Literal("SsoRequired"),
+  orgId: Schema.String,
+  connectionId: Schema.String,
+})
+const InvalidGrant = Schema.Struct({ error: Schema.Literal("invalid_grant") })
+const LiveSession = Schema.fromJsonString(
+  Schema.Struct({ session: Schema.Struct({ id: Schema.String }), transport: Schema.Struct({ sdp: Schema.String }) }),
+)
+const InferenceError = Schema.fromJsonString(Schema.Struct({ error: Schema.Struct({ message: Schema.String }) }))
+// Console's 401 when the session behind the access token was revoked or expired.
+const Unauthorized = Schema.Struct({ _tag: Schema.Literal("Unauthorized") })
+const signedOutMessage = "Reconnect OpenCode Console to continue"
+const ssoMessage = (organization: string | undefined) =>
+  `Sign in with SSO again to use ${organization ?? "your OpenCode Console organization"}`
+
+class SsoRequiredError extends Schema.TaggedError<SsoRequiredError>()("OpencodeConsole.SsoRequired", {
+  organization: Schema.optional(Schema.String),
+  url: Schema.String,
+}) {
+  override get message() {
+    return `${ssoMessage(this.organization)}.`
+  }
+}
+
+// The Console session or refresh token was revoked or expired; only a new device login recovers.
+class SignedOutError extends Schema.TaggedError<SignedOutError>()("OpencodeConsole.SignedOut", {}) {
+  override get message() {
+    return `${signedOutMessage}.`
+  }
+}
 
 function oauth(http: HttpClient.HttpClient) {
   return {
@@ -41,13 +134,28 @@ function oauth(http: HttpClient.HttpClient) {
       id: methodID,
       type: "oauth",
       label: "OpenCode Console account",
+      form: [
+        {
+          key: "server",
+          type: "string",
+          format: "uri",
+          hidden: true,
+          default: defaultServer,
+        },
+      ],
     },
-    authorize: () =>
+    authorize: (answer) =>
       Effect.gen(function* () {
-        const device = yield* post(http, `${defaultServer}/auth/device/code`, { client_id: clientID }, Device)
+        const server = yield* normalizeServer(answer.server ?? defaultServer)
+        const device = yield* post(
+          http,
+          `${server}/auth/device/code`,
+          { client_id: clientID, supports_org_scope: true },
+          Device,
+        )
         const verification = yield* Effect.try({
           try: () => {
-            const url = new URL(device.verification_uri_complete, `${defaultServer}/`)
+            const url = new URL(device.verification_uri_complete, `${server}/`)
             if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("expected HTTP(S)")
             return url
           },
@@ -58,191 +166,563 @@ function oauth(http: HttpClient.HttpClient) {
           mode: "auto" as const,
           url: verification.href,
           instructions: `Enter code: ${device.user_code}`,
-          callback: poll(http, defaultServer, device.device_code, Duration.seconds(device.interval)),
+          callback: poll(http, server, device.device_code, Duration.seconds(device.interval)),
         }
       }),
     refresh: (credential) =>
       Effect.gen(function* () {
-        const server = typeof credential.metadata?.server === "string" ? credential.metadata.server : defaultServer
-        const token = yield* post(
-          http,
-          `${server}/auth/device/token`,
-          { grant_type: "refresh_token", refresh_token: credential.refresh, client_id: clientID },
-          Token,
+        const response = yield* send(http, `${serverUrl(credential)}/auth/device/token`, {
+          grant_type: "refresh_token",
+          refresh_token: credential.refresh,
+          client_id: clientID,
+        })
+        if (response.status === 400) {
+          const body = yield* HttpClientResponse.schemaBodyJson(InvalidGrant)(response).pipe(Effect.option)
+          if (Option.isSome(body)) return yield* new SignedOutError()
+        }
+        const token = yield* HttpClientResponse.filterStatusOk(response).pipe(
+          Effect.flatMap(HttpClientResponse.schemaBodyJson(Token)),
         )
+        // Persist rotated tokens without depending on discovery requests.
         return {
           ...credential,
           access: token.access_token,
           refresh: token.refresh_token,
           expires: Date.now() + token.expires_in * 1000,
+          metadata:
+            token.org_id == null
+              ? credential.metadata
+              : {
+                  ...credential.metadata,
+                  orgID: token.org_id,
+                  orgName:
+                    credential.metadata?.orgID === token.org_id && typeof credential.metadata.orgName === "string"
+                      ? credential.metadata.orgName
+                      : token.org_id,
+                },
         }
       }),
-    label: (credential) => {
-      return typeof credential.metadata?.orgName === "string" ? credential.metadata.orgName : undefined
-    },
+    label: (credential) => (typeof credential.metadata?.orgName === "string" ? credential.metadata.orgName : undefined),
   } satisfies IntegrationOAuthMethodRegistration
 }
 
-export const OpencodePlugin = define<HttpClient.HttpClient | EventV2.Service | Scope.Scope>({
-  id: "opencode",
+export const OpencodePlugin = define<
+  HttpClient.HttpClient | Bus.Service | ManagedPolicy.Service | Voice.Service | Scope.Scope
+>({
+  id: "opencode.provider.opencode",
   effect: Effect.fn(function* (ctx) {
-    const events = yield* EventV2.Service
-    const http = yield* HttpClient.HttpClient
+    const disableFree = ["1", "true"].includes(process.env.OPENCODE_DISABLE_FREE_MODELS?.toLowerCase() ?? "")
+    const bus = yield* Bus.Service
+    const client = yield* HttpClient.HttpClient
+    // Every request here goes to the Console, which reads the User-Agent to tell which OpenCode a member runs
+    // and whether it evaluates the policies it is being sent.
+    const http = HttpClient.mapRequest(client, HttpClientRequest.setHeader("User-Agent", App.useragent(ctx.app)))
+    const managed = yield* ManagedPolicy.Service
+    const voice = yield* Voice.Service
+    const scope = yield* Scope.Scope
     const loading = Semaphore.makeUnsafe(1)
-    let connected = false
-    let providers: typeof ConfigV1.Info.Type.provider | undefined
+    type ActiveConnection = Effect.Success<ReturnType<typeof ctx.integration.connection.active>>
+    let snapshot: {
+      config: typeof RemoteResponse.Type | undefined
+      connection: ActiveConnection
+      organization: string | undefined
+      // Console MCP servers carry the credential in their headers, so a rotated token changes the snapshot.
+      mcp:
+        | { servers: NonNullable<typeof RemoteResponse.Type.mcp>["servers"]; headers: Record<string, string> }
+        | undefined
+    } = { config: undefined, connection: undefined, organization: undefined, mcp: undefined }
+    // Status last reported for the active connection, so inference failures can name the fix.
+    let reported: IntegrationConnection.Status | undefined
+    let explainers: Effect.Success<ReturnType<typeof ctx.session.hook>>[] = []
+    // When the last Console config load started, so rejected inference can reuse a recent status.
+    let checked = Number.NEGATIVE_INFINITY
 
     const load = Effect.fn("OpencodePlugin.load")(function* () {
+      checked = yield* Clock.currentTimeMillis
       const connection = yield* ctx.integration.connection.active("opencode")
-      const credential = connection
-        ? yield* ctx.integration.connection.resolve(connection).pipe(Effect.catch(() => Effect.succeed(undefined)))
-        : undefined
-      connected = connection !== undefined
-      providers = credential
-        ? yield* fetchProviders(http, credential).pipe(
-            Effect.catch((cause) =>
-              Effect.logWarning("failed to load OpenCode provider config", { cause }).pipe(Effect.as(undefined)),
+      if (!connection) {
+        reported = undefined
+        return { config: undefined, connection, organization: undefined, mcp: undefined }
+      }
+      const status = (status: IntegrationConnection.Status | undefined) => {
+        reported = status
+        return ctx.integration.connection.status({ integrationID: "opencode", connection, status })
+      }
+      return yield* ctx.integration.connection.resolve(connection).pipe(
+        Effect.flatMap((credential) => {
+          if (!credential || credential.type === "external")
+            return Effect.succeed({ config: undefined, connection, organization: undefined, mcp: undefined })
+          return fetchConfig(http, credential).pipe(
+            Effect.map((config) => ({
+              config,
+              connection,
+              organization: organizationName(credential),
+              mcp: config?.mcp && { servers: config.mcp.servers, headers: credentialHeaders(credential) },
+            })),
+          )
+        }),
+        Effect.tap(() => status(undefined)),
+        Effect.catch((cause) =>
+          Effect.gen(function* () {
+            // Only well-formed Console errors change the connection status; anything else may be transient.
+            const next = connectionStatus(cause)
+            if (next) yield* status(next)
+            yield* Effect.logWarning("failed to load OpenCode provider config", { cause })
+            // A load that fails for the connection already in place keeps its last config: dropping it
+            // would lift organization policy while personal credentials keep working.
+            return IntegrationConnection.key(connection) === IntegrationConnection.key(snapshot.connection)
+              ? { config: snapshot.config, connection, organization: snapshot.organization, mcp: snapshot.mcp }
+              : { config: undefined, connection, organization: undefined, mcp: undefined }
+          }),
+        ),
+      )
+    })
+    // The credential of the connection a snapshot was built from, while it is still the active one.
+    const resolveActive = Effect.fnUntraced(function* (connection: NonNullable<ActiveConnection>) {
+      const active = yield* ctx.integration.connection.active("opencode")
+      if (!active || IntegrationConnection.key(active) !== IntegrationConnection.key(connection))
+        return yield* Effect.fail(new Error("OpenCode Console connection changed"))
+      const credential = yield* ctx.integration.connection.resolve(active)
+      if (!credential || credential.type === "external")
+        return yield* Effect.fail(new Error("OpenCode Console is not connected"))
+      return credential
+    })
+
+    // Hosted GPT-Live: the server's apps start sessions on the Console's account, billed to the workspace, with
+    // the credential of the connection whose config offered it.
+    const consoleVoice = (
+      connection: NonNullable<ActiveConnection>,
+      offer: NonNullable<typeof RemoteResponse.Type.voice>,
+    ): Voice.Host => {
+      const send = (path: string, body: unknown) =>
+        Effect.gen(function* () {
+          const credential = yield* resolveActive(connection)
+          const response = yield* HttpClient.withScope(http).execute(
+            HttpClientRequest.post(`${offer.baseURL}${path}`).pipe(
+              HttpClientRequest.acceptJson,
+              HttpClientRequest.setHeaders(credentialHeaders(credential)),
+              HttpClientRequest.bodyJsonUnsafe(body),
             ),
           )
-        : undefined
-    })
+          return { status: response.status, text: yield* response.text }
+        }).pipe(
+          Effect.provideService(FetchHttpClient.RequestInit, { redirect: "error" }),
+          Effect.scoped,
+          Effect.timeoutOrElse({
+            duration: Duration.seconds(20),
+            orElse: () => Effect.fail(new Error("OpenCode Console didn't answer in time")),
+          }),
+          Effect.mapError(
+            (cause) =>
+              new Voice.UnavailableError({
+                service: "opencode",
+                message: cause instanceof Error ? cause.message : String(cause),
+              }),
+          ),
+          Effect.flatMap((reply): Effect.Effect<string, Voice.Error> => {
+            if (reply.status >= 200 && reply.status < 300) return Effect.succeed(reply.text)
+            if (reply.status === 401)
+              return Effect.fail(new Voice.UnavailableError({ service: "opencode", message: `${signedOutMessage}.` }))
+            const message =
+              Option.getOrUndefined(Schema.decodeUnknownOption(InferenceError)(reply.text))?.error.message ??
+              `OpenCode Console refused the voice request (HTTP ${reply.status})`
+            return Effect.fail(
+              reply.status === 400 || reply.status === 404
+                ? new Voice.InvalidRequestError({ message })
+                : new Voice.UnavailableError({ service: "opencode", message }),
+            )
+          }),
+        )
+      return {
+        integration: "opencode",
+        models: offer.models,
+        workspace: offer.workspace,
+        session: (input) =>
+          send("/live/sessions", { session: { ...input.session, model: input.model }, transport: input.transport }).pipe(
+            Effect.flatMap((text) =>
+              Schema.decodeUnknownEffect(LiveSession)(text).pipe(
+                Effect.mapError(
+                  () =>
+                    new Voice.UnavailableError({
+                      service: "opencode",
+                      message: "OpenCode Console returned an invalid voice session",
+                    }),
+                ),
+              ),
+            ),
+            Effect.map((created) => ({
+              transport: { type: "webrtc" as const, sdp: created.transport.sdp },
+              id: created.session.id,
+            })),
+          ),
+        instruct: (input) =>
+          send(`/live/sessions/${encodeURIComponent(input.id)}/instructions`, {
+            instructions: input.instructions,
+          }).pipe(Effect.asVoid),
+      }
+    }
 
-    yield* ctx.integration.transform((draft) => {
-      draft.update("opencode", (integration) => {
-        integration.name = "OpenCode"
+    // Statements and hosted voice ride on the snapshot, so a credential switch, disconnect, or 404 replaces them too.
+    const publish = (next: typeof snapshot) =>
+      Effect.all(
+        [
+          managed.set({
+            statements: [...(next.config?.experimental?.policies ?? []), ...(next.config?.policies ?? [])],
+            organization: next.organization,
+          }),
+          voice.host(
+            next.connection && next.config?.voice ? consoleVoice(next.connection, next.config.voice) : undefined,
+          ),
+        ],
+        { discard: true },
+      )
+
+    yield* ctx.integration.transform((editor) => {
+      editor.update("opencode", (integration) => {
+        integration.name = "OpenCode Console"
       })
-      draft.method.update(oauth(http))
-      draft.method.update({ integrationID: "opencode", method: { type: "key", label: "API key (service account)" } })
+      editor.method.update(oauth(http))
+      editor.method.update({ integrationID: "opencode", method: { type: "key", label: "API key (service account)" } })
     })
 
-    connected = (yield* ctx.integration.connection.active("opencode")) !== undefined
-    yield* ctx.catalog.transform((catalog) => {
-      for (const [providerID, item] of Object.entries(providers ?? {})) {
-        catalog.provider.update(providerID, (provider) => {
+    snapshot = yield* load()
+    yield* publish(snapshot)
+    yield* ctx.provider.transform((providers) => {
+      for (const [providerID, item] of Object.entries(snapshot.config?.providers ?? {})) {
+        const source = providers.get(item.canonical ?? providerID)
+        providers.update(providerID, (provider) => {
+          if (source && source.provider !== provider)
+            Object.assign(provider, structuredClone(source.provider), { id: provider.id })
           provider.integrationID = Integration.ID.make("opencode")
+          if (item.canonical !== undefined) provider.canonical = item.canonical
           if (item.name !== undefined) provider.name = item.name
-          provider.api = item.npm
-            ? { type: "aisdk", package: item.npm, url: item.api }
-            : { type: "native", url: item.api, settings: {} }
-          Object.assign(provider.request.headers, item.options?.headers)
-          Object.assign(provider.request.body, withoutCredentials(item.options))
+          provider.package = item.package ?? provider.package
+          provider.settings = Provider.mergeOverlay(
+            withoutCredentials(provider.settings),
+            withoutCredentials(item.settings),
+          )
+          provider.headers = Provider.mergeHeaders(provider.headers, item.headers)
+          provider.body = Provider.mergeOverlay(provider.body, item.body)
         })
 
         for (const [modelID, config] of Object.entries(item.models ?? {})) {
-          catalog.model.update(providerID, modelID, (model) => {
+          const base = source?.models.get(config.modelID ?? modelID) ?? source?.models.get(modelID)
+          providers.models.update(providerID, modelID, (model) => {
+            Object.assign(model, structuredClone(base ?? model))
             if (config.family !== undefined) model.family = config.family
             if (config.name !== undefined) model.name = config.name
-            if (config.id !== undefined) model.api.id = config.id
-            if (config.provider !== undefined) {
-              model.api = config.provider.npm
-                ? {
-                    id: model.api.id,
-                    type: "aisdk",
-                    package: config.provider.npm,
-                    url: config.provider.api,
-                  }
-                : { id: model.api.id, type: "native", url: config.provider.api, settings: {} }
+            if (config.modelID !== undefined) model.modelID = config.modelID
+            if (config.releaseDate !== undefined) model.time = { released: Date.parse(config.releaseDate) }
+            if (config.compatibility !== undefined)
+              model.compatibility = { ...model.compatibility, ...config.compatibility }
+            model.package = config.package ?? (item.package !== undefined ? undefined : model.package)
+            if (item.settings?.baseURL !== undefined && model.settings) delete model.settings.baseURL
+            if (config.capabilities !== undefined)
+              model.capabilities = Model.mergeCapabilities(config.capabilities, model.capabilities)
+            model.settings = Provider.mergeOverlay(
+              withoutCredentials(model.settings),
+              withoutCredentials(config.settings),
+            )
+            model.headers = Provider.mergeHeaders(model.headers, config.headers)
+            model.body = Provider.mergeOverlay(model.body, config.body)
+            if (config.limit !== undefined) model.limit = { ...model.limit, ...config.limit }
+          })
+          // Variants are spelled for the final package, which the update above normalizes from `aisdk:*`.
+          providers.models.update(providerID, modelID, (model) => {
+            // The Console's reasoning replaces the base variants; its variants still overlay them below.
+            if (config.capabilities?.reasoning !== undefined)
+              model.variants = [
+                ...Variant.resolve(
+                  { ...model, package: model.package ?? providers.get(providerID)?.provider.package },
+                  Variant.supports(config.capabilities.reasoning),
+                ),
+              ]
+            for (const variant of config.variants ?? []) {
+              let existing = model.variants.find((item) => item.id === variant.id)
+              if (!existing) {
+                existing = { id: variant.id }
+                model.variants.push(existing)
+              }
+              if (variant.settings !== undefined)
+                existing.settings = Provider.mergeOverlay(existing.settings, withoutCredentials(variant.settings))
+              if (variant.headers !== undefined)
+                existing.headers = Provider.mergeHeaders(existing.headers, variant.headers)
+              if (variant.body !== undefined) existing.body = Provider.mergeOverlay(existing.body, variant.body)
             }
-            if (config.tool_call !== undefined) model.capabilities.tools = config.tool_call
-            if (config.modalities?.input !== undefined) model.capabilities.input = [...config.modalities.input]
-            if (config.modalities?.output !== undefined) model.capabilities.output = [...config.modalities.output]
-            const packageName = config.provider?.npm ?? item.npm
-            const lowerer = ConfigProviderOptionsV1.get(packageName)
-            Object.assign(model.request.headers, config.headers)
-            Object.assign(model.request.body, lowerer.request(withoutCredentials(config.options)))
-            if (config.variants !== undefined) {
-              model.variants = Object.entries(config.variants).map(([id, options]) => ({
-                id: ModelV2.VariantID.make(id),
-                headers: { ...(options.headers ?? {}) },
-                body: lowerer.request(withoutCredentials(options)),
+            if (config.cost !== undefined)
+              model.cost = (Array.isArray(config.cost) ? config.cost : [config.cost]).map((cost) => ({
+                tier: cost.tier && { ...cost.tier },
+                input: cost.input,
+                output: cost.output,
+                cache: {
+                  read: cost.cache?.read ?? Money.USDPerMillionTokens.zero,
+                  write: cost.cache?.write ?? Money.USDPerMillionTokens.zero,
+                },
               }))
-            }
-            if (config.release_date !== undefined) {
-              const released = Date.parse(config.release_date)
-              model.time.released = Number.isFinite(released) ? released : 0
-            }
-            if (config.cost !== undefined) {
-              model.cost = remoteCost(config.cost)
-            }
-            model.status = config.status ?? "active"
-            model.enabled = config.status !== "deprecated"
-            if (config.limit !== undefined) model.limit = { ...config.limit }
+            model.enabled = !config.disabled
           })
         }
+        const configured = providers.get(providerID)
+        if (configured)
+          providers.add({
+            info: configured.provider,
+            models: Array.from(configured.models.values()),
+            sourceConnection: snapshot.connection,
+          })
       }
 
-      const item = catalog.provider.get(ProviderV2.ID.opencode)
+      const item = providers.get(Provider.ID.opencode)
       if (!item) return
-      const hasKey = Boolean(process.env.OPENCODE_API_KEY || connected || item.provider.request.body.apiKey)
-      catalog.provider.update(item.provider.id, (provider) => {
-        if (!hasKey) provider.request.body.apiKey = "public"
+      const hasKey = Boolean(process.env.OPENCODE_API_KEY || snapshot.connection || item.provider.settings?.apiKey)
+      providers.update(item.provider.id, (provider) => {
+        if (!hasKey && !disableFree) {
+          provider.activation = "enabled"
+          provider.settings = { ...provider.settings, apiKey: "public" }
+        }
       })
+    })
+    yield* ctx.model.transform((models) => {
+      const item = models.provider.get(Provider.ID.opencode)
+      if (!item) return
+      const hasKey = Boolean(
+        process.env.OPENCODE_API_KEY ||
+          snapshot.connection ||
+          (item.provider.settings?.apiKey && item.provider.settings.apiKey !== "public"),
+      )
       if (hasKey) return
-      for (const model of item.models.values()) {
+      for (const model of models.list(item.provider.id)) {
         if (!model.cost.some((cost) => cost.input > 0)) continue
-        catalog.model.update(item.provider.id, model.id, (draft) => {
+        models.update(item.provider.id, model.id, (draft) => {
           draft.enabled = false
         })
       }
     })
 
-    const refresh = () => loading.withPermit(load().pipe(Effect.andThen(ctx.catalog.reload())))
-    yield* events.subscribe(Integration.Event.ConnectionUpdated).pipe(
+    yield* ctx.websearch.transform((editor) => {
+      const descriptor = snapshot.config?.websearch
+      const connection = snapshot.connection
+      if (!descriptor || !connection) return
+      editor.add({
+        id: descriptor.providerID,
+        name: "OpenCode Web Search",
+        execute: (input) =>
+          Effect.gen(function* () {
+            const credential = yield* resolveActive(connection)
+            const metadata = credential.metadata
+            const orgID = typeof metadata?.orgID === "string" ? metadata.orgID : undefined
+            const token = credential.type === "oauth" ? credential.access : credential.key
+            const server = yield* normalizeServer(serverUrl(credential))
+            const request = yield* HttpClientRequest.post(`${server}/api/websearch`).pipe(
+              HttpClientRequest.acceptJson,
+              HttpClientRequest.bearerToken(token),
+              HttpClientRequest.setHeaders(orgID ? { "x-org-id": orgID } : {}),
+              HttpClientRequest.schemaBodyJson(WebSearch.Input)({
+                query: input.query,
+                providerID: descriptor.providerID,
+              }),
+            )
+            const response = yield* HttpClient.withScope(HttpClient.filterStatusOk(http))
+              .execute(request)
+              .pipe(
+                Effect.provideService(FetchHttpClient.RequestInit, { redirect: "error" }),
+                Effect.flatMap(HttpClientResponse.schemaBodyJson(WebSearch.Response)),
+                Effect.scoped,
+                Effect.timeoutOrElse({
+                  duration: Duration.seconds(25),
+                  orElse: () => Effect.fail(new Error("OpenCode web search request timed out")),
+                }),
+              )
+            if (response.providerID !== descriptor.providerID) {
+              return yield* Effect.fail(
+                new Error(
+                  `OpenCode web search returned provider ${response.providerID} instead of ${descriptor.providerID}`,
+                ),
+              )
+            }
+            return response.results
+          }),
+      })
+      editor.default.set(descriptor.providerID)
+    })
+
+    yield* ctx.mcp.transform((editor) => {
+      const mcp = snapshot.mcp
+      if (!mcp) return
+      for (const [name, server] of Object.entries(mcp.servers)) {
+        // A server the user configured under the same name wins.
+        if (editor.get(name)) continue
+        const { auth, ...config } = server
+        editor.set(name, auth === "console" ? { ...config, headers: { ...config.headers, ...mcp.headers } } : config)
+      }
+    })
+
+    const apply = Effect.fn("OpencodePlugin.apply")(function* (next: typeof snapshot) {
+      snapshot = next
+      yield* publish(next)
+      yield* guard(next)
+      yield* Effect.all([ctx.provider.reload(), ctx.websearch.reload(), ctx.mcp.reload()], {
+        concurrency: 3,
+        discard: true,
+      })
+    })
+    const refresh = () => loading.withPermit(load().pipe(Effect.andThen(apply)))
+    // Annotated: `apply` re-registers the hooks that call `check`, which would otherwise make inference circular.
+    // With `maxAge`, a load that started within it is reused; checking inside the permit lets concurrent callers
+    // share the load that was in flight when they arrived.
+    const check = (maxAge = Duration.zero): Effect.Effect<void> =>
+      loading.withPermit(
+        Effect.gen(function* () {
+          if ((yield* Clock.currentTimeMillis) - checked < Duration.toMillis(maxAge)) return
+          const next = yield* load()
+          if (!Equal.equals(snapshot, next)) yield* apply(next)
+        }),
+      )
+
+    // Console inference rejects a missing SSO sign-in with a generic 401/403. Re-check the Console config, which
+    // reports the reason, and replace the response with instructions when the connection needs the user.
+    // A client retrying rejected inference would otherwise send one config request per failed response.
+    const explain = (event: SessionHttpResponse) =>
+      Effect.gen(function* () {
+        if (event.response.status !== 401 && event.response.status !== 403) return
+        yield* check(Duration.seconds(30))
+        const status = reported
+        if (!status) return
+        void event.response.body?.cancel()
+        event.response = Response.json(
+          {
+            error: {
+              type: "authentication_error",
+              message: `${status.message}.`,
+            },
+          },
+          { status: event.response.status },
+        )
+      })
+    // Hooks are scoped per provider so requests to unrelated providers skip the HTTP hook path.
+    const guard = Effect.fn("OpencodePlugin.guard")(function* (next: typeof snapshot) {
+      yield* Effect.forEach(explainers, (registration) => registration.dispose, { discard: true })
+      explainers = yield* Effect.forEach(
+        next.connection ? new Set([Provider.ID.opencode, ...Object.keys(next.config?.providers ?? {})]) : [],
+        (providerID) => ctx.session.hook("http.response", explain, { providerID }).pipe(Scope.provide(scope)),
+      )
+    })
+    yield* guard(snapshot)
+
+    // Console config can change independently of local credential activity, so re-fetch
+    // periodically and only rebuild the catalog and search providers when the snapshot differs.
+    // Only while connected: a signed-out location runs no timer and no credential lookups.
+    const polling = yield* FiberHandle.make<void, never>()
+    const poll = Effect.fnUntraced(function* () {
+      if (!snapshot.connection) return yield* FiberHandle.clear(polling)
+      yield* FiberHandle.run(polling, Effect.sleep(Duration.minutes(1)).pipe(Effect.andThen(check()), Effect.forever), {
+        onlyIfMissing: true,
+      })
+    })
+    yield* bus.subscribe(Credential.Event.Switched).pipe(
       Stream.filter((event) => event.data.integrationID === Integration.ID.make("opencode")),
-      Stream.runForEach(refresh),
+      Stream.runForEach(() => refresh().pipe(Effect.andThen(poll()))),
       Effect.forkScoped({ startImmediately: true }),
     )
-    yield* refresh().pipe(Effect.forkScoped)
+    yield* poll()
   }),
 })
 
-function fetchProviders(http: HttpClient.HttpClient, value: CredentialValue) {
-  const metadata = value.metadata
-  const server = typeof metadata?.server === "string" ? metadata.server : defaultServer
-  const orgID = typeof metadata?.orgID === "string" ? metadata.orgID : undefined
-  const token = value.type === "oauth" ? value.access : value.key
-  return http
+function fetchConfig(http: HttpClient.HttpClient, value: Credential.Key | Credential.OAuth) {
+  // Scoped so responses whose body is never read (404, errors) are released here instead of by a GC-time abort.
+  return HttpClient.withScope(http)
     .execute(
-      HttpClientRequest.get(`${server}/api/config`).pipe(
+      HttpClientRequest.get(`${serverUrl(value)}/api/v2/config`).pipe(
         HttpClientRequest.acceptJson,
-        HttpClientRequest.bearerToken(token),
-        HttpClientRequest.setHeaders(orgID ? { "x-org-id": orgID } : {}),
+        HttpClientRequest.setHeaders(credentialHeaders(value)),
       ),
     )
     .pipe(
-      Effect.flatMap((response) => {
-        if (response.status === 404) return Effect.succeed(undefined)
-        return HttpClientResponse.filterStatusOk(response).pipe(
-          Effect.flatMap(HttpClientResponse.schemaBodyJson(RemoteResponse)),
-          Effect.map((remote) => remote.config.provider),
-        )
-      }),
+      Effect.flatMap((response) =>
+        Effect.gen(function* () {
+          if (response.status === 404) return undefined
+          if (response.status === 401) {
+            const body = yield* HttpClientResponse.schemaBodyJson(Unauthorized)(response).pipe(Effect.option)
+            if (Option.isSome(body)) return yield* new SignedOutError()
+          }
+          if (response.status === 403) {
+            const body = yield* HttpClientResponse.schemaBodyJson(SsoRequired)(response).pipe(Effect.option)
+            if (Option.isSome(body))
+              return yield* new SsoRequiredError({
+                organization: organizationName(value),
+                url: yield* ssoUrl(serverUrl(value), body.value.connectionId),
+              })
+          }
+          return yield* HttpClientResponse.filterStatusOk(response).pipe(
+            Effect.flatMap(HttpClientResponse.schemaBodyJson(RemoteResponse)),
+          )
+        }),
+      ),
+      Effect.scoped,
     )
 }
 
-function withoutCredentials(body: Readonly<Record<string, unknown>> | undefined) {
-  return Object.fromEntries(Object.entries(body ?? {}).filter(([key]) => key !== "apiKey" && key !== "headers"))
+function ssoUrl(server: string, connectionID: string) {
+  return normalizeServer(server).pipe(
+    Effect.map((base) => {
+      // Console only redirects to paths under its own base path after SSO.
+      const redirectTo = `${new URL(base).pathname.replace(/\/+$/, "")}/`
+      return `${base}/auth/sso/${encodeURIComponent(connectionID)}/start?redirectTo=${encodeURIComponent(redirectTo)}`
+    }),
+  )
 }
 
-function remoteCost(input: NonNullable<(typeof ConfigProviderV1.Model.Type)["cost"]>) {
-  const base = {
-    input: input.input,
-    output: input.output,
-    cache: { read: input.cache_read ?? 0, write: input.cache_write ?? 0 },
+function connectionStatus(cause: unknown): IntegrationConnection.Status | undefined {
+  if (cause instanceof SsoRequiredError)
+    return {
+      status: "needs_auth",
+      message: ssoMessage(cause.organization),
+      url: cause.url,
+    }
+  if (
+    cause instanceof SignedOutError ||
+    (cause instanceof Integration.AuthorizationError && cause.cause instanceof SignedOutError)
+  )
+    return { status: "needs_auth", message: signedOutMessage }
+  return undefined
+}
+
+function organizationName(credential: Credential.Value) {
+  return typeof credential.metadata?.orgName === "string" ? credential.metadata.orgName : undefined
+}
+
+function credentialHeaders(value: Credential.Key | Credential.OAuth): Record<string, string> {
+  const orgID = value.metadata?.orgID
+  return {
+    authorization: `Bearer ${value.type === "oauth" ? value.access : value.key}`,
+    ...(typeof orgID === "string" ? { "x-org-id": orgID } : {}),
   }
-  if (!input.context_over_200k) return [base]
-  return [
-    base,
-    {
-      tier: { type: "context" as const, size: 200_000 },
-      input: input.context_over_200k.input,
-      output: input.context_over_200k.output,
-      cache: {
-        read: input.context_over_200k.cache_read ?? 0,
-        write: input.context_over_200k.cache_write ?? 0,
-      },
+}
+
+function serverUrl(value: Credential.Value) {
+  const server = typeof value.metadata?.server === "string" ? value.metadata.server : defaultServer
+  // Credentials saved before August 2026 store the retired console.opencode.ai host, which maps path-for-path onto
+  // the default server; rewriting it lets that host be shut down without forcing those users to reconnect.
+  return server.replace(/^https:\/\/console\.opencode\.ai(?=\/|$)/, defaultServer)
+}
+
+function withoutCredentials<Value>(body: Readonly<Record<string, Value>> | undefined) {
+  return (
+    body &&
+    Object.fromEntries(Object.entries(body).filter(([key]) => !["apiKey", "authToken", "accessToken"].includes(key)))
+  )
+}
+
+function normalizeServer(input: unknown) {
+  return Effect.try({
+    try: () => {
+      if (typeof input !== "string") throw new Error("expected string")
+      const url = new URL(input)
+      if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("expected HTTP(S)")
+      return `${url.origin}${url.pathname.replace(/\/+$/, "")}`
     },
-  ]
+    catch: (cause) =>
+      new Error(`Invalid OpenCode server URL: ${cause instanceof Error ? cause.message : String(cause)}`),
+  })
 }
 
 function poll(http: HttpClient.HttpClient, server: string, deviceCode: string, interval: Duration.Duration) {
@@ -279,7 +759,13 @@ function credential(http: HttpClient.HttpClient, server: string, token: typeof T
       ],
       { concurrency: 2 },
     )
-    const org = orgs.toSorted((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))[0]
+    const org =
+      token.org_id == null
+        ? orgs.toSorted((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))[0]
+        : orgs.find((org) => org.id === token.org_id)
+    if (token.org_id != null && !org) {
+      return yield* Effect.fail(new Error(`OpenCode organization not found: ${token.org_id}`))
+    }
     return Credential.OAuth.make({
       type: "oauth" as const,
       methodID,
@@ -306,15 +792,20 @@ function get<S extends Schema.Top>(http: HttpClient.HttpClient, url: string, tok
 function post<S extends Schema.Top>(
   http: HttpClient.HttpClient,
   url: string,
-  body: Record<string, string>,
+  body: Record<string, string | boolean>,
   schema: S,
   statusOk = true,
 ) {
-  return HttpClientRequest.post(url).pipe(
-    HttpClientRequest.acceptJson,
-    HttpClientRequest.schemaBodyJson(Schema.Record(Schema.String, Schema.String))(body),
-    Effect.flatMap((request) => http.execute(request)),
+  return send(http, url, body).pipe(
     Effect.flatMap((response) => (statusOk ? HttpClientResponse.filterStatusOk(response) : Effect.succeed(response))),
     Effect.flatMap(HttpClientResponse.schemaBodyJson(schema)),
+  )
+}
+
+function send(http: HttpClient.HttpClient, url: string, body: Record<string, string | boolean>) {
+  return HttpClientRequest.post(url).pipe(
+    HttpClientRequest.acceptJson,
+    HttpClientRequest.schemaBodyJson(Schema.Record(Schema.String, Schema.Union([Schema.String, Schema.Boolean])))(body),
+    Effect.flatMap((request) => http.execute(request)),
   )
 }

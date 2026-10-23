@@ -1,12 +1,12 @@
 /// <reference path="../env.d.ts" />
-import { tool } from "@opencode-ai/plugin"
+import { tool } from "@opencode/plugin"
 
 const TEAM = {
   tui: ["kommander", "simonklee"],
   desktop_web: ["Hona", "Brendonovich"],
   core: ["jlongster", "rekram1-node", "neriousy", "nexxeln", "kitlangton"],
-  inference: ["fwang", "vaprdev", "vimtor"],
-  windows: ["Hona", "neriousy"],
+  inference: ["fwang", "MrMushrooooom", "starptech"],
+  windows: ["Hona"],
 } as const
 
 function pick<T>(items: readonly T[]) {

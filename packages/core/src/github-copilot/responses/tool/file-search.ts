@@ -1,8 +1,8 @@
-import { createFactoryWithOutput } from "./factory"
+import { createProviderToolFactoryWithOutputSchema } from "@ai-sdk/provider-utils"
 import type {
   OpenAIResponsesFileSearchToolComparisonFilter,
   OpenAIResponsesFileSearchToolCompoundFilter,
-} from "../openai-responses-api-types"
+} from "../openai-responses-api-types.js"
 import { z } from "zod/v4"
 
 const comparisonFilterSchema = z.object({
@@ -43,7 +43,7 @@ export const fileSearchOutputSchema = z.object({
     .nullable(),
 })
 
-export const fileSearch = createFactoryWithOutput<
+export const fileSearch = createProviderToolFactoryWithOutputSchema<
   {},
   {
     /**

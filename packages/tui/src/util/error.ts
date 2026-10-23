@@ -1,4 +1,5 @@
 import { isRecord } from "./record"
+import { CLI_NAME } from "@opencode/util/identity"
 
 type ConfigIssue = { message: string; path: string[] }
 
@@ -24,7 +25,7 @@ export function cliErrorMessage(input: unknown): string | undefined {
     return [
       `Model not found: ${field(model, "providerID")}/${field(model, "modelID")}`,
       ...(suggestions.length ? ["Did you mean: " + suggestions.join(", ")] : []),
-      "Try: `opencode models` to list available models",
+      `Try: \`${CLI_NAME} models\` to list available models`,
       "Or check your config (opencode.json) provider/model names",
     ].join("\n")
   }
@@ -47,17 +48,6 @@ export function cliErrorMessage(input: unknown): string | undefined {
   const frontmatter = configData(input, "ConfigFrontmatterError")
   if (frontmatter) return field(frontmatter, "message") ?? ""
 
-  const remoteAuth = configData(input, "ConfigRemoteAuthError")
-  if (remoteAuth) {
-    const url = field(remoteAuth, "url")
-    const remote = field(remoteAuth, "remote")
-    return [
-      `Failed to load remote config${remote ? ` from ${remote}` : ""}: the server returned a login page instead of JSON.`,
-      "Authentication is missing or has expired (the endpoint is likely behind an SSO or identity-aware proxy).",
-      ...(url ? [`Run \`opencode auth login ${url}\` to re-authenticate.`] : []),
-    ].join("\n")
-  }
-
   const invalid = configData(input, "ConfigInvalidError")
   if (invalid) {
     const path = field(invalid, "path")
@@ -79,10 +69,6 @@ export function cliErrorMessage(input: unknown): string | undefined {
   }
 
   if (tagged(input, "UICancelledError") || named(input, "UICancelledError")) return ""
-  if (isRecord(input) && named(input, "MCPFailed")) {
-    const name = isRecord(input.data) ? field(input.data, "name") : undefined
-    return `MCP server "${name}" failed. Note, opencode does not support MCP authentication yet.`
-  }
   return undefined
 }
 
@@ -153,41 +139,4 @@ export function errorMessage(error: unknown): string {
   const formatted = errorFormat(error)
   if (formatted) return formatted
   return "unknown error"
-}
-
-export function errorData(error: unknown) {
-  if (error instanceof Error) {
-    return {
-      type: error.name,
-      message: errorMessage(error),
-      stack: error.stack,
-      cause: error.cause === undefined ? undefined : errorFormat(error.cause),
-      formatted: errorFormat(error),
-    }
-  }
-
-  if (!isRecord(error)) {
-    return {
-      type: typeof error,
-      message: errorMessage(error),
-      formatted: errorFormat(error),
-    }
-  }
-
-  const data = Object.getOwnPropertyNames(error).reduce<Record<string, unknown>>((acc, key) => {
-    const value = error[key]
-    if (value === undefined) return acc
-    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-      acc[key] = value
-      return acc
-    }
-    // oxlint-disable-next-line no-base-to-string -- intentional coercion of arbitrary error properties
-    acc[key] = value instanceof Error ? value.message : String(value)
-    return acc
-  }, {})
-
-  if (typeof data.message !== "string") data.message = errorMessage(error)
-  if (typeof data.type !== "string") data.type = error.constructor?.name
-  data.formatted = errorFormat(error)
-  return data
 }

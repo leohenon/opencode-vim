@@ -1,9 +1,16 @@
 #!/usr/bin/env bun
 
 const installCommands = {
-  npm: "npm i -g @leohenon/ocv",
-  homebrew: "brew install leohenon/tap/ocv",
-  curl: "curl -fsSL https://raw.githubusercontent.com/leohenon/opencode-vim/ocv/install.sh | sh",
+  v2: {
+    npm: "npm i -g @leohenon/ocv@ocv-v2",
+    homebrew: "brew install leohenon/tap/ocv-v2",
+    curl: "curl -fsSL https://raw.githubusercontent.com/leohenon/opencode-vim/ocv/install.sh | sh",
+  },
+  v1: {
+    npm: "npm i -g @leohenon/ocv@latest",
+    homebrew: "brew install leohenon/tap/ocv",
+    curl: "curl -fsSL https://raw.githubusercontent.com/leohenon/opencode-vim/ocv1/install.sh | sh",
+  },
 }
 
 const html = `<!DOCTYPE html>
@@ -229,9 +236,13 @@ const html = `<!DOCTYPE html>
         <div class="wrap">
           <p class="kicker">OpenCode Vim</p>
           <h1>Vim mode for OpenCode</h1>
-          <p class="lede">An unofficial OpenCode fork with built-in Vim motions, navigation, and editing.</p>
+          <p class="lede">An unofficial OpenCode V2 fork with built-in Vim motions, navigation, and editing. V2 is available as a beta; V1 remains supported.</p>
 
           <div class="install">
+            <div class="tabs" aria-label="OpenCode version">
+              <button class="tab" type="button" data-version="v2" aria-pressed="true">OpenCode v2 (beta)</button>
+              <button class="tab" type="button" data-version="v1" aria-pressed="false">OpenCode v1</button>
+            </div>
             <div class="tabs" aria-label="Install method">
               <button class="tab" type="button" data-install="curl" aria-pressed="true">curl</button>
               <button class="tab" type="button" data-install="npm" aria-pressed="false">npm</button>
@@ -247,11 +258,12 @@ const html = `<!DOCTYPE html>
             </div>
             <div class="run-row"><span class="prompt" aria-hidden="true">$</span> <code>ocv</code></div>
           </div>
+          <p><a href="https://github.com/leohenon/opencode-vim/blob/ocv1/README.md">V1 usage and configuration →</a></p>
         </div>
       </section>
 
       <div class="demo">
-        <video autoplay muted loop playsinline aria-label="OpenCode Vim demo">
+        <video autoplay muted loop playsinline aria-label="OpenCode Vim editing demo (V1 interface)">
           <source src="./assets/ocv.mp4" type="video/mp4" />
         </video>
       </div>
@@ -262,7 +274,7 @@ const html = `<!DOCTYPE html>
             <div class="feature"><span class="mark">[*]</span><div><strong>Vim motions</strong><p>Operators, text objects, visual selection, undo, repeat.</p></div></div>
             <div class="feature"><span class="mark">[*]</span><div><strong>Session navigation</strong><p>Move through session output with Vim controls.</p></div></div>
             <div class="feature"><span class="mark">[*]</span><div><strong>Copy mode</strong><p>Select and copy text from sessions.</p></div></div>
-            <div class="feature"><span class="mark">[*]</span><div><strong>Up to date</strong><p>Updated daily to stay current with OpenCode releases.</p></div></div>
+            <div class="feature"><span class="mark">[*]</span><div><strong>Up to date</strong><p>Tracks upstream OpenCode V2 releases.</p></div></div>
           </div>
         </div>
       </section>
@@ -270,7 +282,7 @@ const html = `<!DOCTYPE html>
       <section id="plugin">
         <div class="wrap">
           <h2>Prefer a plugin?</h2>
-          <p class="lede">The prompt Vim mode is also available as a plugin for the official OpenCode — no fork required. Motions, operators, text objects, registers, and more, in the prompt only.</p>
+          <p class="lede">The prompt Vim mode is also available as a plugin for official OpenCode V2 — no fork required. Motions, operators, text objects, registers, and more, in the prompt only.</p>
           <div class="install">
             <div class="panel-bar">
               <span class="panel-title">opencode-vim-plugin</span>
@@ -280,7 +292,7 @@ const html = `<!DOCTYPE html>
             </div>
             <div class="command-row">
               <div class="command-inner">
-                <span class="prompt" aria-hidden="true">$</span><code>opencode plugin @leohenon/opencode-vim-plugin --global</code>
+                <span class="prompt" aria-hidden="true">$</span><code>opencode plugin add @leohenon/opencode-vim-plugin@beta</code>
                 <button class="copy" type="button" aria-label="Copy plugin install command" title="Copy">
                   <svg viewBox="0 0 512 512" aria-hidden="true"><rect width="336" height="336" x="128" y="128" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-width="32" rx="57" ry="57"/><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="32" d="m383.5 128 .5-24a56.16 56.16 0 0 0-56-56H112a64.19 64.19 0 0 0-64 64v216a56.16 56.16 0 0 0 56 56h24"/></svg>
                 </button>
@@ -300,11 +312,26 @@ const html = `<!DOCTYPE html>
     const installCommands = ${JSON.stringify(installCommands)}
     const installCommand = document.querySelector("#install-command")
     const installButtons = document.querySelectorAll("[data-install]")
+    const versionButtons = document.querySelectorAll("[data-version]")
+    let version = "v2"
+    let method = "curl"
+    const updateCommand = () => {
+      installCommand.textContent = installCommands[version][method]
+    }
+
+    versionButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        versionButtons.forEach((item) => item.setAttribute("aria-pressed", String(item === button)))
+        version = button.dataset.version
+        updateCommand()
+      })
+    })
 
     installButtons.forEach((button) => {
       button.addEventListener("click", () => {
         installButtons.forEach((item) => item.setAttribute("aria-pressed", String(item === button)))
-        installCommand.textContent = installCommands[button.dataset.install]
+        method = button.dataset.install
+        updateCommand()
       })
     })
 

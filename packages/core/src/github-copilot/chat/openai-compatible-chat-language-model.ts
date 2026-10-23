@@ -22,13 +22,13 @@ import {
   type ResponseHandler,
 } from "@ai-sdk/provider-utils"
 import { z } from "zod/v4"
-import { convertToOpenAICompatibleChatMessages } from "./convert-to-openai-compatible-chat-messages"
-import { getResponseMetadata } from "./get-response-metadata"
-import { mapOpenAICompatibleFinishReason } from "./map-openai-compatible-finish-reason"
-import { type OpenAICompatibleChatModelId, openaiCompatibleProviderOptions } from "./openai-compatible-chat-options"
-import { defaultOpenAICompatibleErrorStructure, type ProviderErrorStructure } from "../openai-compatible-error"
-import type { MetadataExtractor } from "./openai-compatible-metadata-extractor"
-import { prepareTools } from "./openai-compatible-prepare-tools"
+import { convertToOpenAICompatibleChatMessages } from "./convert-to-openai-compatible-chat-messages.js"
+import { getResponseMetadata } from "./get-response-metadata.js"
+import { mapOpenAICompatibleFinishReason } from "./map-openai-compatible-finish-reason.js"
+import { type OpenAICompatibleChatModelId, openaiCompatibleProviderOptions } from "./openai-compatible-chat-options.js"
+import { defaultOpenAICompatibleErrorStructure, type ProviderErrorStructure } from "../openai-compatible-error.js"
+import type { MetadataExtractor } from "./openai-compatible-metadata-extractor.js"
+import { prepareTools } from "./openai-compatible-prepare-tools.js"
 
 export type OpenAICompatibleChatConfig = {
   provider: string
@@ -330,7 +330,6 @@ export class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
 
     const toolCalls: Array<{
       id: string
-      type: "function"
       function: {
         name: string
         arguments: string
@@ -552,7 +551,6 @@ export class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
 
                   toolCalls[index] = {
                     id: toolCallDelta.id,
-                    type: "function",
                     function: {
                       name: toolCallDelta.function.name,
                       arguments: toolCallDelta.function.arguments ?? "",
@@ -647,7 +645,11 @@ export class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
             }
 
             if (isActiveText) {
-              controller.enqueue({ type: "text-end", id: "txt-0" })
+              controller.enqueue({
+                type: "text-end",
+                id: "txt-0",
+                providerMetadata: reasoningOpaque ? { copilot: { reasoningOpaque } } : undefined,
+              })
             }
 
             // go through all tool calls and send the ones that are not finished

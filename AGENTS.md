@@ -7,6 +7,11 @@ This repository is the ocv fork of OpenCode. Treat most code as upstream; keep f
 - Prefer stability, simplicity, and maintainability over broad rewrites.
 - Keep changes surgical and scoped to the requested behavior.
 
+## Branches
+
+- `ocv` is the default V2 branch; base V2 work on it and track upstream `dev`.
+- `ocv1` is for V1 maintenance; track upstream `v1`, never upstream `dev`.
+
 ## Vim/copy layout
 
 - Prompt Vim behavior lives under `packages/tui/src/component/vim/`; entry wiring is `packages/tui/src/component/prompt/vim.ts`.

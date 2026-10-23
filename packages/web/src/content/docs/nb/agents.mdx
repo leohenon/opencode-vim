@@ -61,7 +61,7 @@ En begrenset agent designet for planlegging og analyse. Vi bruker et tillatelses
 Som standard er alt av følgende satt til `ask`:
 
 - `file edits`: Alle skrivinger, patcher og redigeringer
-- `bash`: Alle bash-kommandoer
+- `shell`: Alle shell-kommandoer
 
 Denne agenten er nyttig når du vil at LLM skal analysere kode, foreslå endringer eller lage planer uten å gjøre noen faktiske endringer i kodebasen.
 
@@ -71,7 +71,7 @@ Denne agenten er nyttig når du vil at LLM skal analysere kode, foreslå endring
 
 _Modus_: `subagent`
 
-En generell agent for å undersøke komplekse spørsmål og utføre flertrinnsoppgaver. Har full verktøytilgang (unntatt todo), slik at den kan gjøre filendringer når det er nødvendig. Bruk denne til å kjøre flere arbeidsenheter parallelt.
+En generell agent for å undersøke komplekse spørsmål og utføre flertrinnsoppgaver. Har full verktøytilgang, slik at den kan gjøre filendringer når det er nødvendig. Bruk denne til å kjøre flere arbeidsenheter parallelt.
 
 ---
 
@@ -156,7 +156,7 @@ Konfigurer agenter i konfigurasjonsfilen `opencode.json`:
       "tools": {
         "write": true,
         "edit": true,
-        "bash": true
+        "shell": true
       }
     },
     "plan": {
@@ -165,7 +165,7 @@ Konfigurer agenter i konfigurasjonsfilen `opencode.json`:
       "tools": {
         "write": false,
         "edit": false,
-        "bash": false
+        "shell": false
       }
     },
     "code-reviewer": {
@@ -200,7 +200,7 @@ temperature: 0.1
 tools:
   write: false
   edit: false
-  bash: false
+  shell: false
 ---
 
 You are in code review mode. Focus on:
@@ -366,7 +366,7 @@ Hvis du ikke spesifiserer en modell, bruker primæragenter [modell globalt konfi
 }
 ```
 
-Modellen ID i OpenCode-konfigurasjonen din bruker formatet `provider/model-id`. For eksempel, hvis du bruker [OpenCode Zen](/docs/zen), vil du bruke `opencode/gpt-5.1-codex` for GPT 5.1 Codex.
+Modellen ID i OpenCode-konfigurasjonen din bruker formatet `provider/model-id`. For eksempel, hvis du bruker [OpenCode Zen](https://opencode.ai/v2/docs/console/), vil du bruke `opencode/gpt-5.1-codex` for GPT 5.1 Codex.
 
 ---
 
@@ -379,13 +379,13 @@ Kontroller hvilke verktøy som er tilgjengelige i denne agenten med `tools`-konf
   "$schema": "https://opencode.ai/config.json",
   "tools": {
     "write": true,
-    "bash": true
+    "shell": true
   },
   "agent": {
     "plan": {
       "tools": {
         "write": false,
-        "bash": false
+        "shell": false
       }
     }
   }
@@ -419,7 +419,7 @@ Du kan også bruke jokertegn for å kontrollere flere verktøy samtidig. For eks
 
 ### Tillatelser
 
-Du kan konfigurere tillatelser for å administrere hvilke handlinger en agent kan utføre. For øyeblikket kan tillatelsene for verktøyene `edit`, `bash` og `webfetch` konfigureres til:
+Du kan konfigurere tillatelser for å administrere hvilke handlinger en agent kan utføre. For øyeblikket kan tillatelsene for verktøyene `edit`, `shell` og `webfetch` konfigureres til:
 
 - `"ask"` — Be om godkjenning før du kjører verktøyet
 - `"allow"` — Tillat alle operasjoner uten godkjenning
@@ -460,7 +460,7 @@ description: Code review without edits
 mode: subagent
 permission:
   edit: deny
-  bash:
+  shell:
     "*": ask
     "git diff": allow
     "git log*": allow
@@ -471,7 +471,7 @@ permission:
 Only analyze code and suggest changes.
 ```
 
-Du kan angi tillatelser for spesifikke bash-kommandoer.
+Du kan angi tillatelser for spesifikke shell-kommandoer.
 
 ```json title="opencode.json" {7}
 {
@@ -479,7 +479,7 @@ Du kan angi tillatelser for spesifikke bash-kommandoer.
   "agent": {
     "build": {
       "permission": {
-        "bash": {
+        "shell": {
           "git push": "ask",
           "grep *": "allow"
         }
@@ -497,7 +497,7 @@ Dette kan ta et globmønster.
   "agent": {
     "build": {
       "permission": {
-        "bash": {
+        "shell": {
           "git *": "ask"
         }
       }
@@ -515,7 +515,7 @@ Siden den siste samsvarsregelen har forrang, setter du jokertegnet `*` først og
   "agent": {
     "build": {
       "permission": {
-        "bash": {
+        "shell": {
           "*": "ask",
           "git status *": "allow"
         }
@@ -671,19 +671,9 @@ Kjør `opencode models` for å se en liste over tilgjengelige modeller.
 
 ## Opprette agenter
 
-Du kan opprette nye agenter ved å bruke følgende kommando:
+Opprett en ny agent ved å legge til en markdown-fil i `.opencode/agents/` for prosjektet eller i `~/.config/opencode/agents/` globalt. Filnavnet blir agentens navn, og frontmatter konfigurerer beskrivelse, modus, modell og tillatelser. Se [Markdown](#markdown) ovenfor for filformatet.
 
-```bash
-opencode agent create
-```
-
-Denne interaktive kommandoen vil:
-
-1. Spør hvor du skal lagre agenten; global eller prosjektspesifikk.
-2. Beskrivelse av hva agenten skal gjøre.
-3. Generer en passende systemmelding og identifikator.
-4. La deg velge hvilke verktøy agenten har tilgang til.
-5. Lag til slutt en nedmerkingsfil med agentkonfigurasjonen.
+Kjør `opencode debug agents` for å liste agentene som OpenCode har lastet inn.
 
 ---
 
@@ -694,7 +684,7 @@ Her er noen vanlige bruksområder for forskjellige agenter.
 - **Byggagent**: Fullstendig utviklingsarbeid med alle verktøy aktivert
 - **Planagent**: Analyse og planlegging uten å gjøre endringer
 - **Kodevurderingsagent**: Kodegjennomgang med skrivebeskyttet tilgang pluss dokumentasjonsverktøy
-- **Feilsøkingsagent**: Fokusert på etterforskning med bash og leseverktøy aktivert
+- **Feilsøkingsagent**: Fokusert på etterforskning med shell og leseverktøy aktivert
 - **Dokumentasjonsagent**: Dokumentasjonsskriving med filoperasjoner, men ingen systemkommandoer
 
 ---
@@ -716,7 +706,7 @@ Har du en agent du vil dele? [Send inn en PR](https://github.com/anomalyco/openc
 description: Writes and maintains project documentation
 mode: subagent
 tools:
-  bash: false
+  shell: false
 ---
 
 You are a technical writer. Create clear, comprehensive documentation.

@@ -42,20 +42,19 @@ describe("prompt showbreak", () => {
   })
 
   test("renders in padding without changing prompt text", async () => {
-    const setup = await createTestRenderer({ width: 24, height: 5, useThread: false })
+    const setup = await createTestRenderer({ width: 24, height: 5 })
+    await setup.renderer.setupTerminal()
     const box = new BoxRenderable(setup.renderer as any, { width: 22, height: 3, paddingLeft: 2 })
     const textarea = new TextareaRenderable(setup.renderer as any, { width: 20, height: 3, wrapMode: "word" })
     box.add(textarea)
     setup.renderer.root.add(box)
     textarea.setText("A".repeat(45))
     const original = textarea.plainText
-    const render = textarea.render.bind(textarea)
     const color = RGBA.fromInts(128, 128, 128)
     let enabled = true
-    textarea.render = (buffer, deltaTime) => {
-      render(buffer, deltaTime)
+    setup.renderer.addPostProcessFn((buffer) => {
       drawShowbreak(buffer, textarea, enabled, color, color)
-    }
+    })
 
     try {
       await setup.renderOnce()
@@ -79,19 +78,18 @@ describe("prompt showbreak", () => {
   })
 
   test("uses the textarea's visual scroll offset", async () => {
-    const setup = await createTestRenderer({ width: 24, height: 4, useThread: false })
+    const setup = await createTestRenderer({ width: 24, height: 4 })
+    await setup.renderer.setupTerminal()
     const box = new BoxRenderable(setup.renderer as any, { width: 22, height: 2, paddingLeft: 2 })
     const textarea = new TextareaRenderable(setup.renderer as any, { width: 20, height: 2, wrapMode: "word" })
     box.add(textarea)
     setup.renderer.root.add(box)
     textarea.setText("A".repeat(60))
     textarea.cursorOffset = 59
-    const render = textarea.render.bind(textarea)
     const color = RGBA.fromInts(128, 128, 128)
-    textarea.render = (buffer, deltaTime) => {
-      render(buffer, deltaTime)
+    setup.renderer.addPostProcessFn((buffer) => {
       drawShowbreak(buffer, textarea, true, color, color)
-    }
+    })
 
     try {
       await setup.renderOnce()

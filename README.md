@@ -43,16 +43,6 @@ npm i -g @leohenon/ocv@latest
 brew upgrade ocv
 ```
 
-## Prefer a plugin?
-
-The prompt Vim mode is also available as a plugin for the official OpenCode, prompt editing only (no copy mode or session navigation):
-
-```bash
-opencode plugin @leohenon/opencode-vim-plugin --global
-```
-
-See [opencode-vim-plugin](https://github.com/leohenon/opencode-vim-plugin).
-
 ## Features
 
 ### Prompt controls

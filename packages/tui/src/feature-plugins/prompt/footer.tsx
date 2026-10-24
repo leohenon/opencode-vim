@@ -17,7 +17,7 @@ export function PromptFooter(props: {
   sessionID?: string
   mode: "normal" | "shell"
   showDetails: boolean
-  minimal: boolean
+  minimal?: boolean
 }) {
   const dimensions = useTerminalDimensions()
   const [liveHovered, setLiveHovered] = createSignal(false)

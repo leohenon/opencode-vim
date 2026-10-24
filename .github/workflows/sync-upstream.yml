@@ -1,5 +1,5 @@
-name: Sync ocv with upstream
-run-name: "Sync ocv v2 | ${{ github.ref_name }} | ${{ github.event_name != 'schedule' && inputs.dry_run && 'dry-run' || 'real' }}"
+name: Sync ocv with upstream/dev
+run-name: "Sync ocv with upstream/dev | ${{ github.ref_name }} | ${{ github.event_name != 'schedule' && inputs.dry_run && 'dry-run' || 'real' }}"
 
 on:
   schedule:

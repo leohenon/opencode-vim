@@ -40,7 +40,7 @@ test("prompt footer separates simultaneous subagent, shell, and usage status", a
     },
   } as unknown as Context
   const app = await testRender(
-    () => <PromptFooter context={context} sessionID="session" mode="normal" showDetails={true} minimal={false} />,
+    () => <PromptFooter context={context} sessionID="session" mode="normal" showDetails={true} />,
     {
       width: 80,
       height: 2,

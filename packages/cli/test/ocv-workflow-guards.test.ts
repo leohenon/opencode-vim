@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test"
 
-test("shared workflows use neutral names and identify V2 executions without changing routing", async () => {
+test("workflow names identify the upstream and V2 executions without changing routing", async () => {
   for (const [file, name, action] of [
-    ["sync-upstream", "Sync ocv with upstream", "Sync"],
-    ["publish-ocv", "Release ocv", "Release"],
+    ["sync-upstream", "Sync ocv with upstream/dev", "Sync ocv with upstream/dev"],
+    ["publish-ocv", "Release ocv", "Release ocv v2"],
   ] as const) {
     const workflow = Bun.YAML.parse(
       await Bun.file(new URL(`../../../.github/workflows/${file}.yml`, import.meta.url)).text(),
@@ -14,7 +14,7 @@ test("shared workflows use neutral names and identify V2 executions without chan
       jobs: Record<string, { steps: { run?: string }[] }>
     }
     expect(workflow.name).toBe(name)
-    expect(workflow["run-name"]).toContain(`${action} ocv v2`)
+    expect(workflow["run-name"]).toContain(action)
     expect(workflow["run-name"]).toContain("${{ github.ref_name }}")
     expect(workflow["run-name"]).toContain("inputs.dry_run && 'dry-run' || 'real'")
     expect(workflow.on.workflow_dispatch.inputs.dry_run.default).toBe(true)

@@ -31,6 +31,7 @@ export function fromRow(row: typeof SessionTable.$inferSelect): SessionSchema.In
         }
       : undefined,
     cost: Money.USD.make(row.cost),
+    allowance: row.allowance > 0 ? Money.USD.make(row.allowance) : undefined,
     tokens: {
       input: row.tokens_input,
       output: row.tokens_output,

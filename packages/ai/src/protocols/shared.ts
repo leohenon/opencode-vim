@@ -43,6 +43,25 @@ export const lenient = <const S extends Schema.Top>(schema: S) =>
   Schema.optionalKey(
     Schema.UndefinedOr(schema).pipe(Schema.catchDecoding(() => Effect.succeed(Option.some(undefined)))),
   )
+/** A billed amount in USD; a malformed or negative one decodes as absent. */
+const billedAmount = lenient(Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0)))
+
+/**
+ * Billing an endpoint reports beside its token usage. `cost` is the USD it charged (OpenRouter, LiteLLM, OpenCode
+ * Zen); OpenCode Go reports the subscription allowance a request used as `opencode.allowance`, also in USD.
+ */
+export const ReportedBilling = Schema.Struct({
+  cost: billedAmount,
+  opencode: lenient(Schema.Struct({ allowance: billedAmount })),
+})
+
+/** Reads `ReportedBilling` from a raw usage object, which provider metadata keeps as the endpoint sent it. */
+export const reportedBilling = (usage: unknown) =>
+  Option.match(Schema.decodeUnknownOption(ReportedBilling)(usage), {
+    onNone: () => ({}),
+    onSome: (billing) => ({ cost: billing.cost, allowance: billing.opencode?.allowance }),
+  })
+
 /**
  * Accepts stream frames that carry no `type`, alongside the typed event schema. Gateways inject such frames as
  * keep-alives, so they decode as an ignored event; one with an `error` still decodes as an error event.

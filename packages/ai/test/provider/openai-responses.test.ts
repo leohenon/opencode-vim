@@ -2224,6 +2224,25 @@ describe("OpenAI Responses route", () => {
     }),
   )
 
+  it.effect("reports the cost and allowance the endpoint billed", () =>
+    Effect.gen(function* () {
+      const body = sseEvents(
+        { type: "response.output_item.added", item: { type: "message", id: "msg_1" } },
+        { type: "response.output_text.delta", item_id: "msg_1", delta: "Hello" },
+        {
+          type: "response.completed",
+          response: {
+            id: "resp_1",
+            usage: { input_tokens: 5, output_tokens: 2, cost: 0, opencode: { allowance: 0.0042 } },
+          },
+        },
+      )
+      const response = yield* LLMClient.generate(request).pipe(Effect.provide(fixedResponse(body)))
+
+      expect(response.usage).toMatchObject({ inputTokens: 5, outputTokens: 2, cost: 0, allowance: 0.0042 })
+    }),
+  )
+
   it.effect("preserves standard refusal content as ordinary assistant text", () =>
     Effect.gen(function* () {
       const response = yield* LLMClient.generate(request).pipe(

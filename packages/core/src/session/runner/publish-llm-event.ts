@@ -13,7 +13,6 @@ import { SessionMessage } from "../message.js"
 import { SessionSchema } from "../schema.js"
 import { SessionError } from "@opencode/schema/session-error"
 import { Money } from "@opencode/schema/money"
-import { SessionUsage } from "../usage.js"
 import { contentFilterError } from "../to-session-error.js"
 import type { Tool } from "../../tool.js"
 import { stringify } from "../../tool/runtime.js"
@@ -69,7 +68,7 @@ export interface StepRecord {
     readonly finish: Extract<LLMEvent, { type: "step-finish" }>["reason"]["normalized"]
     readonly rawFinish?: string
     readonly native?: SessionMessage.Native
-    readonly tokens: TokenUsage.Info
+    readonly usage: Extract<LLMEvent, { type: "step-finish" }>["usage"]
   }
   readonly needsContinuation: boolean
 }
@@ -412,6 +411,7 @@ export const createLLMEventPublisher = (bus: Pick<Bus.Interface, "publish">, inp
 
   const publishStepFailure = Effect.fnUntraced(function* (details?: {
     readonly cost?: Money.USD
+    readonly allowance?: Money.USD
     readonly tokens?: TokenUsage.Info
     readonly snapshot?: Snapshot.ID
     readonly files?: readonly RelativePath[]
@@ -574,7 +574,7 @@ export const createLLMEventPublisher = (bus: Pick<Bus.Interface, "publish">, inp
           finish: event.reason.normalized,
           rawFinish: event.reason.raw,
           native: native(event.providerMetadata),
-          tokens: SessionUsage.tokens(event.usage),
+          usage: event.usage,
         }
         if (event.reason.normalized === "content-filter") {
           providerFailed = true

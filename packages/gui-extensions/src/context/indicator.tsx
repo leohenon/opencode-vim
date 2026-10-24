@@ -75,9 +75,18 @@ export function SessionContextUsage(props: {
 
   const cost = createMemo(() => usd().format(spent()))
 
+  // A subscription such as OpenCode Go covers its requests from an allowance, so they cost nothing.
+  const allowance = createMemo(() =>
+    props.session.id ? props.session.server.data.session.allowance(props.session.id) : 0,
+  )
+
   // Spend anywhere in the family keeps the cost visible, even when this session's model is free.
   const showCost = createMemo(() => {
     if (spent() > 0) return true
+
+    // The allowance shows instead of $0.00.
+    if (allowance() > 0) return false
+
     const ref = info()?.model ?? messages().findLast((item) => item.type === "assistant")?.model
     const model = ref ? catalogModel(props.session, ref)?.model : undefined
 
@@ -118,6 +127,9 @@ export function SessionContextUsage(props: {
       <Show when={showCost()}>
         <ContextTooltipRow name={ctx.t("usage.cost")} value={cost()} />
       </Show>
+      <Show when={allowance() > 0}>
+        <ContextTooltipRow name={ctx.t("usage.allowance")} value={usd().format(allowance())} />
+      </Show>
       <ContextTooltipRow name={ctx.t("usage.usage")} value={`${context()?.usage ?? 0}%`} />
       <ContextTooltipRow name={ctx.t("usage.tokens")} value={context()?.total.toLocaleString(i18n.locale()) ?? "0"} />
     </div>
@@ -149,6 +161,12 @@ export function SessionContextUsage(props: {
                     ·
                   </span>
                   <span>{cost()}</span>
+                </Show>
+                <Show when={allowance() > 0}>
+                  <span aria-hidden="true" class="flex w-1.5 shrink-0 items-center justify-center">
+                    ·
+                  </span>
+                  <span>{ctx.t("usage.allowanceAmount", { amount: usd().format(allowance()) })}</span>
                 </Show>
               </span>
             </Button>

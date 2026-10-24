@@ -229,6 +229,7 @@ const GeminiUsage = Schema.Struct({
   promptTokenCount: optionalNull(Schema.Number),
   candidatesTokenCount: optionalNull(Schema.Number),
   totalTokenCount: optionalNull(Schema.Number),
+  ...ProviderShared.ReportedBilling.fields,
 })
 type GeminiUsage = Schema.Schema.Type<typeof GeminiUsage>
 
@@ -539,6 +540,8 @@ const mapUsage = (
     cacheReadInputTokens: cached,
     reasoningTokens: thoughts,
     totalTokens: ProviderShared.totalTokens(promptTokens, outputTokens, usage.totalTokenCount ?? undefined),
+    cost: usage.cost,
+    allowance: usage.opencode?.allowance,
     providerMetadata: providerMetadata(metadataKey, metadata),
   })
 }
@@ -547,7 +550,7 @@ const mapUsage = (
 // input plus output equal to the response's final context size, under-reporting billed input; the summed billed counts
 // remain in provider metadata.
 const mapContinuedUsage = (requests: ReadonlyArray<GeminiUsage>, metadataKey: string) => {
-  const sum = (field: keyof GeminiUsage) =>
+  const sum = (field: Exclude<keyof GeminiUsage, "opencode">) =>
     ProviderShared.sumTokens(...requests.map((usage) => usage[field] ?? undefined))
   return mapUsage(
     {
@@ -555,6 +558,9 @@ const mapContinuedUsage = (requests: ReadonlyArray<GeminiUsage>, metadataKey: st
       cachedContentTokenCount: requests[0].cachedContentTokenCount,
       candidatesTokenCount: sum("candidatesTokenCount"),
       thoughtsTokenCount: sum("thoughtsTokenCount"),
+      // Every continued request is billed on its own.
+      cost: sum("cost"),
+      opencode: { allowance: ProviderShared.sumTokens(...requests.map((usage) => usage.opencode?.allowance)) },
     },
     metadataKey,
     {

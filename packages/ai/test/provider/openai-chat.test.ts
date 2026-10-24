@@ -1177,6 +1177,43 @@ describe("OpenAI Chat route", () => {
     }),
   )
 
+  it.effect("reports the cost and allowance the endpoint billed", () =>
+    Effect.gen(function* () {
+      const response = yield* LLMClient.generate(request).pipe(
+        Effect.provide(
+          fixedResponse(
+            sseEvents(
+              deltaChunk({ content: "Hello" }, "stop"),
+              usageChunk({ prompt_tokens: 5, completion_tokens: 2, cost: 0, opencode: { allowance: 0.0042 } }),
+            ),
+          ),
+        ),
+      )
+
+      expect(response.usage).toMatchObject({ inputTokens: 5, outputTokens: 2, cost: 0, allowance: 0.0042 })
+    }),
+  )
+
+  it.effect("drops a malformed billed cost without failing the stream", () =>
+    Effect.gen(function* () {
+      const response = yield* LLMClient.generate(request).pipe(
+        Effect.provide(
+          fixedResponse(
+            sseEvents(
+              deltaChunk({ content: "Hello" }, "stop"),
+              usageChunk({ prompt_tokens: 5, completion_tokens: 2, cost: -1, opencode: { allowance: "lots" } }),
+            ),
+          ),
+        ),
+      )
+
+      expect(response.text).toBe("Hello")
+      expect(response.usage).toMatchObject({ inputTokens: 5, outputTokens: 2 })
+      expect(response.usage?.cost).toBeUndefined()
+      expect(response.usage?.allowance).toBeUndefined()
+    }),
+  )
+
   it.effect("uses the configured provider metadata namespace for reasoning and usage", () =>
     Effect.gen(function* () {
       const selected = LanguageModel.update(model, {

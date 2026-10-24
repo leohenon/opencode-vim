@@ -37,6 +37,7 @@ export class SessionAlreadyProjected extends Error {}
 
 type Usage = {
   cost: number
+  allowance?: number
   tokens: TokenUsage.Info
 }
 
@@ -54,6 +55,7 @@ function applyUsage(db: DatabaseService, sessionID: SessionSchema.ID, value: Usa
     .update(SessionTable)
     .set({
       cost: sql`${SessionTable.cost} + ${value.cost}`,
+      allowance: sql`${SessionTable.allowance} + ${value.allowance ?? 0}`,
       tokens_input: sql`${SessionTable.tokens_input} + ${value.tokens.input}`,
       tokens_output: sql`${SessionTable.tokens_output} + ${value.tokens.output}`,
       tokens_reasoning: sql`${SessionTable.tokens_reasoning} + ${value.tokens.reasoning}`,
@@ -83,6 +85,7 @@ const publishSessionUsage = Effect.fn("SessionProjector.publishUsage")(function*
   const row = yield* db
     .select({
       cost: SessionTable.cost,
+      allowance: SessionTable.allowance,
       input: SessionTable.tokens_input,
       output: SessionTable.tokens_output,
       reasoning: SessionTable.tokens_reasoning,
@@ -97,6 +100,7 @@ const publishSessionUsage = Effect.fn("SessionProjector.publishUsage")(function*
   yield* bus.publish(SessionEvent.UsageUpdated, {
     sessionID,
     cost: Money.USD.make(row.cost),
+    ...(row.allowance > 0 ? { allowance: Money.USD.make(row.allowance) } : {}),
     tokens: {
       input: row.input,
       output: row.output,
@@ -732,7 +736,7 @@ const layer = Layer.effectDiscard(
           yield* applyUsage(
             db,
             event.data.sessionID,
-            { cost: event.data.cost, tokens: event.data.tokens },
+            { cost: event.data.cost, allowance: event.data.allowance, tokens: event.data.tokens },
             event.created,
           )
         else yield* touch(db, event)

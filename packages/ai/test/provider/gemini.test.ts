@@ -925,6 +925,23 @@ describe("Gemini route", () => {
     }),
   )
 
+  it.effect("reports the cost and allowance the endpoint billed", () =>
+    Effect.gen(function* () {
+      const body = sseEvents({
+        candidates: [{ content: { role: "model", parts: [{ text: "Hello" }] }, finishReason: "STOP" }],
+        usageMetadata: {
+          promptTokenCount: 5,
+          candidatesTokenCount: 2,
+          cost: 0,
+          opencode: { allowance: 0.0042 },
+        },
+      })
+      const response = yield* LLMClient.generate(request).pipe(Effect.provide(fixedResponse(body)))
+
+      expect(response.usage).toMatchObject({ inputTokens: 5, outputTokens: 2, cost: 0, allowance: 0.0042 })
+    }),
+  )
+
   it.effect("parses text, reasoning, and usage stream fixtures", () =>
     Effect.gen(function* () {
       const body = sseEvents(

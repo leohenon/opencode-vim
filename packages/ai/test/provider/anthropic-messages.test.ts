@@ -1198,6 +1198,28 @@ describe("Anthropic Messages route", () => {
     }),
   )
 
+  it.effect("reports the cost and allowance the endpoint billed", () =>
+    Effect.gen(function* () {
+      const response = yield* LLMClient.generate(request).pipe(
+        Effect.provide(
+          fixedResponse(
+            sseEvents(
+              { type: "message_start", message: { usage: { input_tokens: 5 } } },
+              {
+                type: "message_delta",
+                delta: { stop_reason: "end_turn" },
+                usage: { output_tokens: 2, cost: 0, opencode: { allowance: 0.0042 } },
+              },
+              { type: "message_stop" },
+            ),
+          ),
+        ),
+      )
+
+      expect(response.usage).toMatchObject({ inputTokens: 5, outputTokens: 2, cost: 0, allowance: 0.0042 })
+    }),
+  )
+
   it.effect("preserves terminal state across usage-only message deltas", () =>
     Effect.gen(function* () {
       const response = yield* LLMClient.generate(request).pipe(

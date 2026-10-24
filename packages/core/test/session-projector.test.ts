@@ -630,6 +630,47 @@ describe("SessionProjector", () => {
     }),
   )
 
+  it.effect("adds each step's allowance to its message and the session total", () =>
+    Effect.gen(function* () {
+      const db = yield* seedSession()
+      const first = SessionMessage.ID.make("msg_allowance_1")
+      const second = SessionMessage.ID.make("msg_allowance_2")
+      yield* db
+        .insert(SessionMessageTable)
+        .values([assistantRow(first, 0), assistantRow(second, 1)])
+        .run()
+      const bus = yield* Bus.Service
+      const tokens = { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } }
+
+      yield* bus.publish(SessionEvent.Step.Ended, {
+        sessionID,
+        assistantMessageID: first,
+        finish: "stop",
+        cost: Money.USD.zero,
+        allowance: Money.USD.make(0.25),
+        tokens,
+      })
+      const usageUpdated = yield* bus
+        .subscribe(SessionEvent.UsageUpdated)
+        .pipe(Stream.runHead, Effect.forkScoped({ startImmediately: true }))
+      yield* bus.publish(SessionEvent.Step.Ended, {
+        sessionID,
+        assistantMessageID: second,
+        finish: "stop",
+        cost: Money.USD.zero,
+        allowance: Money.USD.make(0.5),
+        tokens,
+      })
+
+      const message = yield* db.select().from(SessionMessageTable).where(eq(SessionMessageTable.id, second)).get()
+      expect(message?.data).toMatchObject({ cost: 0, allowance: 0.5 })
+      const stored = yield* db.select().from(SessionTable).where(eq(SessionTable.id, sessionID)).get()
+      if (!stored) return yield* Effect.die("Session row missing")
+      expect(fromRow(stored)).toMatchObject({ cost: 0, allowance: 0.75 })
+      expect(Option.getOrThrow(yield* Fiber.join(usageUpdated)).data).toMatchObject({ cost: 0, allowance: 0.75 })
+    }),
+  )
+
   it.effect("reads and replays native data stored under its pre-v2.1 names", () =>
     Effect.gen(function* () {
       const db = yield* seedSession()

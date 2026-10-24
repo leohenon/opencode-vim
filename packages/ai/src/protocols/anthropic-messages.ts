@@ -1147,6 +1147,7 @@ const mapUsage = (usage: AnthropicUsage | undefined, providerMetadataKey: string
     cacheWriteInputTokens: cacheWrite,
     reasoningTokens: ProviderShared.sumTokens(...iterations.map((item) => item.output_tokens_details?.thinking_tokens)),
     totalTokens: ProviderShared.totalTokens(inputTokens, outputTokens, undefined),
+    ...ProviderShared.reportedBilling(usage),
     providerMetadata: { [providerMetadataKey]: usage },
   })
 }
@@ -1174,6 +1175,8 @@ const mergeUsage = (left: Usage | undefined, right: Usage | undefined, providerM
     cacheWriteInputTokens,
     reasoningTokens,
     totalTokens: ProviderShared.totalTokens(inputTokens, outputTokens, undefined),
+    cost: right.cost ?? left.cost,
+    allowance: right.allowance ?? left.allowance,
     providerMetadata: {
       [providerMetadataKey]:
         mergeJsonRecords(left.providerMetadata?.[providerMetadataKey], right.providerMetadata?.[providerMetadataKey]) ??

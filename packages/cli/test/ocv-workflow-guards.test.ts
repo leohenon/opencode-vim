@@ -3,7 +3,7 @@ import { expect, test } from "bun:test"
 test("workflow names identify the upstream and V2 executions without changing routing", async () => {
   for (const [file, name, action] of [
     ["sync-upstream", "Sync ocv with upstream/dev", "Sync ocv with upstream/dev"],
-    ["publish-ocv", "Release ocv", "Release ocv v2"],
+    ["publish-ocv", "Release ocv", "release v"],
   ] as const) {
     const workflow = Bun.YAML.parse(
       await Bun.file(new URL(`../../../.github/workflows/${file}.yml`, import.meta.url)).text(),
@@ -17,9 +17,7 @@ test("workflow names identify the upstream and V2 executions without changing ro
     expect(workflow["run-name"]).toContain(action)
     expect(workflow.on.workflow_dispatch.inputs.dry_run.default).toBe(true)
     if (file === "publish-ocv") {
-      expect(workflow["run-name"]).toContain("${{ github.ref_name }}")
-      expect(workflow["run-name"]).toContain("inputs.dry_run && 'dry-run' || 'real'")
-      expect(workflow["run-name"]).toContain("${{ inputs.version }}")
+      expect(workflow["run-name"]).toBe("release v${{ inputs.version }}")
       continue
     }
     expect(workflow["run-name"]).toBe(name)

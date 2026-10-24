@@ -141,3 +141,32 @@ jobs:
           VERSION: ${{ steps.release.outputs.version }}
           RELEASE_SHA: ${{ steps.release.outputs.sha }}
         run: gh workflow run publish-ocv.yml --repo "$GITHUB_REPOSITORY" --ref ocv -f version="$VERSION" -f sha="$RELEASE_SHA" -f dry_run=false
+
+  issues:
+    name: Report sync outcome
+    needs: sync
+    if: >-
+      always() && !cancelled() &&
+      github.repository == 'leohenon/opencode-vim' && github.ref == 'refs/heads/ocv' &&
+      (github.event_name == 'schedule' || inputs.dry_run == false) &&
+      (needs.sync.result == 'success' || needs.sync.result == 'failure')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      OCV_ISSUE_MAJOR: v2
+      OCV_ISSUE_WORKFLOW: sync
+      OCV_ISSUE_RESULT: ${{ needs.sync.result }}
+      OCV_ISSUE_DRY_RUN: ${{ github.event_name != 'schedule' && inputs.dry_run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          sparse-checkout: .github/scripts
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - name: Update owned failure tracker
+        run: bun .github/scripts/ocv-issues.ts

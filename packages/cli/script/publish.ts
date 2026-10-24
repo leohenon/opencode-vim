@@ -10,13 +10,40 @@ const root = path.resolve(process.env.OPENCODE_CLI_DIST ?? path.join(dir, "dist"
 process.chdir(dir)
 const dryRun = process.argv.includes("--dry-run")
 
-async function published(name: string, version: string) {
-  return (await $`npm view ${name}@${version} version`.nothrow()).exitCode === 0
+function requireVersion(value: unknown) {
+  if (
+    typeof value !== "string" ||
+    !/^2\.(0|[1-9]\d*)\.(0|[1-9]\d*)-ocv\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?![\s\S])/.test(value)
+  ) {
+    throw new Error(`Invalid OCV V2 version: ${value}`)
+  }
+  return value
+}
+
+async function registryVersion(spec: string, expected?: string) {
+  const result = await $`npm view ${spec} version --json`.quiet().nothrow()
+  const value: unknown = JSON.parse(result.stdout.toString() || "null")
+  if (result.exitCode === 0) {
+    const version = requireVersion(value)
+    if (expected && version !== expected) throw new Error(`Expected ${spec} to resolve to ${expected}, got ${version}`)
+    return version
+  }
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "error" in value &&
+    typeof value.error === "object" &&
+    value.error !== null &&
+    "code" in value.error &&
+    value.error.code === "E404"
+  )
+    return undefined
+  throw new Error(`npm lookup failed for ${spec}: ${result.stderr.toString()} ${JSON.stringify(value)}`)
 }
 
 async function publish(dir: string, name: string, version: string) {
   if (process.platform !== "win32") await $`chmod -R 755 .`.cwd(dir)
-  const exists = !dryRun && (await published(name, version))
+  const exists = !dryRun && (await registryVersion(`${name}@${version}`, version)) !== undefined
   if (exists) console.log(`already published ${name}@${version}`)
   // Keep local tarballs available to downstream publishers when retrying a release.
   await $`bun pm pack`.cwd(dir)
@@ -42,6 +69,14 @@ async function publishDistribution(input: {
   const version = versions.values().next().value
   if (!version) throw new Error(`No binary packages found for ${input.name}`)
   if (version !== Script.version) throw new Error(`Expected ${Script.version}, got ${version} for ${input.name}`)
+
+  requireVersion(version)
+  if (!dryRun) {
+    const current = await registryVersion(`${input.name}@ocv-v2`)
+    if (current && Bun.semver.order(version, current) < 0) {
+      throw new Error(`Refusing to downgrade ocv-v2 from ${current} to ${version}`)
+    }
+  }
 
   await $`mkdir -p ${input.root}/${input.name}/bin`
   await Bun.write(`${input.root}/${input.name}/bin/${input.command}.cjs`, Bun.file(path.join(dir, "bin", "ocv.cjs")))
@@ -71,6 +106,13 @@ async function publishDistribution(input: {
     ),
   )
   await publish(`${input.root}/${input.name}`, input.name, version)
+  if (!dryRun) {
+    // A retry may find the immutable package already published but its channel missing or stale.
+    const current = await registryVersion(`${input.name}@ocv-v2`)
+    if (!current || Bun.semver.order(current, version) < 0) {
+      await $`npm dist-tag add ${input.name}@${version} ocv-v2`
+    }
+  }
 }
 
 await publishDistribution({

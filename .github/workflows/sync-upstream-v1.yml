@@ -30,3 +30,32 @@ jobs:
         run: |
           [ -n "$GH_TOKEN" ] || { echo "SYNC_PAT with Actions write access is required" >&2; exit 1; }
           gh workflow run sync-upstream.yml --repo "$GITHUB_REPOSITORY" --ref ocv1 -f dry_run="$DRY_RUN"
+
+  issues:
+    name: Report v1 sync dispatch outcome
+    needs: dispatch
+    if: >-
+      always() && !cancelled() &&
+      github.repository == 'leohenon/opencode-vim' && github.ref == 'refs/heads/ocv' &&
+      (github.event_name == 'schedule' || inputs.dry_run == false) &&
+      (needs.dispatch.result == 'success' || needs.dispatch.result == 'failure')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      OCV_ISSUE_MAJOR: v1
+      OCV_ISSUE_WORKFLOW: sync-dispatch
+      OCV_ISSUE_RESULT: ${{ needs.dispatch.result }}
+      OCV_ISSUE_DRY_RUN: ${{ github.event_name != 'schedule' && inputs.dry_run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          sparse-checkout: .github/scripts
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - name: Update owned dispatch failure tracker
+        run: bun .github/scripts/ocv-issues.ts

@@ -22,13 +22,17 @@ permissions:
   contents: write
 
 concurrency:
-  group: release-ocv-v2
+  group: release-ocv-v2-${{ inputs.dry_run && 'dry-run' || 'publish' }}
   cancel-in-progress: false
 
 jobs:
   release:
+    outputs:
+      github: ${{ steps.release_ref.outputs.published == 'true' && 'success' || ((steps.github_stage.outcome == 'failure' || steps.github_publish.outcome == 'failure') && 'failure' || steps.github_publish.outcome) }}
+      npm: ${{ steps.npm_publish.outcome }}
     if: github.repository == 'leohenon/opencode-vim' && github.ref == 'refs/heads/ocv'
-    runs-on: ubuntu-24.04
+    # Darwin artifacts must be signed before either npm packing or archiving.
+    runs-on: macos-latest
     env:
       GH_TOKEN: ${{ github.token }}
       VERSION: ${{ inputs.version }}
@@ -42,7 +46,26 @@ jobs:
         with:
           bun-version: 1.4.4
 
+      - name: Resolve existing V2 release source
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$VERSION" =~ ^2\.[0-9]+\.[0-9]+-ocv\.[0-9]+\.[0-9]+$ ]]
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 --json tagName,isDraft > "$RUNNER_TEMP/releases.json"
+          source=""
+          if git rev-parse -q --verify "refs/tags/v$VERSION^{commit}" >/dev/null; then
+            source=$(git rev-parse "refs/tags/v$VERSION^{commit}")
+          elif jq -e --arg tag "v$VERSION" '.[] | select(.tagName == $tag and .isDraft)' "$RUNNER_TEMP/releases.json" >/dev/null; then
+            source=$(gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" --json targetCommitish --jq '.targetCommitish')
+            [[ "$source" =~ ^[0-9a-f]{40}$ ]]
+          fi
+          if [ -n "$source" ]; then
+            git merge-base --is-ancestor "$source" origin/ocv || { echo "Existing release source is outside ocv" >&2; exit 1; }
+            git checkout --detach "$source"
+          fi
+
       - name: Validate OCV V2 version and release ref
+        id: release_ref
         shell: bash
         run: |
           set -euo pipefail
@@ -58,15 +81,15 @@ jobs:
               exit 1
             }
           fi
-          gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 --json tagName,isDraft > "$RUNNER_TEMP/releases.json"
           if jq -e --arg tag "v$VERSION" '.[] | select(.tagName == $tag and .isDraft)' "$RUNNER_TEMP/releases.json" >/dev/null; then
             target=$(gh release view "v$VERSION" --json targetCommitish --jq '.targetCommitish')
             [ "$target" = "$(git rev-parse HEAD)" ] || { echo "Draft belongs to a different commit" >&2; exit 1; }
           fi
-          if jq -e --arg tag "v$VERSION" '.[] | select(.tagName == $tag and .isDraft == false)' "$RUNNER_TEMP/releases.json" >/dev/null; then
-            echo "Version v$VERSION is already released; use a new version" >&2
-            exit 1
+          published=$(jq --arg tag "v$VERSION" 'any(.[]; .tagName == $tag and .isDraft == false)' "$RUNNER_TEMP/releases.json")
+          if [ "$published" = true ]; then
+            git rev-parse --verify "refs/tags/v$VERSION^{commit}" >/dev/null || { echo "Public release has no immutable source tag" >&2; exit 1; }
           fi
+          echo "published=$published" >> "$GITHUB_OUTPUT"
 
       - name: Require Homebrew tap credentials before publishing
         if: inputs.dry_run == false
@@ -96,6 +119,17 @@ jobs:
           OPENCODE_VERSION: ${{ inputs.version }}
           OPENCODE_CHANNEL: ocv
         run: bun run --cwd packages/cli build
+
+      - name: Sign and verify every Darwin binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          for target in arm64 x64 x64-baseline; do
+            binary="packages/cli/dist/cli-darwin-$target/bin/opencode"
+            [ -f "$binary" ] || { echo "Missing Darwin binary: $binary" >&2; exit 1; }
+            codesign --force --sign - "$binary"
+            codesign --verify --strict --verbose=2 "$binary"
+          done
 
       - name: Pack npm distributions
         env:
@@ -140,17 +174,22 @@ jobs:
           if-no-files-found: error
 
       - name: Stage or resume draft prerelease
+        id: github_stage
         if: inputs.dry_run == false
         shell: bash
         run: |
           set -euo pipefail
-          if jq -e --arg tag "v$VERSION" '.[] | select(.tagName == $tag and .isDraft)' "$RUNNER_TEMP/releases.json" >/dev/null; then
+          if [ "${{ steps.release_ref.outputs.published }}" = true ]; then
+            # Public assets/checksums are immutable, even on a duplicate dispatch.
+            gh release download "v$VERSION" --repo "$GITHUB_REPOSITORY" --pattern 'ocv-*' --dir packages/cli/dist/release --clobber
+          elif jq -e --arg tag "v$VERSION" '.[] | select(.tagName == $tag and .isDraft)' "$RUNNER_TEMP/releases.json" >/dev/null; then
             gh release upload "v$VERSION" packages/cli/dist/release/* --clobber
           else
             gh release create "v$VERSION" packages/cli/dist/release/* --target "$(git rev-parse HEAD)" --title "v$VERSION" --draft --prerelease --latest=false --generate-notes
           fi
 
       - name: Publish npm packages to ocv-v2 only
+        id: npm_publish
         if: inputs.dry_run == false
         env:
           OPENCODE_VERSION: ${{ inputs.version }}
@@ -159,7 +198,8 @@ jobs:
         run: bun run packages/cli/script/publish.ts
 
       - name: Publish GitHub prerelease after npm succeeds
-        if: inputs.dry_run == false
+        id: github_publish
+        if: inputs.dry_run == false && steps.release_ref.outputs.published != 'true'
         run: gh release edit "v$VERSION" --draft=false --prerelease --latest=false
 
   # Separate from publication so a failed tap push can be retried without
@@ -198,6 +238,13 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p Formula
+          if [ -f Formula/ocv-v2.rb ]; then
+            ruby -r rubygems -e '
+              current = File.read(ARGV[0])[/^\s*version\s+"([^"]+)"/, 1]
+              abort "Cannot determine current Homebrew version" unless current
+              abort "Refusing Homebrew downgrade from #{current} to #{ARGV[1]}" if Gem::Version.new(current) > Gem::Version.new(ARGV[1])
+            ' Formula/ocv-v2.rb "$VERSION"
+          fi
           install -m 644 "$RUNNER_TEMP/homebrew-formula/ocv-v2.rb" Formula/ocv-v2.rb
           git add -- Formula/ocv-v2.rb
           if git diff --cached --quiet; then
@@ -208,3 +255,35 @@ jobs:
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git commit -m "chore(homebrew): update ocv-v2 to $VERSION"
           git push origin HEAD
+
+  issues:
+    name: Report release outcome
+    needs: [release, homebrew]
+    if: >-
+      always() && !cancelled() && inputs.dry_run == false &&
+      github.repository == 'leohenon/opencode-vim' && github.ref == 'refs/heads/ocv' &&
+      (needs.release.result == 'success' || needs.release.result == 'failure' || needs.homebrew.result == 'failure')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      OCV_ISSUE_MAJOR: v2
+      OCV_ISSUE_WORKFLOW: release
+      OCV_ISSUE_VERSION: ${{ inputs.version }}
+      OCV_ISSUE_RESULT: ${{ needs.release.result == 'success' && needs.homebrew.result == 'success' && 'success' || 'failure' }}
+      OCV_ISSUE_NPM: ${{ needs.release.outputs.npm || 'skipped' }}
+      OCV_ISSUE_GITHUB: ${{ needs.release.outputs.github || 'skipped' }}
+      OCV_ISSUE_HOMEBREW: ${{ needs.homebrew.result }}
+      OCV_ISSUE_DRY_RUN: ${{ inputs.dry_run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          sparse-checkout: .github/scripts
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - name: Update owned failure trackers
+        run: bun .github/scripts/ocv-issues.ts

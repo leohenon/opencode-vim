@@ -15,14 +15,14 @@ test("workflow names identify the upstream and V2 executions without changing ro
     }
     expect(workflow.name).toBe(name)
     expect(workflow["run-name"]).toContain(action)
-    expect(workflow["run-name"]).toContain("${{ github.ref_name }}")
-    expect(workflow["run-name"]).toContain("inputs.dry_run && 'dry-run' || 'real'")
     expect(workflow.on.workflow_dispatch.inputs.dry_run.default).toBe(true)
     if (file === "publish-ocv") {
+      expect(workflow["run-name"]).toContain("${{ github.ref_name }}")
+      expect(workflow["run-name"]).toContain("inputs.dry_run && 'dry-run' || 'real'")
       expect(workflow["run-name"]).toContain("${{ inputs.version }}")
       continue
     }
-    expect(workflow["run-name"]).toContain("github.event_name != 'schedule'")
+    expect(workflow["run-name"]).toBe(name)
     const runs = workflow.jobs.sync!.steps.map((step) => step.run ?? "").join("\n")
     expect(runs).toContain('gh workflow run publish-ocv.yml --repo "$GITHUB_REPOSITORY" --ref ocv ')
     expect(runs).toContain("|package\\.json|packages/cli/package\\.json|")

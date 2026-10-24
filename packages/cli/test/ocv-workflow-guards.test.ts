@@ -2,7 +2,7 @@ import { expect, test } from "bun:test"
 
 test("workflow names identify the upstream and V2 executions without changing routing", async () => {
   for (const [file, name, action] of [
-    ["sync-upstream", "Sync ocv with upstream/dev", "Sync ocv with upstream/dev"],
+    ["sync-upstream", "Schedule ocv sync", "Schedule ocv sync"],
     ["publish-ocv", "Release ocv", "release v"],
   ] as const) {
     const workflow = Bun.YAML.parse(

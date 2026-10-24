@@ -50,10 +50,7 @@ describe("V1 workflow isolation", () => {
     expect(sync.name).toBe("Sync ocv1 with upstream/v1")
     expect(publish.name).toBe("Release ocv")
     expect(sync["run-name"]).toBe("Sync ocv1 with upstream/v1")
-    expect(publish["run-name"]).toContain("Release")
-    expect(publish["run-name"]).toContain("${{ github.ref_name }}")
-    expect(publish["run-name"]).toContain("inputs.dry_run && 'dry-run' || 'real'")
-    expect(publish["run-name"]).toContain("${{ inputs.version }}")
+    expect(publish["run-name"]).toBe("release v${{ inputs.version }}")
   })
 
   test.each(["ci.yml", "typecheck.yml", "test.yml", "storybook.yml", "nix-eval.yml"])(

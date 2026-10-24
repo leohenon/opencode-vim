@@ -1,4 +1,5 @@
-name: Release OCV V2
+name: Release ocv
+run-name: "Release ocv v2 | ${{ github.ref_name }} | ${{ inputs.version }} | ${{ inputs.dry_run && 'dry-run' || 'real' }}"
 
 on:
   workflow_dispatch:
@@ -39,7 +40,7 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.4.2
+          bun-version: 1.4.4
 
       - name: Validate OCV V2 version and release ref
         shell: bash

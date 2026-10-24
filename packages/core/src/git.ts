@@ -339,7 +339,7 @@ const layer = Layer.effect(
     ) {
       const result = yield* proc
         .run(
-          ChildProcess.make(gitExecutable, repositoryArgs(repository, args), {
+          ChildProcess.make(gitExecutable(), repositoryArgs(repository, args), {
             cwd: repository.worktree,
             env: options?.index ? { ...options.env, GIT_INDEX_FILE: options.index } : options?.env,
             extendEnv: true,
@@ -549,7 +549,7 @@ const layer = Layer.effect(
       const result = yield* proc
         .run(
           ChildProcess.make(
-            gitExecutable,
+            gitExecutable(),
             repositoryArgs(input.repository, ["check-ignore", "--no-index", "--stdin", "-z"]),
             {
               cwd: input.repository.worktree,
@@ -1227,7 +1227,7 @@ const layer = Layer.effect(
       cwd = repository.worktree,
     ) {
       const result = yield* proc
-        .run(ChildProcess.make(gitExecutable, args, { cwd, extendEnv: true, stdin: "ignore" }))
+        .run(ChildProcess.make(gitExecutable(), args, { cwd, extendEnv: true, stdin: "ignore" }))
         .pipe(
           Effect.mapError(
             (cause) => new WorktreeError({ operation, directory: worktreeDirectory, message: cause.message, cause }),
@@ -1324,7 +1324,7 @@ function run(cwd: string, proc: AppProcess.Interface, args: string[]) {
 function execute(cwd: string, proc: AppProcess.Interface, args: string[]) {
   return proc
     .run(
-      ChildProcess.make(gitExecutable, args, {
+      ChildProcess.make(gitExecutable(), args, {
         cwd,
         extendEnv: true,
         stdin: "ignore",

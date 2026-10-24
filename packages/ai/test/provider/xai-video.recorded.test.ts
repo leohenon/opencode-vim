@@ -24,7 +24,7 @@ describe("xAI Video recorded", () => {
         const generation = yield* Video.start({
           model,
           prompt: "A single red balloon drifting slowly upward against a clear blue sky.",
-          aspectRatio: "16:9",
+          aspect: "16:9",
           resolution: "480p",
           durationSeconds: 2,
         })

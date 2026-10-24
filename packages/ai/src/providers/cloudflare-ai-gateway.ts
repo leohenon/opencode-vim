@@ -1,10 +1,13 @@
 import type { Config, Redacted } from "effect"
 import type { ProviderPackage } from "../provider-package.js"
+import { CloudflareRunEvaluation } from "../experimental/cloudflare-run-evaluation.js"
+import { SystemOne } from "../experimental/system-one.js"
 import { AnthropicMessages, OpenAIChat, OpenAIResponses } from "../protocols/index.js"
 import { Auth } from "../route/auth.js"
+import { Endpoint } from "../route/endpoint.js"
 import type { AtLeastOne, ProviderAuthOption } from "../route/auth-options.js"
 import type { RouteDefaultsInput } from "../route/client.js"
-import { ProviderConfigurationError, ProviderID, type ModelID } from "../schema/index.js"
+import { HttpOptions, ProviderConfigurationError, ProviderID, type ModelID } from "../schema/index.js"
 import { encodeJson } from "../utils/json.js"
 import type { OpenAIProviderOptionsInput } from "./openai-options.js"
 
@@ -44,6 +47,17 @@ export type Settings = ProviderPackage.Settings &
 export const baseURL = (input: GatewayURL) => {
   if (input.baseURL) return input.baseURL
   return `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(requireAccountId(input))}/ai/v1`
+}
+
+/** The Run API (`/ai/run`) next to the OpenAI-compatible `/ai/v1` base. */
+export const runBaseURL = (input: GatewayURL) => {
+  const url = Endpoint.trimBaseUrl(baseURL(input))
+  if (!url.endsWith("/ai/v1"))
+    throw new ProviderConfigurationError({
+      provider: id,
+      message: "CloudflareAIGateway needs accountId or a baseURL ending in /ai/v1 to derive the Run API base",
+    })
+  return `${url.slice(0, -"/v1".length)}/run`
 }
 
 // Cloudflare's REST API rejects parts of the Anthropic Messages and OpenAI Responses request shapes, such as
@@ -118,10 +132,19 @@ export const configure = (input: LanguageModelOptions) => {
   const responses = responsesRoute.with(passthrough("openai"))
   const messages = messagesRoute.with(passthrough("anthropic/v1"))
   const chat = route.with(rest)
+  const evaluation = (value: string | ModelID) =>
+    CloudflareRunEvaluation.model({
+      id: value,
+      provider: id,
+      auth: rest.auth,
+      baseURL: runBaseURL(input),
+      headers: rest.headers,
+      http: HttpOptions.make(input.http),
+      rounding: SystemOne.jevRounding,
+    })
   return {
     id,
-    model: (input: string | ModelID) => {
-      const value = String(input)
+    model: (value: string | ModelID) => {
       if (value.startsWith("openai/"))
         return responses.model<OpenAIProviderOptionsInput>({ id: native ? value.slice("openai/".length) : value })
       if (value.startsWith("anthropic/"))
@@ -132,6 +155,7 @@ export const configure = (input: LanguageModelOptions) => {
         return chat.model<OpenAIProviderOptionsInput>({ id: value.slice("workers-ai/".length) })
       return chat.model<OpenAIProviderOptionsInput>({ id: value })
     },
+    experimental: { evaluation },
     configure,
   }
 }

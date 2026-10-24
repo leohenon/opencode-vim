@@ -25,8 +25,9 @@ describe("Black Forest Labs Images recorded", () => {
         const started = yield* Image.start({
           model,
           prompt: "A simple flat black circle centered on a plain white background.",
-          size: "512x512",
-          format: "jpeg",
+          aspect: "1:1",
+          resolution: "0.5K",
+          providerOptions: { output_format: "jpeg" },
         })
         const generation = yield* Image.resume(model, JSON.parse(JSON.stringify(started.token)))
         const response = yield* generation.await({ poll: queuedPoll })

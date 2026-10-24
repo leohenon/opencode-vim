@@ -5,6 +5,7 @@ import { LLM, AIError, LLMEvent, LLMRequest, Message, ToolCallPart, ToolDefiniti
 import { Auth, LLMClient } from "../../src/route.js"
 import { compileRequest } from "../../src/route/client.js"
 import * as Gemini from "../../src/protocols/gemini.js"
+import { Google } from "../../src/providers.js"
 import { it } from "../lib/effect.js"
 import { dynamicResponse, fixedResponse } from "../lib/http.js"
 import { sseEvents, sseRaw } from "../lib/sse.js"
@@ -553,6 +554,80 @@ describe("Gemini route", () => {
           ],
         },
       ])
+    }),
+  )
+
+  it.effect("forwards native video URLs in user and tool input", () =>
+    Effect.gen(function* () {
+      const uri = "https://example.test/clip.mp4"
+      const messages = [
+        Message.user(Message.media(Media.url(uri, { mediaType: "video/mp4" }))),
+        Message.assistant([ToolCallPart.make({ id: "call_video", name: "read", input: {} })]),
+        Message.tool({
+          id: "call_video",
+          name: "read",
+          result: { type: "content", value: [{ type: "file", uri, mime: "video/mp4" }] },
+        }),
+      ]
+      const gemini = yield* compileRequest(LLM.request({ model: gemini3, messages }))
+      expect(gemini.body).toEqual({
+        contents: [
+          { role: "user", parts: [{ fileData: { mimeType: "video/mp4", fileUri: uri } }] },
+          {
+            role: "model",
+            parts: [
+              {
+                functionCall: { id: "call_video", name: "read", args: {} },
+                thoughtSignature: "skip_thought_signature_validator",
+              },
+            ],
+          },
+          {
+            role: "user",
+            parts: [
+              { functionResponse: { id: "call_video", name: "read", response: { name: "read", content: "" } } },
+            ],
+          },
+          {
+            role: "user",
+            parts: [
+              { text: "Attached media from tool result:" },
+              { fileData: { mimeType: "video/mp4", fileUri: uri } },
+            ],
+          },
+        ],
+      })
+
+      const interactions = yield* compileRequest(
+        LLM.request({
+          model: Google.configure({ apiKey: "test" }).interactions("gemini-3-flash-preview"),
+          messages,
+        }),
+      )
+      expect(interactions.body).toEqual({
+        model: "gemini-3-flash-preview",
+        input: [
+          { type: "user_input", content: [{ type: "video", uri, mime_type: "video/mp4" }] },
+          { type: "function_call", id: "call_video", name: "read", arguments: {} },
+          {
+            type: "function_result",
+            call_id: "call_video",
+            name: "read",
+            result: [{ type: "video", uri, mime_type: "video/mp4" }],
+          },
+        ],
+        stream: true,
+        store: false,
+        generation_config: {},
+      })
+
+      const error = yield* compileRequest(
+        LLM.request({
+          model: gemini3,
+          prompt: Message.media(Media.url("https://example.test/image.png", { mediaType: "image/png" })),
+        }),
+      ).pipe(Effect.flip)
+      expect(error.reason._tag).toBe("InvalidRequest")
     }),
   )
 

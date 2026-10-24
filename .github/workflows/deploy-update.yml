@@ -24,7 +24,7 @@ jobs:
 
       - name: Typecheck
         working-directory: services/update
-        run: bun typecheck
+        run: bun run typecheck:tsc
 
       - name: Deploy
         working-directory: services/update

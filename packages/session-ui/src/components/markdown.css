@@ -271,7 +271,7 @@
     margin: 32px 0;
   }
 
-  .shiki {
+  .highlights {
     background: var(--color-background-stronger);
     color: var(--text-base);
     font-size: 13px;
@@ -313,7 +313,7 @@
     display: none;
   }
 
-  [data-component="markdown-code"][data-code-kind="shell"] .shiki {
+  [data-component="markdown-code"][data-code-kind="shell"] .highlights {
     background: var(--markdown-shell-code-background);
     border-color: var(--markdown-shell-code-border);
     color: var(--markdown-shell-code-color);

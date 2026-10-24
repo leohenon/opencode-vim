@@ -1,4 +1,5 @@
-name: Sync OCV with upstream V2
+name: Sync ocv with upstream
+run-name: "Sync ocv v2 | ${{ github.ref_name }} | ${{ github.event_name != 'schedule' && inputs.dry_run && 'dry-run' || 'real' }}"
 
 on:
   schedule:
@@ -35,7 +36,7 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.4.2
+          bun-version: 1.4.4
 
       - run: bun install --frozen-lockfile
 
@@ -53,9 +54,9 @@ jobs:
           [[ "$base" =~ ^2\.[0-9]+\.[0-9]+$ ]] || { echo "Refusing non-V2 upstream source: $base" >&2; exit 1; }
           if ! git merge --no-commit --no-ff upstream/dev; then
             conflicts=$(git diff --name-only --diff-filter=U)
-            other=$(printf '%s\n' "$conflicts" | grep -Ev '^(AGENTS\.md|README\.md|install\.sh|\.github/ocv-track|packages/cli/package\.json|bun\.lock)$' || true)
+            other=$(printf '%s\n' "$conflicts" | grep -Ev '^(AGENTS\.md|README\.md|install\.sh|\.github/ocv-track|package\.json|packages/cli/package\.json|bun\.lock)$' || true)
             [ -z "$other" ] || { printf '%s\n' "$other"; exit 1; }
-            for file in packages/cli/package.json bun.lock; do
+            for file in package.json packages/cli/package.json bun.lock; do
               if printf '%s\n' "$conflicts" | grep -Fxq "$file"; then
                 bun run packages/cli/script/ocv-sync.ts "$file"
               fi

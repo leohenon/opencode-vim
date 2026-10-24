@@ -5,20 +5,25 @@ import path from "node:path"
 
 /** Let Git merge the content after removing only the known package-identity/version conflict. */
 export async function mergePackageMetadata(file: string, input: { base: string; ours: string; theirs: string }) {
-  if (file !== "packages/cli/package.json" && file !== "bun.lock") throw new Error(`Unsupported merge file: ${file}`)
+  if (file !== "package.json" && file !== "packages/cli/package.json" && file !== "bun.lock")
+    throw new Error(`Unsupported merge file: ${file}`)
   const prefix = file === "bun.lock" ? ["workspaces", "packages/cli"] : []
+  const identity =
+    file === "package.json"
+      ? { upstream: "opencode", fork: "ocv" }
+      : { upstream: "@opencode/cli", fork: "@leohenon/ocv" }
   const values = [input.base, input.ours, input.theirs].map((text) => {
     const errors: ParseError[] = []
     const value = parse(text, errors, { allowTrailingComma: true })
     if (errors.length) throw new Error(`Invalid JSON in ${file}`)
     const pkg = prefix.length ? value?.workspaces?.["packages/cli"] : value
     if (typeof pkg?.name !== "string" || typeof pkg?.version !== "string")
-      throw new Error(`Missing CLI identity in ${file}`)
+      throw new Error(`Missing package identity in ${file}`)
     return pkg as { name: string; version: string }
   })
-  if (values[0]!.name !== "@opencode/cli" || values[2]!.name !== values[0]!.name)
-    throw new Error(`Upstream CLI identity changed in ${file}`)
-  if (values[1]!.name !== "@leohenon/ocv") throw new Error(`Unexpected OCV identity in ${file}`)
+  if (values[0]!.name !== identity.upstream || values[2]!.name !== values[0]!.name)
+    throw new Error(`Upstream package identity changed in ${file}`)
+  if (values[1]!.name !== identity.fork) throw new Error(`Unexpected OCV identity in ${file}`)
   if (!values.every((value) => /^2\.\d+\.\d+(?:-ocv\.\d+\.\d+)?$/.test(value.version)))
     throw new Error(`Refusing a non-V2 package merge in ${file}`)
   const normalized = [input.base, input.ours, input.theirs].map((text) =>

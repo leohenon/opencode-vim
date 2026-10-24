@@ -25,7 +25,7 @@ describe("Google Veo recorded", () => {
           {
             model,
             prompt: "A single red balloon drifting slowly upward against a clear blue sky.",
-            aspectRatio: "16:9",
+            aspect: "16:9",
             durationSeconds: 4,
           },
           { poll: queuedPoll },

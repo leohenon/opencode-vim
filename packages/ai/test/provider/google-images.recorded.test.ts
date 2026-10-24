@@ -22,7 +22,7 @@ describe("Google Images recorded", () => {
       const response = yield* Image.generate({
         model,
         prompt: "A simple flat blue circle centered on a plain white background.",
-        aspectRatio: "1:1",
+        aspect: "1:1",
       })
 
       expect(response.images).toHaveLength(1)
@@ -43,7 +43,7 @@ describe("Google Images recorded", () => {
             "image/jpeg",
           ),
         ],
-        aspectRatio: "1:1",
+        aspect: "1:1",
       })
 
       expect(response.image.mediaType).toBe("image/jpeg")

@@ -1,31 +1,23 @@
 import { expect, test } from "bun:test"
-import { mainConfig } from "../vite.node.config"
-import { nodeTarget } from "../src/node/target"
+import { tmpdir } from "../../core/test/fixture/tmpdir"
+import { isolatedEnv } from "./fixture/environment"
 
-test("Node builds embed OCV identity and do not share the official native-asset cache", () => {
-  const config = mainConfig({
-    version: "2.0.32-ocv.4.13",
-    channel: "ocv",
-    assetHash: "test",
-    target: nodeTarget("darwin", "arm64"),
+test("Node builds embed OCV identity and do not share the official native-asset cache", async () => {
+  await using tmp = await tmpdir()
+  // A fresh process matches build-node.ts: Vite loads before Babel transforms install
+  // an Error.prepareStackTrace wrapper that breaks Vite's follow-redirects import in Bun.
+  const child = Bun.spawn([process.execPath, `${import.meta.dir}/fixture/ocv-node-build-probe.ts`], {
+    cwd: tmp.path,
+    env: isolatedEnv(tmp.path),
+    stdout: "pipe",
+    stderr: "pipe",
   })
-  expect(config.define).toMatchObject({
-    OPENCODE_CLI_NAME: JSON.stringify("ocv"),
-    OPENCODE_PRODUCT_NAME: JSON.stringify("ocv"),
-    OPENCODE_CHANNEL: JSON.stringify("ocv"),
-    OPENCODE_ARTIFACT: JSON.stringify("cli-node"),
-  })
-  expect(config.resolve?.builtins).toContain("fs")
-  expect(config.resolve?.builtins).not.toContain("ws")
-  expect(config.resolve?.builtins).not.toContain("undici")
-  const external = config.build?.rollupOptions?.external
-  if (typeof external !== "function") throw new Error("Expected a Node built-in predicate")
-  expect(external("fs", undefined, false)).toBe(true)
-  expect(external("node:fs", undefined, false)).toBe(true)
-  expect(external("ws", undefined, false)).toBe(false)
-  expect(external("undici", undefined, false)).toBe(false)
-  const output = config.build?.rollupOptions?.output
-  if (!output || Array.isArray(output)) throw new Error("Expected a single Node output")
-  expect(output.banner).toContain("ocv-node-")
-  expect(output.banner).not.toContain("`opencode-node-")
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ])
+  expect(stderr).toBe("")
+  expect(exitCode).toBe(0)
+  expect(stdout).toBe("")
 })

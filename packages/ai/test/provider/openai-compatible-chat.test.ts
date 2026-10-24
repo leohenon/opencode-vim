@@ -572,16 +572,8 @@ describe("OpenAI-compatible Chat route", () => {
 
       const unknown = yield* LLMClient.generate(request).pipe(
         Effect.provide(fixedResponse(sseEvents(deltaChunk({}, "future_reason")))),
-        Effect.flip,
       )
-      expect(unknown).toMatchObject({
-        reason: { _tag: "UnknownProvider" },
-        message: "Provider finish_reason: future_reason",
-      })
-      expect(decodeJson(unknown.reason.body ?? "")).toMatchObject({
-        id: "chatcmpl_fixture",
-        choices: [{ finish_reason: "future_reason" }],
-      })
+      expect(unknown.finishReason).toEqual({ normalized: "unknown", raw: "future_reason" })
     }),
   )
 

@@ -1,7 +1,7 @@
 import { Effect } from "effect"
 import { Evaluation, EvaluationClient, EvaluationModel, type EvaluationRoute } from "../src/experimental.js"
 import type { Service } from "../src/experimental/evaluation-client.js"
-import { OpenCode, OpenRouter, TypeSafeAI, VercelAIGateway } from "../src/providers.js"
+import { Baseten, OpenCode, OpenRouter, TypeSafeAI, VercelAIGateway } from "../src/providers.js"
 
 type Requirements<T> = T extends Effect.Effect<infer _A, infer _E, infer R> ? R : never
 type Success<T> = T extends Effect.Effect<infer A, infer _E, infer _R> ? A : never
@@ -73,6 +73,20 @@ Evaluation.run({
   state: "hello",
   questions: { ok: { type: "boolean", instructions: "OK?" } },
   options: { session_id: 1 },
+})
+
+Evaluation.run({
+  model: Baseten.experimental.evaluation("decision-models/baseten-elephant-9b-latest"),
+  state: "hello",
+  questions: { ok: { type: "boolean", instructions: "OK?" } },
+  options: { max_len: 512 },
+})
+// @ts-expect-error Baseten max_len is a number.
+Evaluation.run({
+  model: Baseten.experimental.evaluation("decision-models/baseten-elephant-9b-latest"),
+  state: "hello",
+  questions: { ok: { type: "boolean", instructions: "OK?" } },
+  options: { max_len: "512" },
 })
 
 Evaluation.run({

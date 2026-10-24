@@ -25,7 +25,7 @@ jobs:
 
       - name: Typecheck
         working-directory: services/files
-        run: bun typecheck
+        run: bun run typecheck:tsc
 
       - name: Deploy
         working-directory: services/files

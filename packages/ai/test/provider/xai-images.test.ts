@@ -18,16 +18,16 @@ describe("xAI Images", () => {
         }).image("grok-imagine-image"),
         prompt: "A robot tending a rooftop garden",
         n: 2,
-        aspectRatio: "16:9",
+        aspect: "16:9",
+        resolution: "4K",
         providerOptions: {
           aspect_ratio: "4:3",
-          resolution: "1k",
           responseFormat: "url",
           response_format: "b64_json",
           future_option: true,
         },
         http: {
-          body: { resolution: "2k", future_option: "http" },
+          body: { future_option: "http" },
           headers: { "x-request": "yes" },
           query: { trace: "1" },
         },
@@ -39,6 +39,7 @@ describe("xAI Images", () => {
       expect(response.images[1].mediaType).toBe("application/octet-stream")
       expect(response.images[1].source).toEqual({ type: "url", url: "https://api.xai.test/image.jpg" })
       expect(response.usage).toBeUndefined()
+      expect(response.notices).toEqual([{ type: "other", message: "xAI Images doesn't offer 4K; used 2k" }])
       expect(response.providerMetadata).toEqual({ xai: { usage: { num_images: 2 } } })
     }).pipe(
       Effect.provide(

@@ -22,8 +22,9 @@ describe("xAI Images recorded", () => {
       const response = yield* Image.generate({
         model,
         prompt: "A simple flat black diamond centered on a plain white background.",
-        aspectRatio: "1:1",
-        providerOptions: { resolution: "1k", responseFormat: "b64_json" },
+        aspect: "1:1",
+        resolution: "1K",
+        providerOptions: { responseFormat: "b64_json" },
       })
 
       expect(response.images).toHaveLength(1)
@@ -43,8 +44,9 @@ describe("xAI Images recorded", () => {
             "image/jpeg",
           ),
         ],
-        aspectRatio: "1:1",
-        providerOptions: { resolution: "1k", responseFormat: "b64_json" },
+        aspect: "1:1",
+        resolution: "1K",
+        providerOptions: { responseFormat: "b64_json" },
       })
 
       expect(response.image.mediaType).toMatch(/^image\/(jpeg|png)$/)

@@ -1,6 +1,6 @@
 {
   "name": "@opencode/app",
-  "version": "2.1.2",
+  "version": "2.1.4",
   "description": "",
   "type": "module",
   "exports": {
@@ -12,16 +12,17 @@
     "./index.css": "./src/index.css"
   },
   "scripts": {
-    "typecheck": "tsc -b",
+    "typecheck": "bun check --no-script -b",
+    "typecheck:tsc": "tsc -b",
     "typecheck:e2e": "tsc -p e2e/tsconfig.json",
     "start": "vite",
     "dev": "vite",
     "build": "vite build",
     "serve": "vite preview",
     "test": "bun run test:unit && bun run test:browser",
-    "test:unit": "bun test --conditions=solid --only-failures --isolate --preload ./happydom.ts ./src",
-    "test:browser": "bun test --conditions=browser --isolate --preload ./happydom.ts ./test-browser",
-    "test:unit:watch": "bun test --conditions=solid --watch --isolate --preload ./happydom.ts ./src",
+    "test:unit": "bun test --conditions=solid --only-failures --isolate --preload ../ui/test/solid-jsx.ts --preload ./happydom.ts ./src",
+    "test:browser": "bun test --conditions=browser --isolate --preload ../ui/test/solid-jsx.ts --preload ./happydom.ts ./test-browser",
+    "test:unit:watch": "bun test --conditions=solid --watch --isolate --preload ../ui/test/solid-jsx.ts --preload ./happydom.ts ./src",
     "test:e2e": "playwright test",
     "test:e2e:built": "PLAYWRIGHT_BUILD=1 playwright test",
     "test:e2e:local": "playwright test",

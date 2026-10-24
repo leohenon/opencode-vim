@@ -3,7 +3,8 @@ import { OpenAIChat } from "../protocols/openai-chat.js"
 import { AuthOptions, type ProviderAuthOption } from "../route/auth-options.js"
 import { Route, type RouteDefaultsInput } from "../route/client.js"
 import { Endpoint } from "../route/endpoint.js"
-import { ProviderID, type ModelID } from "../schema/index.js"
+import { HttpOptions, ProviderID, type ModelID } from "../schema/index.js"
+import { SystemOne } from "../experimental/system-one.js"
 import type { OpenAIProviderOptionsInput } from "./openai-options.js"
 
 export const id = ProviderID.make("baseten")
@@ -14,6 +15,11 @@ export type LanguageModelOptions = Omit<RouteDefaultsInput, "providerOptions"> &
     readonly baseURL?: string
     readonly providerOptions?: OpenAIProviderOptionsInput
   }
+
+export interface BasetenEvaluationOptions {
+  readonly [key: string]: unknown
+  readonly max_len?: number
+}
 
 export type Settings = ProviderPackage.Settings &
   OpenAIProviderOptionsInput & {
@@ -34,19 +40,32 @@ export const routes = [route]
 
 export const configure = (input: LanguageModelOptions = {}) => {
   const { apiKey: _apiKey, auth: _auth, baseURL: endpoint, ...defaults } = input
+  const auth = AuthOptions.bearer(input, "BASETEN_API_KEY")
   const configured = route.with({
     ...defaults,
     endpoint: { baseURL: endpoint ?? baseURL },
-    auth: AuthOptions.bearer(input, "BASETEN_API_KEY"),
+    auth,
   })
+  const evaluation = (modelID: string | ModelID) =>
+    SystemOne.model<BasetenEvaluationOptions>({
+      id: modelID,
+      provider: id,
+      providerMetadataKey: "baseten",
+      auth,
+      baseURL: endpoint ?? baseURL,
+      headers: input.headers,
+      http: HttpOptions.make(input.http),
+    })
   return {
     id,
     model: (modelID: string | ModelID) => configured.model<OpenAIProviderOptionsInput>({ id: modelID }),
+    experimental: { evaluation },
     configure,
   }
 }
 
 export const provider = configure()
+export const experimental = provider.experimental
 
 export const model: ProviderPackage.Definition<Settings, OpenAIProviderOptionsInput>["model"] = (
   modelID,

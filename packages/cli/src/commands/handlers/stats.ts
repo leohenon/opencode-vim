@@ -17,10 +17,7 @@ const handler = Effect.fn("cli.stats")(function* (input: Runtime.Input<typeof Co
   if ([days !== undefined, year !== undefined, input.all].filter(Boolean).length > 1)
     yield* Effect.fail(new Error("--days, --year, and --all cannot be combined"))
 
-  const server = yield* ServerConnection.resolve({
-    server: Option.getOrUndefined(input.server),
-    standalone: input.standalone,
-  })
+  const server = yield* ServerConnection.resolve()
   const client = OpenCode.make({ baseUrl: server.endpoint.url, headers: Service.headers(server.endpoint) })
   const range = statsRange({ days, year, all: input.all })
   const projectID =

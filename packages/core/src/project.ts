@@ -65,13 +65,18 @@ export interface ListInput {
   readonly archived?: boolean
 }
 
+export interface ResolveOptions {
+  /** Discover ownership without persisting or announcing it. */
+  readonly persist?: boolean
+}
+
 export interface Interface {
   readonly list: (input?: ListInput) => Effect.Effect<ReadonlyArray<Info>>
   readonly update: (input: UpdateInput) => Effect.Effect<Info, NotFoundError>
   /** Records Project activity for recency ordering, at most once per minute per Project. */
   readonly activate: (projectID: ID) => Effect.Effect<void>
-  /** Resolves and persists the owning Project. */
-  readonly resolve: (input: AbsolutePath) => Effect.Effect<Resolved>
+  /** Resolves the owning Project, persisting it unless `persist` is false. */
+  readonly resolve: (input: AbsolutePath, options?: ResolveOptions) => Effect.Effect<Resolved>
   /** Archives Projects whose known directories are all gone; resolving a Project unarchives it. */
   readonly sweep: () => Effect.Effect<void>
 }
@@ -145,14 +150,14 @@ const layer = Layer.effect(
       const changed = replaced ?? unarchived
       if (changed) yield* bus.publish(ProjectSchema.Event.Updated, fromRow(changed))
       if (!project.vcs) return project
-      const directories: Array<{ projectID: ID; directory: AbsolutePath; strategy?: string }> = [
+      const directories: Array<{ projectID: ID; directory: AbsolutePath; strategy?: Worktree.StrategyID }> = [
         { projectID: project.id, directory: project.canonical },
       ]
       if (project.directory !== project.canonical)
         directories.push({
           projectID: project.id,
           directory: project.directory,
-          strategy: project.vcs.type === "git" ? "git" : undefined,
+          strategy: project.vcs.type === "git" ? Worktree.StrategyID.make("git") : undefined,
         })
       // A missing directory row means this directory's resolution is a new durable
       // fact. The row insert commits atomically with the event, so a crash between
@@ -340,18 +345,18 @@ const layer = Layer.effect(
 
     const hgDiscover = Effect.fnUntraced(function* (dotHg: AbsolutePath) {
       const worktree = AbsolutePath.make(path.dirname(dotHg))
-      const store = AbsolutePath.make(dotHg)
-      const previous = yield* cached(store)
+      const previous = yield* cached(dotHg)
       const id = previous ?? (yield* hgRoot(worktree))
       return {
         previous,
         id: id ?? ID.global,
         directory: worktree,
-        vcs: { type: "hg" as const, store },
+        vcs: { type: "hg" as const, store: dotHg },
       }
     })
 
-    const resolve = Effect.fn("Project.resolve")(function* (input: AbsolutePath) {
+    const resolve = Effect.fn("Project.resolve")(function* (input: AbsolutePath, options?: ResolveOptions) {
+      const save = (project: Resolved) => (options?.persist === false ? Effect.succeed(project) : persist(project))
       const directory = AbsolutePath.make(yield* fs.resolve(input))
       const native = yield* fs.up({ targets: [".git", ".hg"], start: directory, mode: "first" }).pipe(
         Effect.map((matches) => matches[0]),
@@ -371,7 +376,7 @@ const layer = Layer.effect(
                 Effect.map((items) => items.find((item) => item.kind === "main")?.directory ?? repo.worktree),
                 Effect.orElseSucceed(() => repo.worktree),
               )
-        return yield* persist({
+        return yield* save({
           previous,
           id: id ?? ID.global,
           directory: repo.worktree,
@@ -382,13 +387,13 @@ const layer = Layer.effect(
 
       const hg = native && path.basename(native) === ".hg" ? yield* hgDiscover(AbsolutePath.make(native)) : undefined
       if (hg) {
-        return yield* persist({
+        return yield* save({
           ...hg,
           canonical: hg.directory,
         })
       }
 
-      return yield* persist({
+      return yield* save({
         id: ID.make(Hash.fast(`directory:${directory}`)),
         directory,
         canonical: directory,

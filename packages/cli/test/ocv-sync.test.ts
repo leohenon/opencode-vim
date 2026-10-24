@@ -55,3 +55,33 @@ test("rejects upstream major-version and package-identity transitions", async ()
     ).rejects.toThrow()
   }
 })
+
+test("root version bumps preserve fork metadata without blocking upstream changes", async () => {
+  const root = {
+    name: "opencode",
+    description: "AI-powered development tool",
+    version: "2.1.2",
+    private: true,
+    type: "module",
+    packageManager: "bun@1.4.2",
+    scripts: { dev: "upstream" },
+  }
+  const fork = { ...root, name: "ocv", description: "OpenCode with Vim", scripts: { dev: "fork" } }
+  const merged = await mergePackageMetadata("package.json", {
+    base: json(root),
+    ours: json(fork),
+    theirs: json({ ...root, version: "2.1.4", packageManager: "bun@1.4.4" }),
+  })
+  expect(JSON.parse(merged)).toEqual({ ...fork, version: "2.1.4", packageManager: "bun@1.4.4" })
+})
+
+test("root dependency conflicts still require manual review", async () => {
+  const root = { name: "opencode", version: "2.1.2", dependencies: { example: "1" } }
+  await expect(
+    mergePackageMetadata("package.json", {
+      base: json(root),
+      ours: json({ ...root, name: "ocv", dependencies: { example: "2" } }),
+      theirs: json({ ...root, version: "2.1.4", dependencies: { example: "3" } }),
+    }),
+  ).rejects.toThrow("Non-metadata conflict")
+})

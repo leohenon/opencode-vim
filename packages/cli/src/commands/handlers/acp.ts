@@ -20,8 +20,6 @@ export default Runtime.handler(
         target: Option.none(),
         method: Option.none(),
         answer: [],
-        server: Option.none(),
-        standalone: false,
       })
     }
     process.env.OPENCODE_CLIENT = "acp"

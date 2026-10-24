@@ -125,7 +125,7 @@ test("a tab does not reopen its title editor while a rename is saving", async ({
   await mockWorkspace(page, { name: "Tabs", sessions: [a, b] })
   await page.goto(sessionHref(a.id))
   const title = page.locator(`[data-titlebar-tab-slot]:has(a[href="${sessionHref(a.id)}"]) [data-slot="tab-title"]`)
-  const editor = page.locator('[data-slot="tab-title"][contenteditable="true"]')
+  const editor = page.locator('[data-slot="tab-title"][contenteditable="plaintext-only"]')
   await expect(title).toHaveText(a.title)
   const save = await holdRoute(page, (url) => url.pathname === `/api/session/${a.id}`, { method: "PATCH" })
 

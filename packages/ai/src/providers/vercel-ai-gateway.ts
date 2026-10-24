@@ -11,6 +11,7 @@ import {
 import { AnthropicMessages } from "../protocols/anthropic-messages.js"
 import { OpenAIChat } from "../protocols/openai-chat.js"
 import { OpenResponses } from "../protocols/open-responses.js"
+import { OpenAIImages } from "../protocols/openai-images.js"
 import { JsonObject, optionalNull, ProviderShared } from "../protocols/shared.js"
 import { gatewayProtocol } from "../protocols/utils/gateway-protocol.js"
 import type { ProviderPackage } from "../provider-package.js"
@@ -20,6 +21,7 @@ import { Route, type RouteDefaultsInput } from "../route/client.js"
 import { Endpoint } from "../route/endpoint.js"
 import { RequestExecutor } from "../route/executor.js"
 import { Framing } from "../route/framing.js"
+import { MediaRoute } from "../route/media.js"
 import type { Protocol } from "../route/protocol.js"
 import {
   AIError,
@@ -350,7 +352,9 @@ export const configure = (input: Options = {}) => {
           }),
       },
     })
-  return { id, model, messages, responses, chat, experimental: { evaluation }, configure }
+  const media = MediaRoute.deployment({ ...input, baseURL: configured.endpoint.baseURL }, configured.auth)
+  const image = (modelID: string | ModelID) => OpenAIImages.model({ ...media, id: modelID, provider: id })
+  return { id, model, messages, responses, chat, image, experimental: { evaluation }, configure }
 }
 
 export const provider = configure()
@@ -358,6 +362,7 @@ export const experimental = provider.experimental
 export const messages = provider.messages
 export const responses = provider.responses
 export const chat = provider.chat
+export const image = provider.image
 
 export const model: ProviderPackage.Definition<Settings, ProviderOptionsInput>["model"] = (modelID, settings) =>
   fromSettings(settings).model(modelID)

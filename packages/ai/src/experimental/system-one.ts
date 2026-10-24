@@ -9,6 +9,7 @@ import {
   ScoreQuestion,
   type EvaluationAnswer,
   type EvaluationOptions,
+  type EvaluationRequestFor,
 } from "./evaluation.js"
 import { Auth, type Definition as AuthDefinition } from "../route/auth.js"
 import { RequestExecutor } from "../route/executor.js"
@@ -23,6 +24,7 @@ import {
   Usage,
   mergeJsonRecords,
 } from "../schema/index.js"
+import { encodeJson } from "../utils/json.js"
 
 const Noul = Schema.Struct({
   type: Schema.Literal("noul"),
@@ -47,9 +49,8 @@ const Question = Schema.Union([
   ),
   Noul,
 ])
-const Request = Schema.StructWithRest(
+const Input = Schema.StructWithRest(
   Schema.Struct({
-    model: Schema.String,
     state: EvaluationInput,
     questions: Schema.Record(Schema.String, Question),
   }),
@@ -79,7 +80,7 @@ const NativeUsage = Schema.StructWithRest(
   }),
   [JsonObject],
 )
-const Response = Schema.Struct({
+export const Response = Schema.Struct({
   model: Schema.String,
   answers: Schema.Record(Schema.String, Answer),
   usage: Schema.optional(NativeUsage),
@@ -96,6 +97,71 @@ export interface ModelInput {
   readonly baseURL: string
   readonly headers?: Record<string, string>
   readonly http?: HttpOptions
+  readonly rounding?: EvaluationRounding
+}
+
+export const jevRounding = new EvaluationRounding({ probabilityDecimals: 2, scoreDecimals: 2 })
+
+/** The System One request body without `model`, with `boolean` questions lowered to native `noul`. */
+export const encodeInput = (req: EvaluationRequestFor) =>
+  Schema.encodeUnknownEffect(Input)({
+    ...mergeJsonRecords(req.options, req.http?.body),
+    state: req.state,
+    questions: Object.fromEntries(
+      Object.entries(req.questions).map(([id, x]) => [id, x.type === "boolean" ? { ...x, type: "noul" } : x]),
+    ),
+  }).pipe(
+    Effect.mapError((cause) => new AIError({ reason: new InvalidRequestError({ message: cause.message, cause }) })),
+  )
+
+export const toResponse = (data: typeof Response.Type, providerMetadataKey: string, rounding?: EvaluationRounding) => {
+  const legend: Record<string, Record<string, Schema.Json>> = {}
+  const answers = Object.fromEntries(
+    Object.entries(data.answers).map(([id, answer]): [string, EvaluationAnswer] => {
+      if (answer.type === "noul") return [id, { type: "boolean", probability: answer.noul }]
+      if (answer.type === "choice") {
+        return [
+          id,
+          {
+            type: "choice",
+            choice: answer.choice,
+            probabilities: answer.probabilities,
+            ...(answer.confidence === undefined ? {} : { confidence: answer.confidence }),
+          },
+        ]
+      }
+      if (answer.legend !== undefined) legend[id] = answer.legend
+      return [
+        id,
+        {
+          type: "score",
+          score: answer.score,
+          probabilities: answer.probabilities,
+          ...(answer.confidence === undefined ? {} : { confidence: answer.confidence }),
+        },
+      ]
+    }),
+  )
+  const meta = {
+    ...(data.id === undefined ? {} : { responseId: data.id }),
+    ...(data.provider === undefined ? {} : { provider: data.provider }),
+    ...data.provider_metadata?.[providerMetadataKey],
+    ...(Object.keys(legend).length === 0 ? {} : { legend }),
+  }
+  return new EvaluationResponse({
+    model: ModelID.make(data.model),
+    answers,
+    usage: data.usage
+      ? new Usage({
+          inputTokens: data.usage.input_tokens,
+          outputTokens: data.usage.output_tokens,
+          totalTokens: ProviderShared.totalTokens(data.usage.input_tokens, data.usage.output_tokens, undefined),
+          providerMetadata: { [providerMetadataKey]: data.usage },
+        })
+      : undefined,
+    rounding,
+    providerMetadata: Object.keys(meta).length === 0 ? undefined : { [providerMetadataKey]: meta },
+  })
 }
 
 export const model = <Options extends EvaluationOptions = EvaluationOptions>(cfg: ModelInput) =>
@@ -109,18 +175,7 @@ export const model = <Options extends EvaluationOptions = EvaluationOptions>(cfg
         Effect.gen(function* () {
           const url = new URL(`${cfg.baseURL.replace(/\/$/, "")}/systemone`)
           Object.entries(req.http?.query ?? {}).forEach(([key, value]) => url.searchParams.set(key, value))
-          const body = yield* Schema.encodeUnknownEffect(Schema.fromJsonString(Request))({
-            ...mergeJsonRecords(req.options, req.http?.body),
-            model: req.model.id,
-            state: req.state,
-            questions: Object.fromEntries(
-              Object.entries(req.questions).map(([id, x]) => [id, x.type === "boolean" ? { ...x, type: "noul" } : x]),
-            ),
-          }).pipe(
-            Effect.mapError(
-              (cause) => new AIError({ reason: new InvalidRequestError({ message: cause.message, cause }) }),
-            ),
-          )
+          const body = encodeJson({ ...(yield* encodeInput(req)), model: req.model.id })
           const headers = yield* Auth.toEffect(cfg.auth)({
             request: req,
             method: "POST",
@@ -143,60 +198,9 @@ export const model = <Options extends EvaluationOptions = EvaluationOptions>(cfg
           const data = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Response))(text).pipe(
             Effect.mapError((cause) => fail("System One returned an invalid response", cause, text)),
           )
-
-          const legend: Record<string, Record<string, Schema.Json>> = {}
-          const answers = Object.fromEntries(
-            Object.entries(data.answers).map(([id, answer]): [string, EvaluationAnswer] => {
-              if (answer.type === "noul") return [id, { type: "boolean", probability: answer.noul }]
-              if (answer.type === "choice") {
-                return [
-                  id,
-                  {
-                    type: "choice",
-                    choice: answer.choice,
-                    probabilities: answer.probabilities,
-                    ...(answer.confidence === undefined ? {} : { confidence: answer.confidence }),
-                  },
-                ]
-              }
-              if (answer.legend !== undefined) legend[id] = answer.legend
-              return [
-                id,
-                {
-                  type: "score",
-                  score: answer.score,
-                  probabilities: answer.probabilities,
-                  ...(answer.confidence === undefined ? {} : { confidence: answer.confidence }),
-                },
-              ]
-            }),
-          )
-          const meta = {
-            ...(data.id === undefined ? {} : { responseId: data.id }),
-            ...(data.provider === undefined ? {} : { provider: data.provider }),
-            ...data.provider_metadata?.[cfg.providerMetadataKey],
-            ...(Object.keys(legend).length === 0 ? {} : { legend }),
-          }
-          return new EvaluationResponse({
-            model: ModelID.make(data.model),
-            answers,
-            usage: data.usage
-              ? new Usage({
-                  inputTokens: data.usage.input_tokens,
-                  outputTokens: data.usage.output_tokens,
-                  totalTokens: ProviderShared.totalTokens(
-                    data.usage.input_tokens,
-                    data.usage.output_tokens,
-                    undefined,
-                  ),
-                  providerMetadata: { [cfg.providerMetadataKey]: data.usage },
-                })
-              : undefined,
-            rounding: new EvaluationRounding({ probabilityDecimals: 2, scoreDecimals: 2 }),
-            providerMetadata: Object.keys(meta).length === 0 ? undefined : { [cfg.providerMetadataKey]: meta },
-          })
+          return toResponse(data, cfg.providerMetadataKey, cfg.rounding)
         }),
     },
   })
 
-export const SystemOne = { model } as const
+export const SystemOne = { Response, encodeInput, toResponse, model, jevRounding } as const

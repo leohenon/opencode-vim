@@ -16,11 +16,13 @@ import { withOpenAIOptions, type OpenAIProviderOptionsInput } from "./openai-opt
 import { OpenAIImages } from "../protocols/openai-images.js"
 import { OpenAISpeech } from "../protocols/openai-speech.js"
 import { OpenAITranscription } from "../protocols/openai-transcription.js"
+import { OpenAIDecisions } from "../experimental/openai-decisions.js"
 
 export type { OpenAIOptionsInput, OpenAIResponseIncludable } from "./openai-options.js"
 export type { OpenAIImageOptions } from "../protocols/openai-images.js"
 export type { OpenAISpeechOptions } from "../protocols/openai-speech.js"
 export type { OpenAITranscriptionOptions } from "../protocols/openai-transcription.js"
+export type { OpenAIDecisionOptions } from "../experimental/openai-decisions.js"
 
 export const id = ProviderID.make("openai")
 
@@ -118,6 +120,7 @@ export const configure = (input: Config = {}) => {
   const image = (modelID: string | ModelID) => OpenAIImages.model({ ...media, id: modelID })
   const speech = (modelID: string | ModelID) => OpenAISpeech.model({ ...media, id: modelID })
   const transcription = (modelID: string | ModelID) => OpenAITranscription.model({ ...media, id: modelID })
+  const evaluation = (modelID: string | ModelID) => OpenAIDecisions.model({ ...media, id: modelID })
 
   return {
     id,
@@ -127,6 +130,7 @@ export const configure = (input: Config = {}) => {
     image,
     speech,
     transcription,
+    experimental: { evaluation },
     configure,
   }
 }
@@ -175,3 +179,4 @@ export const chat = provider.chat
 export const image = provider.image
 export const speech = provider.speech
 export const transcription = provider.transcription
+export const experimental = provider.experimental

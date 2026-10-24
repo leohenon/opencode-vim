@@ -203,6 +203,7 @@ export const configure = (input: LanguageModelOptions = {}) => {
       baseURL: input.baseURL ?? baseURL,
       headers: input.headers,
       http: HttpOptions.make(input.http),
+      rounding: SystemOne.jevRounding,
     })
   return {
     id,

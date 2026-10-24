@@ -85,6 +85,7 @@ const fixtureSnapshot = [
       },
     ],
     environment: ["ACME_API_KEY"],
+    types: new Map(),
   },
 ] satisfies readonly ModelsDev.Snapshot[]
 
@@ -147,6 +148,7 @@ const fixture2Snapshot = [
       },
     ],
     environment: ["BETA_API_KEY"],
+    types: new Map(),
   },
 ] satisfies readonly ModelsDev.Snapshot[]
 
@@ -291,6 +293,36 @@ describe("ModelsDev Service", () => {
       expect(result[2]?.models.find((model) => model.id === "custom-chat")?.package).toBe(
         "@opencode/ai/providers/azure/chat",
       )
+    }),
+  )
+
+  it.live("keeps typed models in the snapshot with their models.dev type", () =>
+    Effect.gen(function* () {
+      const cache = makeCache()
+      writeCache(cache, {
+        acme: {
+          ...fixture.acme,
+          models: {
+            ...fixture.acme.models,
+            "acme-live": {
+              ...fixture.acme.models["acme-1"],
+              id: "acme-live",
+              type: "realtime",
+              experimental: { modes: { fast: {} } },
+            },
+          },
+        },
+      })
+      const state = yield* Ref.make(initialState)
+      const [acme] = yield* provided(
+        state,
+        cache,
+        ModelsDev.Service.use((service) => service.get()),
+      )
+      expect(acme?.models.map((model) => model.id)).toEqual(
+        ["acme-1", "acme-live", "acme-live-fast"].map((id) => Model.ID.make(id)),
+      )
+      expect(Object.fromEntries(acme?.types ?? [])).toEqual({ "acme-live": "realtime", "acme-live-fast": "realtime" })
     }),
   )
 

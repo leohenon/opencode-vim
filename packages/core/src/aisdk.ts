@@ -47,19 +47,19 @@ type UserContent = Extract<LanguageModelV3Message, { role: "user" }>["content"]
 type AssistantContent = Extract<LanguageModelV3Message, { role: "assistant" }>["content"]
 type ToolResultContent = Extract<AssistantContent[number], { type: "tool-result" }>
 
-const decodeJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown))
+const decodeJsonRecord = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Record(Schema.String, Schema.Json)))
 
 export interface SDKEvent {
   readonly model: RuntimeInfo
   readonly package: string
-  readonly options: Record<string, any>
+  readonly options: Record<string, unknown>
   sdk?: SDK
 }
 
 export interface LanguageEvent {
   readonly model: RuntimeInfo
   readonly sdk: SDK
-  readonly options: Record<string, any>
+  readonly options: Record<string, unknown>
   language?: LanguageModelV3
 }
 
@@ -122,7 +122,7 @@ function wrapSSE(res: Response, ms: number, ctl: AbortController) {
 
 function prepareOptions(model: RuntimeInfo, pkg: string) {
   const projected = mapBodyToProviderOptions(model, pkg)
-  const options: Record<string, any> = {
+  const options: Record<string, unknown> = {
     name: model.canonical ?? model.providerID,
     ...(model.settings ?? {}),
     headers: model.headers,
@@ -155,13 +155,13 @@ function prepareOptions(model: RuntimeInfo, pkg: string) {
     )
 
     if (typeof opts.body === "string" && model.body !== undefined) {
-      const decoded = Option.getOrUndefined(decodeJson(opts.body))
-      if (Schema.is(Schema.Record(Schema.String, Schema.Json))(decoded)) {
+      const decoded = Option.getOrUndefined(decodeJsonRecord(opts.body))
+      if (decoded) {
         opts.body = JSON.stringify(Provider.mergeOverlay(decoded, model.body))
       }
     }
 
-    const send: Fetch = typeof customFetch === "function" ? customFetch : fetch
+    const send: Fetch = isFetch(customFetch) ? customFetch : fetch
     const middleware = httpMiddleware.getStore()
     const res = await (
       middleware
@@ -176,6 +176,8 @@ function prepareOptions(model: RuntimeInfo, pkg: string) {
 }
 
 type Fetch = (input: Parameters<typeof fetch>[0], init?: BunFetchRequestInit) => Promise<Response>
+
+const isFetch = (value: unknown): value is Fetch => typeof value === "function"
 
 // HTTP hook middleware is scoped to one model request, but the SDK's fetch is baked into the
 // cached language model, so the active middleware rides along in async context instead.
@@ -423,7 +425,7 @@ function modelFromLanguage(info: RuntimeInfo, language: LanguageModelV3) {
 }
 
 function gatewayProviderOptions(modelID: ID, settings: Readonly<Record<string, JSONValue>>) {
-  const gateway = isRecord(settings.gateway) ? Object.fromEntries(Object.entries(settings.gateway)) : undefined
+  const gateway = isRecord(settings.gateway) ? { ...settings.gateway } : undefined
   const model = Object.fromEntries(Object.entries(settings).filter(([key]) => key !== "gateway"))
   if (Object.keys(model).length === 0) return gateway === undefined ? undefined : { gateway }
 

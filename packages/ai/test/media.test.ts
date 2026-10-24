@@ -76,6 +76,31 @@ describe("Media", () => {
     }),
   )
 
+  it.effect("tells ISO-BMFF brands apart", () =>
+    Effect.sync(() => {
+      const ftyp = (hex: string) => Uint8Array.from(Buffer.from(hex, "hex"))
+      expect(Media.detectMediaType(ftyp("000000206674797061766966000000004d695072617669666d6961666d696631"))).toBe(
+        "image/avif",
+      )
+      expect(Media.detectMediaType(ftyp("000000186674797061766973000000006d73663161766973"))).toBe("image/avif")
+      expect(Media.detectMediaType(ftyp("000000246674797068656963000000006d6966314d6950726d6961664d694842"))).toBe(
+        "image/heic",
+      )
+      expect(Media.detectMediaType(ftyp("00000018667479706d69663100000000617669666d69663100000000"))).toBe("image/avif")
+      expect(Media.detectMediaType(ftyp("00000018667479706d69663100000000686569636d69663100000000"))).toBe("image/heic")
+      expect(Media.detectMediaType(ftyp("000000206674797069736f6d0000020069736f6d69736f32617663316d703431"))).toBe(
+        "video/mp4",
+      )
+      expect(Media.detectMediaType(ftyp("00000014667479707174202000000200717420200000000877696465"))).toBe(
+        "video/quicktime",
+      )
+      expect(Media.detectMediaType(ftyp("0000001c667479704d344120000002004d34412069736f6d69736f3200000008"))).toBe(
+        "audio/mp4",
+      )
+      expect(Media.bytes(ftyp("000000206674797061766966000000004d695072617669666d6961666d696631")).kind).toBe("image")
+    }),
+  )
+
   it.effect("materializes url assets through the request executor once", () =>
     Effect.gen(function* () {
       const requests = yield* Ref.make<Array<HttpClientRequest.HttpClientRequest>>([])

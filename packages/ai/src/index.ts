@@ -12,21 +12,13 @@ export type {
   LLMClientService,
 } from "./route/client.js"
 export * from "./schema/index.js"
-export {
-  ImageAspectRatio,
-  ImageEvent,
-  ImageModel,
-  ImageModelSchema,
-  ImageRequest,
-  ImageResponse,
-  ImageSize,
-} from "./image.js"
+export { ImageAspectRatio, ImageEvent, ImageModel, ImageModelSchema, ImageRequest, ImageResponse } from "./image.js"
 export type {
-  ImageFormat,
   ImageModelOptions,
   ImageOptions,
   ImageRequestFor,
   ImageRequestInput,
+  ImageResolution,
   ImageRoute,
 } from "./image.js"
 export { Image } from "./image.js"

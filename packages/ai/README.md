@@ -183,17 +183,35 @@ console.log(response.answers.refund.probability)
 ```
 
 `TypeSafeAI` reads `TYPESAFE_API_KEY`. `OpenCode` exposes the same selector and reads
-`OPENCODE_API_KEY`. OpenRouter and Vercel AI Gateway use the same provider shape:
+`OPENCODE_API_KEY`. OpenRouter, Vercel AI Gateway, and OpenAI use the same provider shape:
 
 ```ts
-import { OpenRouter, VercelAIGateway } from "@opencode/ai/providers"
+import { Baseten, DigitalOcean, OpenAI, OpenRouter, VercelAIGateway } from "@opencode/ai/providers"
 
 OpenRouter.configure().experimental.evaluation("typesafe/jev-1.13")
 VercelAIGateway.configure().experimental.evaluation("typesafe-ai/jev")
+Baseten.configure().experimental.evaluation("decision-models/baseten-elephant-9b-latest")
+DigitalOcean.configure().experimental.evaluation("typesafe-jev-1.13.0")
+OpenAI.configure().experimental.evaluation("gpt-6-luna")
 ```
 
 OpenRouter reads `OPENROUTER_API_KEY`. Vercel reads `AI_GATEWAY_API_KEY`, then `VERCEL_OIDC_TOKEN`.
-The common API uses `boolean`; System One routes lower it to native `noul`.
+Baseten reads `BASETEN_API_KEY`, accepts `max_len` in `options`, and returns unrounded values, so
+`response.rounding` is unset. DigitalOcean reads
+`DIGITALOCEAN_ACCESS_TOKEN`, `DIGITALOCEAN_API_KEY`, then `DO_INFERENCE_API_KEY`.
+OpenAI reads `OPENAI_API_KEY` and calls `/v1/decisions`.
+The common API uses `boolean`; System One routes lower it to native `noul`, and OpenAI lowers it to
+`predicate`. OpenAI predicates take no criteria, so boolean criteria fail before the request, and a
+refused question fails the call with a `ContentPolicy` error.
+Cloudflare serves its Clef models through Workers AI and TypeSafe Jev through AI Gateway, both on `/ai/run`:
+
+```ts
+import { CloudflareAIGateway, CloudflareWorkersAI } from "@opencode/ai/providers"
+
+CloudflareWorkersAI.configure({ accountId }).experimental.evaluation("@cf/cloudflare/clef")
+CloudflareAIGateway.configure({ accountId }).experimental.evaluation("typesafe/jev")
+```
+
 Choice and score answers include `confidence` when the provider returns it, such as
 `response.answers.department.confidence`. Score legends remain available in provider metadata, and
 the provider's rounded probabilities are returned unchanged.
@@ -269,6 +287,14 @@ strings. Qwen 3.8 Chat rejects requests combining a thinking budget with effort.
 Package entrypoints are `@opencode/ai/providers/alibaba`, `alibaba/chat`, `alibaba/messages`,
 and `alibaba/responses`. Live recordings cover all three APIs in Singapore; regional URL construction
 is unit-tested for all six regions.
+
+### Images
+
+`alibaba.image(...)` uses the native multimodal generation API (`/api/v1/services/aigc/multimodal-generation/generation`)
+for Qwen-Image (`qwen-image-2.0`, `qwen-image-2.0-pro`) and Wan (`wan2.7-image`, `wan2.7-image-pro`). `size` lowers to
+`W*H`, and `images` are sent as URLs or data URLs for editing. Native `parameters` include `negativePrompt`,
+`promptExtend`, `watermark`, `thinkingMode`, and `enableSequential`; raw keys such as `bbox_list` or `size: "2K"`
+pass through. Results are URLs that Model Studio keeps for 24 hours. A complete `baseURL` for images includes `/api/v1`.
 
 ## Z.AI
 
@@ -494,13 +520,13 @@ const edit = Image.generate({
   model: meta.image("muse-image-1.0"),
   prompt: "Make the square purple.",
   images: [Media.bytes(imageBytes, "image/webp")],
-  format: "png",
-  providerOptions: { reasoningStrength: "low" },
+  providerOptions: { reasoningStrength: "low", outputFormat: "png" },
 })
 ```
 
-The default image format is WEBP; `format` also accepts PNG/JPEG and `responseFormat: "url"`
-returns a signed URL. `size` is an aspect-ratio hint. For conversational images, select
+The default image format is WEBP; `outputFormat` also accepts PNG/JPEG and `responseFormat: "url"`
+returns a signed URL. `aspect` lowers to Meta's `size`, which is only an aspect-ratio hint: Meta renders about 2.5
+megapixels whatever you ask, so `resolution` is ignored with a notice. For conversational images, select
 `meta.responses("muse-image-1.0")` with `tools: [Meta.imageGeneration({ reasoningStrength: "low" })]`.
 Generated images are provider-executed tool results with file content. Retain `response.message` to
 replay the signed image handle on the next request. Muse Image accepts only the `image_generation` tool.
@@ -512,8 +538,9 @@ Meta Responses is explicitly HTTP/SSE-only and does not use WebSockets, even whe
 
 Use `Image.generate` with an image model for direct asset generation. `Image.request` mirrors `LLM.request`: the
 model comes from the facade's `.image(...)` selector (mirroring `.responses(...)`), common fields
-(`images`, `mask`, `n`, `size`, `aspectRatio`, `seed`, `format`) lower natively or fail typed, and
-`providerOptions` is inferred from the selected model:
+(`images`, `n`, `aspect`, `resolution`) lower natively or fail typed, and `providerOptions` is inferred from the
+selected model. `aspect` is a ratio such as `"16:9"`; `resolution` is a size tier (`"1K"` is about 1024×1024 pixels
+at that ratio, `"2K"` about 2048×2048). Exact sizes, seeds, masks, and output formats are provider options:
 
 ```ts
 import { Image, Media } from "@opencode/ai"
@@ -526,9 +553,10 @@ const program = Effect.gen(function* () {
     model: openai.image("gpt-image-2"),
     prompt: "A robot tending a rooftop garden",
     n: 2,
-    size: "1024x1024",
-    format: "webp",
+    aspect: "16:9",
+    resolution: "2K",
     providerOptions: {
+      outputFormat: "webp",
       quality: "high", // inferred from the OpenAI image model
       future_option: true, // unknown native options pass through unchanged
     },
@@ -538,24 +566,34 @@ const program = Effect.gen(function* () {
 })
 ```
 
-Common fields are portable in shape, not in support. Unsupported fields fail with a typed `AIError` before any network
-call rather than being dropped, so check this table before swapping only the `model`:
+Common fields are portable in shape, not in support. A route that has to approximate `aspect` or `resolution`
+returns what it used in `response.notices`; one that cannot honor them fails with a typed `AIError` before any network
+call rather than dropping them, so check this table before swapping only the `model`:
 
-| Provider              | `n` | `size`    | `aspectRatio` | `seed` | `format` | `images`                         | `mask`              |
-| --------------------- | --- | --------- | ------------- | ------ | -------- | -------------------------------- | ------------------- |
-| OpenAI                | ✓¹  | ✓         | ✗             | ✗      | ✓        | ✓                                | ✓                   |
-| Google (Gemini)       | 1   | ✗         | ✓             | ✓      | ✗        | ✓ (no public URLs)               | ✗                   |
-| xAI                   | ✓   | ✗         | ✓             | ✗      | ✗        | ✓                                | ✗                   |
-| Z.ai                  | ✗   | ✓         | ✗             | ✗      | ✗        | ✗                                | ✗                   |
-| Meta                  | ✓   | ✓ (hint)  | ✗             | ✗      | ✓        | ✓                                | ✗                   |
-| Black Forest Labs     | 1   | per model | per model     | ✓      | ✓        | per model (1–8)                  | `flux-pro-1.0-fill` |
-| fal                   | ✓   | per model | per model     | ✓      | ✓        | 1 (several on `/edit`, `/multi`) | ✓                   |
-| Replicate             | ✗   | ✗         | ✗             | ✗      | ✗        | ✗ (use `providerOptions`)        | ✗                   |
-| Stability `image`     | 1   | ✗         | ✓             | ✓      | ✓        | 1 (not on `core`)                | ✗                   |
-| Stability `upscale()` | ✗   | ✗         | ✗             | ✓      | ✓        | exactly 1 (required)             | ✗                   |
+| Provider              | `n` | `aspect`             | `resolution`          | `images`                         | Moved to `providerOptions`                         |
+| --------------------- | --- | -------------------- | --------------------- | -------------------------------- | -------------------------------------------------- |
+| OpenAI                | ✓¹  | nearest size, notice | nearest size, notice  | ✓                                | `size`, `outputFormat`, `mask`                     |
+| Google (Gemini)       | 1   | ✓                    | ✓ (`imageSize`)       | ✓ (no public URLs)               | `seed`                                             |
+| xAI                   | ✓   | ✓                    | `1k`/`2k`, notice     | ✓                                | none                                               |
+| Meta                  | ✓   | ✓ (hint)             | ignored, notice       | ✓                                | `size`, `outputFormat`                             |
+| Z.ai                  | ✗   | width × height       | width × height        | ✗                                | `size`                                             |
+| Alibaba               | ✓   | width × height       | width × height        | ✓                                | `size`, `seed`                                     |
+| Black Forest Labs     | 1   | per model            | width × height models | per model (1–8)                  | `width`, `height`, `seed`, `output_format`, `mask` |
+| fal                   | ✓   | per model            | per model             | 1 (several on `/edit`, `/multi`) | `image_size`, `seed`, `output_format`, `mask`      |
+| Replicate             | ✗   | ✗                    | ✗                     | ✗ (use `providerOptions`)        | everything                                         |
+| Stability `image`     | 1   | ✓                    | ✗                     | 1 (not on `core`)                | `seed`, `output_format`                            |
+| Stability `upscale()` | ✗   | ✗                    | ✗                     | exactly 1 (required)             | `seed`, `output_format`                            |
+| Vercel AI Gateway     | ✓   | as OpenAI³           | as OpenAI³            | per model                        | as OpenAI                                          |
+| Cloudflare Workers AI | 1   | width × height²      | width × height²       | ✗                                | `width`, `height`, `seed`                          |
 
-✓ lowers natively; ✗ fails whenever the field is set (including `n: 1`); `1` means `n > 1` fails. ¹ `Image.stream` on OpenAI generates one image. fal
-rejects `size` and `aspectRatio` together; which one a fal or BFL model takes depends on the model.
+✓ lowers natively; ✗ fails whenever the field is set (including `n: 1`); `1` means `n > 1` fails. "width × height"
+computes a size the provider accepts and fails when the request falls outside its limits. ¹ `Image.stream` on OpenAI
+generates one image. On OpenAI, `gpt-image-2` and later get a computed size; older models get the nearest of their
+fixed sizes. `providerOptions.size` replaces `aspect` and `resolution`, so setting both fails. Vercel AI Gateway
+forwards `outputFormat` but does not apply it, so the returned bytes keep the upstream model's own format. ² Workers AI
+`@cf/black-forest-labs/flux-1-schnell` takes no size, and the provider rejects it. ³ Non-OpenAI gateway models
+(`bfl/flux-2-pro`) get a computed width × height, which the gateway passes through; models with a fixed list, such as
+Recraft, reject sizes outside it.
 
 `Media.Asset` is the one asset type shared by image requests, image responses, LLM messages, and tool results.
 `asset.source` is the serializable `Media.Source` (`bytes`, `base64`, `url`, or `ref`); `asset.bytes()`,
@@ -587,15 +625,15 @@ only forward refs that belong to their own provider (OpenAI, xAI, and Gemini ima
 returns a ref yet, and `asset.bytes()` / `materialize()` on a ref fail by design. Raw strings are not accepted as
 image inputs, avoiding ambiguity between base64, URLs, and provider IDs. Empty or omitted `images` uses text-to-image generation; a
 non-empty array selects the provider's edit behavior (see the table above for routes that limit the count). OpenAI
-uses multipart for byte/data-URL edits and its JSON reference body for URL or file-ID edits. The common `mask`
-field selects inpainting; routes that cannot honor it fail with `UnsupportedOperation`:
+uses multipart for byte/data-URL edits and its JSON reference body for URL or file-ID edits. Inpainting is a
+provider option on the routes that support it (OpenAI, fal, and BFL `flux-pro-1.0-fill`):
 
 ```ts
 const inpainted = Image.generate({
   model: openai.image("gpt-image-2"),
   prompt,
   images: [Media.bytes(sourceBytes, "image/png")],
-  mask: Media.bytes(maskBytes, "image/png"),
+  providerOptions: { mask: Media.bytes(maskBytes, "image/png") },
 })
 ```
 
@@ -624,9 +662,9 @@ const xai = Image.generate({
   model: XAI.configure({ apiKey }).image("any-model-id"),
   prompt,
   n: 2,
-  aspectRatio: "16:9",
+  aspect: "16:9",
+  resolution: "1K",
   providerOptions: {
-    resolution: "1k",
     responseFormat: "b64_json",
     future_option: true,
   },
@@ -643,10 +681,10 @@ const googleProgram = Effect.gen(function* () {
   const response = yield* Image.generate({
     model: Google.configure({ apiKey }).image("any-model-id"),
     prompt: "A robot tending a rooftop garden",
-    aspectRatio: "16:9",
-    seed: 42,
+    aspect: "16:9",
+    resolution: "2K",
     providerOptions: {
-      imageSize: "2K",
+      seed: 42,
       thinkingLevel: "HIGH",
       includeThoughts: true,
       futureOption: true,
@@ -714,7 +752,7 @@ import { BlackForestLabs, Stability } from "@opencode/ai/providers"
 const bfl = BlackForestLabs.configure({ apiKey: process.env.BFL_API_KEY })
 
 const submit = Effect.gen(function* () {
-  const generation = yield* Image.start({ model: bfl.image("flux-2-pro"), prompt, size: "1024x768" })
+  const generation = yield* Image.start({ model: bfl.image("flux-2-pro"), prompt, aspect: "4:3" })
   persist({ provider: "black-forest-labs", modelID: "flux-2-pro", token: generation.token })
 })
 
@@ -770,7 +808,7 @@ The hosted result is represented as a provider-executed tool call and a tool res
 
 Video mirrors `Image` with one difference: every provider is asynchronous, so the route is a submit-then-poll
 `Generation`. Models come from `.video(...)` selectors on the `Google` (Veo), `XAI`, `Fal`, and `Runway` facades.
-Common fields (`frames`, `references`, `video`, `durationSeconds`, `aspectRatio`, `resolution`, `audio`, `n`, `seed`,
+Common fields (`frames`, `references`, `video`, `durationSeconds`, `aspect`, `resolution`, `audio`, `n`, `seed`,
 `negativePrompt`) lower natively or fail with a typed `AIError` before any network call; provider-native controls live
 under `providerOptions`, inferred from the selected model.
 
@@ -786,7 +824,7 @@ const program = Effect.gen(function* () {
     {
       model: google.video("veo-3.1-generate-preview"),
       prompt: "Panning wide shot of a calico kitten sleeping in the sunshine",
-      aspectRatio: "16:9",
+      aspect: "16:9",
       resolution: "1080p",
       durationSeconds: 8,
       providerOptions: { personGeneration: "allow_adult" },
@@ -836,7 +874,7 @@ Provider notes:
 - **fal** endpoints are model-specific: `durationSeconds`, `references`, and `frames.last` fail typed and belong in
   `providerOptions` under the model's own names (`duration: "8s"`, `end_image_url`, …). Auth is
   `Authorization: Key <FAL_KEY>`.
-- **Runway** expects pixel ratios in `aspectRatio` for most models (`"1280:720"`), pins `X-Runway-Version`, reports
+- **Runway** expects pixel ratios in `aspect` for most models (`"1280:720"`), pins `X-Runway-Version`, reports
   `usage: { type: "credits" }`, and its output URLs expire after 24–48 hours.
 
 The promise client exposes the same surface: `ai.video.start(...)` resolves to a handle with `await`, `events`,

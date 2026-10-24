@@ -19,7 +19,7 @@ describe("Z.ai Images recorded", () => {
       const response = yield* Image.generate({
         model,
         prompt: "A simple flat red circle centered on a plain white background.",
-        size: "1024x1024",
+        aspect: "1:1",
         providerOptions: { quality: "standard", userID: "opencode-image-test" },
       })
 

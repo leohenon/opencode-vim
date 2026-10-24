@@ -18,6 +18,20 @@ import snapshotText from "./models-dev/snapshot.txt" with { type: "text" }
 export const CatalogModelStatus = Schema.Literals(["alpha", "beta", "deprecated"])
 export type CatalogModelStatus = typeof CatalogModelStatus.Type
 
+// models.dev treats a model without a type as a chat model.
+export const CatalogModelType = Schema.Literals([
+  "chat",
+  "image",
+  "video",
+  "embedding",
+  "reranking",
+  "decision",
+  "transcription",
+  "speech",
+  "realtime",
+])
+export type CatalogModelType = typeof CatalogModelType.Type
+
 type Cost = {
   readonly input: Money.USDPerMillionTokens
   readonly output: Money.USDPerMillionTokens
@@ -31,6 +45,7 @@ type Modality = "text" | "audio" | "image" | "video" | "pdf"
 type SourceModel = {
   readonly id: string
   readonly name: string
+  readonly type?: CatalogModelType
   readonly family?: string
   readonly release_date: string
   readonly attachment: boolean
@@ -80,6 +95,8 @@ export type Snapshot = {
   readonly info: Provider.Info
   readonly models: readonly Model.Info[]
   readonly environment: readonly string[]
+  /** The models.dev type of each typed model, by catalog model ID. */
+  readonly types?: ReadonlyMap<Model.ID, CatalogModelType>
 }
 
 function nativePackage(provider: SourceProvider, model?: SourceModel) {
@@ -108,12 +125,14 @@ function normalize(input: Record<string, SourceProvider>): readonly Snapshot[] {
         : {}),
     } satisfies Provider.Info
     const models: Model.Info[] = []
+    const types = new Map<Model.ID, CatalogModelType>()
     for (const model of Object.values(item.models)) {
       const baseCost = cost(model.cost)
       const id = Model.ID.make(model.id)
       const base = modelInfo(item, id, model, { cost: baseCost })
       const variants = Variant.resolve({ ...base, package: nativePackage(item, model) }, supports(model))
       models.push({ ...base, variants })
+      if (model.type) types.set(id, model.type)
       for (const [mode, options] of Object.entries(model.experimental?.modes ?? {})) {
         const modeID = Model.ID.make(`${model.id}-${mode}`)
         models.push(
@@ -124,9 +143,10 @@ function normalize(input: Record<string, SourceProvider>): readonly Snapshot[] {
             variants,
           }),
         )
+        if (model.type) types.set(modeID, model.type)
       }
     }
-    providers.push({ info, models, environment: [...item.env] })
+    providers.push({ info, models, environment: [...item.env], types })
   }
   return providers
 }

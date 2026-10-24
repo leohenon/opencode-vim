@@ -5,7 +5,8 @@ import { AuthOptions, type ProviderAuthOption } from "../route/auth-options.js"
 import { Route, type RouteDefaultsInput } from "../route/client.js"
 import { Endpoint } from "../route/endpoint.js"
 import { Protocol } from "../route/protocol.js"
-import { ProviderID, type ModelID } from "../schema/index.js"
+import { HttpOptions, ProviderID, type ModelID } from "../schema/index.js"
+import { SystemOne } from "../experimental/system-one.js"
 import type { OpenAIProviderOptionsInput } from "./openai-options.js"
 
 export const id = ProviderID.make("digitalocean")
@@ -41,11 +42,23 @@ export const routes = [route]
 
 export const configure = (input: LanguageModelOptions = {}) => {
   const { apiKey: _apiKey, auth: _auth, baseURL: endpoint, ...defaults } = input
+  const auth = AuthOptions.bearer(input, ["DIGITALOCEAN_ACCESS_TOKEN", "DIGITALOCEAN_API_KEY", "DO_INFERENCE_API_KEY"])
   const configured = route.with({
     ...defaults,
     endpoint: { baseURL: endpoint ?? baseURL },
-    auth: AuthOptions.bearer(input, ["DIGITALOCEAN_ACCESS_TOKEN", "DIGITALOCEAN_API_KEY", "DO_INFERENCE_API_KEY"]),
+    auth,
   })
+  const evaluation = (modelID: string | ModelID) =>
+    SystemOne.model({
+      id: modelID,
+      provider: id,
+      providerMetadataKey: "digitalocean",
+      auth,
+      baseURL: endpoint ?? baseURL,
+      headers: input.headers,
+      http: HttpOptions.make(input.http),
+      rounding: SystemOne.jevRounding,
+    })
   return {
     id,
     model: (modelID: string | ModelID) =>
@@ -55,11 +68,13 @@ export const configure = (input: LanguageModelOptions = {}) => {
           supportsPromptCacheKey: true,
         },
       }),
+    experimental: { evaluation },
     configure,
   }
 }
 
 export const provider = configure()
+export const experimental = provider.experimental
 
 export const model: ProviderPackage.Definition<Settings, OpenAIProviderOptionsInput>["model"] = (
   modelID,

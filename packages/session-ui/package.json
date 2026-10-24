@@ -1,6 +1,6 @@
 {
   "name": "@opencode/session-ui",
-  "version": "2.1.2",
+  "version": "2.1.4",
   "private": true,
   "type": "module",
   "license": "MIT",
@@ -47,7 +47,8 @@
   },
   "scripts": {
     "generate:progress-indicator": "bun script/generate-session-progress-indicator.ts",
-    "typecheck": "tsc -b",
+    "typecheck": "bun check --no-script -b",
+    "typecheck:tsc": "tsc -b",
     "test": "bun test src --only-failures",
     "test:components": "playwright test --config playwright.components.config.ts",
     "test:components:ui": "playwright test --config playwright.components.config.ts --ui"
@@ -67,7 +68,7 @@
     "@opencode/ui": "workspace:*",
     "@opencode/util": "workspace:*",
     "@pierre/diffs": "catalog:",
-    "@shikijs/stream": "catalog:",
+    "@pierre/highlights": "catalog:",
     "@solid-primitives/event-listener": "catalog:",
     "@solid-primitives/media": "catalog:",
     "@solid-primitives/resize-observer": "catalog:",
@@ -79,7 +80,6 @@
     "mermaid": "11.17.2",
     "motion": "12.34.5",
     "remend": "catalog:",
-    "shiki": "catalog:",
     "solid-js": "catalog:",
     "strip-ansi": "7.1.2"
   }

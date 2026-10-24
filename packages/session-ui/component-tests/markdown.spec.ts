@@ -33,7 +33,7 @@ story("renders small completed Markdown immediately without skipping sanitizatio
   await harness.getByLabel("Markdown text").fill("```ts\nconst value = 42\n```")
   await expect(harness.locator('[data-component="markdown"]')).toHaveAttribute("data-markdown-ready", "")
   await expect(harness.locator("pre code")).toHaveText("const value = 42")
-  await expect(harness.locator("pre.shiki")).toBeVisible()
+  await expect(harness.locator("pre.highlights")).toBeVisible()
 })
 
 story("keeps Markdown text selectable inside a container that disables selection", async ({ page }) => {

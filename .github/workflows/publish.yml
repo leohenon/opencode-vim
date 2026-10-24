@@ -85,7 +85,7 @@ jobs:
 
       - uses: ./.github/actions/setup-bun
         with:
-          bun-version: 1.4.2
+          bun-version: 1.4.4
 
       - name: Setup git committer
         id: committer
@@ -107,7 +107,7 @@ jobs:
         id: build
         run: ./packages/cli/script/build.ts ${{ (github.ref_name == 'beta' && '--sourcemaps') || '' }}
         env:
-          BUN_COMPILE_RELEASE: bun-v1.4.2
+          BUN_COMPILE_RELEASE: bun-v1.4.4
           OPENCODE_VERSION: ${{ needs.version.outputs.version }}
           OPENCODE_RELEASE: ${{ needs.version.outputs.release }}
           OPENCODE_RELEASE_NOTES: ${{ (github.ref_name == 'dev' && inputs.release_notes) || '' }}

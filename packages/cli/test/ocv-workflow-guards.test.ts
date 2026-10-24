@@ -1,5 +1,49 @@
 import { expect, test } from "bun:test"
 
+test("shared workflows use neutral names and identify V2 executions without changing routing", async () => {
+  for (const [file, name, action] of [
+    ["sync-upstream", "Sync ocv with upstream", "Sync"],
+    ["publish-ocv", "Release ocv", "Release"],
+  ] as const) {
+    const workflow = Bun.YAML.parse(
+      await Bun.file(new URL(`../../../.github/workflows/${file}.yml`, import.meta.url)).text(),
+    ) as {
+      name: string
+      "run-name": string
+      on: { workflow_dispatch: { inputs: { dry_run: { default: boolean } } } }
+      jobs: Record<string, { steps: { run?: string }[] }>
+    }
+    expect(workflow.name).toBe(name)
+    expect(workflow["run-name"]).toContain(`${action} ocv v2`)
+    expect(workflow["run-name"]).toContain("${{ github.ref_name }}")
+    expect(workflow["run-name"]).toContain("inputs.dry_run && 'dry-run' || 'real'")
+    expect(workflow.on.workflow_dispatch.inputs.dry_run.default).toBe(true)
+    if (file === "publish-ocv") {
+      expect(workflow["run-name"]).toContain("${{ inputs.version }}")
+      continue
+    }
+    expect(workflow["run-name"]).toContain("github.event_name != 'schedule'")
+    const runs = workflow.jobs.sync!.steps.map((step) => step.run ?? "").join("\n")
+    expect(runs).toContain('gh workflow run publish-ocv.yml --repo "$GITHUB_REPOSITORY" --ref ocv ')
+    expect(runs).toContain("|package\\.json|packages/cli/package\\.json|")
+    expect(runs).toContain("for file in package.json packages/cli/package.json bun.lock; do")
+    expect(runs).toContain('bun run packages/cli/script/ocv-sync.ts "$file"')
+  }
+})
+
+test("active V2 fork workflows pin the incoming upstream Bun version", async () => {
+  for (const file of ["ocv-ci", "ocv-pages", "sync-upstream", "publish-ocv"]) {
+    const workflow = Bun.YAML.parse(
+      await Bun.file(new URL(`../../../.github/workflows/${file}.yml`, import.meta.url)).text(),
+    ) as { jobs: Record<string, { steps?: { uses?: string; with?: { "bun-version"?: string } }[] }> }
+    const steps = Object.values(workflow.jobs)
+      .flatMap((job) => job.steps ?? [])
+      .filter((step) => step.uses === "oven-sh/setup-bun@v2")
+    expect(steps.length, file).toBeGreaterThan(0)
+    for (const step of steps) expect(step.with?.["bun-version"], file).toBe("1.4.4")
+  }
+})
+
 // These persisted job conditions keep upstream automation off forks, including manual runs.
 test("upstream-only jobs require the upstream repository and publication requires a successful version", async () => {
   const workflows = await Promise.all(

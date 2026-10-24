@@ -30,7 +30,8 @@ import { LocaleLinks } from "~/component/locale-links"
 import { SocialMeta } from "~/component/social-meta"
 
 const models = [
-  { name: "MiniMax M3.1 Flash Free", training: "go.faq.a5.notUsed", retention: "go.faq.a5.retention0" },
+  { name: "Kimi K3.1 Pro", training: "go.faq.a5.notUsed", retention: "go.faq.a5.retention0" },
+  { name: "MiniMax M3.1 Flash", training: "go.faq.a5.notUsed", retention: "go.faq.a5.retention0" },
   { name: "LongCat 2.5 Preview Free", training: "go.faq.a5.notUsed", retention: "go.faq.a5.retention0" },
   { name: "Step 5 Preview", training: "go.faq.a5.notUsed", retention: "go.faq.a5.retention0" },
   { name: "Beam Free", training: "go.faq.a5.notUsed", retention: "go.faq.a5.retention30" },
@@ -86,7 +87,7 @@ export default function Home() {
             <div data-component="desktop-app-banner">
               <span data-slot="badge">{i18n.t("home.banner.badge")}</span>
               <div data-slot="content">
-                <span data-slot="text">{i18n.t("go.promo.minimaxM31FlashFree")}</span>
+                <span data-slot="text">{i18n.t("go.promo.kimiK31Pro")}</span>
               </div>
             </div>
             <Show when={searchParams.ref}>

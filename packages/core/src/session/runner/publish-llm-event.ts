@@ -4,6 +4,7 @@ import type { Agent } from "@opencode/schema/agent"
 import type { Model } from "@opencode/schema/model"
 import type { RelativePath } from "@opencode/schema/schema"
 import type { Snapshot } from "@opencode/schema/snapshot"
+import type { TokenUsage } from "@opencode/schema/token-usage"
 import { Effect, Fiber, Iterable } from "effect"
 import { isReadonlyArrayNonEmpty } from "effect/Array"
 import { Bus } from "../../bus.js"
@@ -68,7 +69,7 @@ export interface StepRecord {
     readonly finish: Extract<LLMEvent, { type: "step-finish" }>["reason"]["normalized"]
     readonly rawFinish?: string
     readonly native?: SessionMessage.Native
-    readonly tokens: ReturnType<typeof SessionUsage.tokens>
+    readonly tokens: TokenUsage.Info
   }
   readonly needsContinuation: boolean
 }
@@ -145,7 +146,7 @@ export const createLLMEventPublisher = (bus: Pick<Bus.Interface, "publish">, inp
   const native = (metadata: ProviderMetadata | undefined) => metadata?.[input.providerMetadataKey]
   const fragments = (
     name: string,
-    ended: (id: string, value: string, ordinal: number, native?: Record<string, unknown>) => Effect.Effect<void>,
+    ended: (id: string, value: string, ordinal: number, native?: SessionMessage.Native) => Effect.Effect<void>,
     delta?: (id: string, value: string, ordinal: number) => Effect.Effect<void>,
     single = false,
   ) => {
@@ -154,11 +155,11 @@ export const createLLMEventPublisher = (bus: Pick<Bus.Interface, "publish">, inp
       readonly values: string[]
       pending: string
       timer?: Fiber.Fiber<void>
-      native?: Record<string, unknown>
+      native?: SessionMessage.Native
     }
     const chunks = new Map<string, Fragment>()
     let nextOrdinal = 0
-    const start = (id: string, native?: Record<string, unknown>) =>
+    const start = (id: string, native?: SessionMessage.Native) =>
       Effect.suspend(() => {
         if (chunks.has(id)) return Effect.die(new Error(`Duplicate ${name} start: ${id}`))
         if (single && chunks.size > 0) return Effect.die(new Error(`${name} start before end: ${id}`))
@@ -177,7 +178,7 @@ export const createLLMEventPublisher = (bus: Pick<Bus.Interface, "publish">, inp
       yield* delta(id, value, current.ordinal)
       return undefined
     }, Effect.uninterruptible)
-    const append = Effect.fnUntraced(function* (id: string, value: string, native?: Record<string, unknown>) {
+    const append = Effect.fnUntraced(function* (id: string, value: string, native?: SessionMessage.Native) {
       const current = chunks.get(id)
       if (!current) return yield* Effect.die(new Error(`${name} delta before start: ${id}`))
       current.values.push(value)
@@ -201,7 +202,7 @@ export const createLLMEventPublisher = (bus: Pick<Bus.Interface, "publish">, inp
       }
       return current.ordinal
     })
-    const end = Effect.fnUntraced(function* (id: string, native?: Record<string, unknown>, value?: string) {
+    const end = Effect.fnUntraced(function* (id: string, native?: SessionMessage.Native, value?: string) {
       const current = chunks.get(id)
       if (!current) return yield* Effect.die(new Error(`${name} end before start: ${id}`))
       if (current.timer) yield* Fiber.interrupt(current.timer)
@@ -411,7 +412,7 @@ export const createLLMEventPublisher = (bus: Pick<Bus.Interface, "publish">, inp
 
   const publishStepFailure = Effect.fnUntraced(function* (details?: {
     readonly cost?: Money.USD
-    readonly tokens?: ReturnType<typeof SessionUsage.tokens>
+    readonly tokens?: TokenUsage.Info
     readonly snapshot?: Snapshot.ID
     readonly files?: readonly RelativePath[]
   }) {

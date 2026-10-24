@@ -92,7 +92,6 @@ type RenderableEntry = {
   node: any
   y: number
   x: number
-  gutter: number
   table?: TableCopy
   target?: CopyTarget
   header?: string
@@ -313,27 +312,17 @@ export function createCopyMode(input: {
 
   // --- renderable tree helpers ---
 
-  function findRenderables(
-    node: any,
-    y = 0,
-    x = 0,
-    gutter = 0,
-    target?: CopyTarget,
-    header?: string,
-  ): RenderableEntry[] {
+  function findRenderables(node: any, y = 0, x = 0, target?: CopyTarget, header?: string): RenderableEntry[] {
     target = copyIdentities.get(node)?.() ?? target
     header = copyHeaders.get(node)?.() ?? header
-    if (node.lineInfo && node.plainText !== undefined) return [{ node, y, x, gutter, target, header }]
+    if (node.lineInfo && node.plainText !== undefined) return [{ node, y, x, target, header }]
     const table = tableCopy(node)
-    if (table) return [{ node, y, x, gutter, table, target, header }]
-    const width = gutter || ("gutter" in node && node.gutter ? node.gutter.calculateWidth() : 0)
+    if (table) return [{ node, y, x, table, target, header }]
     const result: RenderableEntry[] = []
     for (const child of node.getChildren?.() ?? []) {
       if (child._positionType === "absolute" || child.visible === false || child.isDestroyed) continue
       const layout = child.getLayout()
-      result.push(
-        ...findRenderables(child, y + Math.floor(layout.top), x + Math.floor(layout.left), width, target, header),
-      )
+      result.push(...findRenderables(child, y + Math.floor(layout.top), x + Math.floor(layout.left), target, header))
     }
     return result
   }

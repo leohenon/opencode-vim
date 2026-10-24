@@ -1,9 +1,13 @@
 import type { ProviderPackage } from "../provider-package.js"
+import { CloudflareRunEvaluation } from "../experimental/cloudflare-run-evaluation.js"
+import { EvaluationRounding } from "../experimental/evaluation.js"
+import { CloudflareWorkersAIImages } from "../protocols/cloudflare-workers-ai-images.js"
 import { OpenAIChat } from "../protocols/openai-chat.js"
 import { AuthOptions, type AtLeastOne, type ProviderAuthOption } from "../route/auth-options.js"
 import { Route, type RouteDefaultsInput } from "../route/client.js"
 import { Endpoint } from "../route/endpoint.js"
-import { ProviderConfigurationError, ProviderID, type ModelID } from "../schema/index.js"
+import { MediaRoute } from "../route/media.js"
+import { HttpOptions, ProviderConfigurationError, ProviderID, type ModelID } from "../schema/index.js"
 import type { OpenAIProviderOptionsInput } from "./openai-options.js"
 
 export const id = ProviderID.make("cloudflare-workers-ai")
@@ -26,6 +30,8 @@ export type Settings = ProviderPackage.Settings &
     readonly apiKey?: string
   }
 
+export type { CloudflareWorkersAIImageOptions } from "../protocols/cloudflare-workers-ai-images.js"
+
 export const baseURL = (input: WorkersAIURL) => {
   if (input.baseURL) return input.baseURL
   if (!input.accountId)
@@ -34,6 +40,17 @@ export const baseURL = (input: WorkersAIURL) => {
       message: "CloudflareWorkersAI.configure requires accountId unless baseURL is supplied",
     })
   return `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(input.accountId)}/ai/v1`
+}
+
+/** The Run API (`/ai/run`) next to the OpenAI-compatible `/ai/v1` base. */
+export const runBaseURL = (input: WorkersAIURL) => {
+  const url = Endpoint.trimBaseUrl(baseURL(input))
+  if (!url.endsWith("/ai/v1"))
+    throw new ProviderConfigurationError({
+      provider: id,
+      message: "CloudflareWorkersAI needs accountId or a baseURL ending in /ai/v1 to derive the Run API base",
+    })
+  return `${url.slice(0, -"/v1".length)}/run`
 }
 
 export const route = Route.make({
@@ -47,16 +64,31 @@ export const route = Route.make({
 
 export const routes = [route]
 
+const clefRounding = new EvaluationRounding({ probabilityDecimals: 4, scoreDecimals: 4 })
+
 export const configure = (input: LanguageModelOptions) => {
   const { accountId: _accountId, apiKey: _apiKey, auth: _auth, baseURL: _baseURL, ...defaults } = input
-  const configured = route.with({
-    ...defaults,
-    endpoint: { baseURL: baseURL(input) },
-    auth: AuthOptions.bearer(input, authEnvVars),
-  })
+  const auth = AuthOptions.bearer(input, authEnvVars)
+  const configured = route.with({ ...defaults, endpoint: { baseURL: baseURL(input) }, auth })
+  const evaluation = (modelID: string | ModelID) =>
+    CloudflareRunEvaluation.model({
+      id: modelID,
+      provider: id,
+      auth,
+      baseURL: runBaseURL(input),
+      headers: input.headers,
+      http: HttpOptions.make(input.http),
+      rounding: clefRounding,
+    })
   return {
     id,
     model: (modelID: string | ModelID) => configured.model<OpenAIProviderOptionsInput>({ id: modelID }),
+    experimental: { evaluation },
+    image: (modelID: string | ModelID) =>
+      CloudflareWorkersAIImages.model({
+        ...MediaRoute.deployment({ ...input, baseURL: runBaseURL(input) }, auth),
+        id: modelID,
+      }),
     configure,
   }
 }

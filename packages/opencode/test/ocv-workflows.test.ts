@@ -46,14 +46,14 @@ function step(workflow: Workflow, name: string) {
 }
 
 describe("V1 workflow isolation", () => {
-  test("shared workflow names remain neutral while run names identify V1 executions", () => {
-    expect(sync.name).toBe("Sync ocv with upstream")
+  test("sync names identify the V1 upstream while run names identify executions", () => {
+    expect(sync.name).toBe("Sync ocv1 with upstream/v1")
     expect(publish.name).toBe("Release ocv")
     for (const [workflow, action] of [
       [sync, "Sync"],
       [publish, "Release"],
     ] as const) {
-      expect(workflow["run-name"]).toContain(`${action} ocv v1`)
+      expect(workflow["run-name"]).toContain(action)
       expect(workflow["run-name"]).toContain("${{ github.ref_name }}")
       expect(workflow["run-name"]).toContain("inputs.dry_run && 'dry-run' || 'real'")
     }

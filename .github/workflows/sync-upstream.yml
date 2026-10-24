@@ -1,5 +1,5 @@
-name: Sync ocv with upstream/dev
-run-name: Sync ocv with upstream/dev
+name: Schedule ocv sync
+run-name: Schedule ocv sync
 
 on:
   schedule:

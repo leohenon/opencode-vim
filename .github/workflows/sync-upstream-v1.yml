@@ -1,4 +1,4 @@
-name: Schedule OCV V1 maintenance
+name: Schedule ocv1 sync
 
 on:
   schedule:

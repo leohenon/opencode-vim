@@ -75,6 +75,7 @@ test("minimal UI hides prompt footer chrome", async () => {
         status: () => "idle",
         get: () => ({ id: "session", location: { directory: "/workspace" } }),
         cost: () => 1,
+        allowance: () => 0,
         message: { list: () => [] },
       },
       shell: { list: () => [] },

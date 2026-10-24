@@ -6,24 +6,24 @@ const input = () => ({
   base: "2.1.2",
   track: "4.13",
   forkChanges: false,
-  upstream: [release("v2.1.2")],
+  upstream: ["v2.1.2"],
   releases: [] as ReturnType<typeof release>[],
 })
 
 describe("OCV V2 release planning", () => {
-  test("does not publish V2 source using an upstream V1 release", () => {
-    expect(planRelease({ ...input(), upstream: [release("v1.19.4")] })).toMatchObject({
+  test("does not publish V2 source using an upstream V1 tag", () => {
+    expect(planRelease({ ...input(), upstream: ["v1.19.4"] })).toMatchObject({
       publish: false,
-      reason: "upstream-not-released",
+      reason: "upstream-not-tagged",
       version: "2.1.2-ocv.4.13",
     })
   })
 
   test.each(["2.1.1", "2.1.3"])("does not relabel source for a different upstream release %s", (version) => {
-    expect(planRelease({ ...input(), upstream: [release(`v${version}`)] }).publish).toBe(false)
+    expect(planRelease({ ...input(), upstream: [`v${version}`] }).publish).toBe(false)
   })
 
-  test("publishes the first V2 release independently of existing V1 releases", () => {
+  test("publishes a V2 Git tag without an upstream GitHub Release", () => {
     expect(planRelease({ ...input(), forkChanges: true, releases: [release("v1.19.4-ocv.4.99")] })).toEqual({
       previous: "",
       track: "4.13",
@@ -33,9 +33,12 @@ describe("OCV V2 release planning", () => {
     })
   })
 
-  test("requires a published upstream release, not a draft", () => {
-    expect(planRelease({ ...input(), upstream: [release("v2.1.2", true)] }).publish).toBe(false)
-  })
+  test.each([{ tags: [] }, { tags: ["v2.1.2-beta.1"] }, { tags: ["v2.1.20"] }])(
+    "requires the exact plain V2 tag %j",
+    ({ tags }) => {
+      expect(planRelease({ ...input(), upstream: tags }).publish).toBe(false)
+    },
+  )
 
   test("skips completed releases and retries drafts", () => {
     expect(planRelease({ ...input(), releases: [release("v2.1.2-ocv.4.13")] })).toMatchObject({

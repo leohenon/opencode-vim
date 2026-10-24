@@ -23,7 +23,7 @@ export function planRelease(input: {
   base: string
   track: string
   forkChanges: boolean
-  upstream: readonly Release[]
+  upstream: readonly string[]
   releases: readonly Release[]
 }) {
   if (!/^2\.\d+\.\d+$/.test(input.base)) throw new Error(`Expected an upstream V2 source version: ${input.base}`)
@@ -34,21 +34,21 @@ export function planRelease(input: {
   const track = input.forkChanges && previousTrack === input.track ? `${major}.${patch! + 1}` : input.track
   const version = `${input.base}-ocv.${track}`
   // Match the source being built, not GitHub's latest stable release (which may be V1).
-  // A published GitHub prerelease with a plain v2.x.y tag is eligible for the OCV beta channel.
-  const upstream = input.upstream.some((release) => !release.isDraft && release.tagName === `v${input.base}`)
+  // Upstream V2 versions are Git tags, even when no GitHub Release exists.
+  const upstream = input.upstream.includes(`v${input.base}`)
   const exists = input.releases.some((release) => !release.isDraft && release.tagName === `v${version}`)
   return {
     previous: previous ?? "",
     track,
     version,
     publish: upstream && !exists,
-    reason: !upstream ? "upstream-not-released" : exists ? "already-released" : "release-needed",
+    reason: !upstream ? "upstream-not-tagged" : exists ? "already-released" : "release-needed",
   }
 }
 
 if (import.meta.main) {
   const [upstream, releases] = process.argv.slice(2)
-  if (!upstream || !releases) throw new Error("Usage: ocv-release.ts <upstream-releases.json> <ocv-releases.json>")
+  if (!upstream || !releases) throw new Error("Usage: ocv-release.ts <upstream-tags.json> <ocv-releases.json>")
   const root = new URL("../../../", import.meta.url)
   const source = await Bun.file(new URL("packages/core/package.json", root)).json()
   const track = (await Bun.file(new URL(".github/ocv-track", root)).text()).trim()

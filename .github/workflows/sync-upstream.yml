@@ -1,5 +1,5 @@
-name: Schedule ocv sync
-run-name: Schedule ocv sync
+name: Sync ocv with upstream/dev
+run-name: Sync ocv with upstream/dev
 
 on:
   schedule:
@@ -49,9 +49,14 @@ jobs:
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           echo "before=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           git remote add upstream https://github.com/anomalyco/opencode.git
-          git fetch upstream dev
+          # Keep upstream tags separate from fork tags, including annotated tags.
+          git fetch --no-tags upstream dev '+refs/tags/v2.*:refs/upstream-tags/v2.*'
+          upstream="$RUNNER_TEMP/upstream-tags.json"
+          git for-each-ref --format='%(refname:strip=2)' refs/upstream-tags/ |
+            jq -Rsc 'split("\n") | map(select(test("^v2\\.[0-9]+\\.[0-9]+$")))' > "$upstream"
           base=$(git show upstream/dev:packages/core/package.json | jq -r '.version')
           [[ "$base" =~ ^2\.[0-9]+\.[0-9]+$ ]] || { echo "Refusing non-V2 upstream source: $base" >&2; exit 1; }
+          # Tags gate publication; the tested fork deliberately includes newer dev work.
           if ! git merge --no-commit --no-ff upstream/dev; then
             conflicts=$(git diff --name-only --diff-filter=U)
             other=$(printf '%s\n' "$conflicts" | grep -Ev '^(AGENTS\.md|README\.md|install\.sh|\.github/ocv-track|package\.json|packages/cli/package\.json|bun\.lock)$' || true)
@@ -69,6 +74,10 @@ jobs:
             done
           fi
           [ -z "$(git diff --name-only --diff-filter=U)" ]
+          [ "$(jq -r '.version' packages/core/package.json)" = "$base" ] || {
+            echo "Merged source version does not match upstream/dev $base" >&2
+            exit 1
+          }
           if git rev-parse -q --verify MERGE_HEAD >/dev/null; then
             # Keep fork documentation and release identity even for clean upstream merges.
             git restore --source=HEAD --staged --worktree -- AGENTS.md README.md install.sh .github/ocv-track
@@ -89,9 +98,8 @@ jobs:
           BEFORE: ${{ steps.merge.outputs.before }}
         run: |
           set -euo pipefail
-          upstream="$RUNNER_TEMP/upstream-releases.json"
+          upstream="$RUNNER_TEMP/upstream-tags.json"
           releases="$RUNNER_TEMP/ocv-releases.json"
-          gh release list --repo anomalyco/opencode --limit 200 --json tagName,isDraft > "$upstream"
           gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 --json tagName,isDraft > "$releases"
           plan=$(bun run packages/cli/script/ocv-release.ts "$upstream" "$releases")
           previous=$(jq -r '.previous' <<< "$plan")

@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       sha:
-        description: "Exact ocv1 source commit (defaults to dispatched commit)"
+        description: "New release source commit (defaults to dispatched commit); existing tags pin retry source"
         required: false
         type: string
       dry_run:
@@ -25,7 +25,6 @@ on:
 
 permissions:
   contents: write
-  issues: write
   pull-requests: read
 
 env:
@@ -35,7 +34,7 @@ env:
   GH_TOKEN: ${{ github.token }}
 
 concurrency:
-  group: release-ocv-v1
+  group: release-ocv-v1-${{ inputs.dry_run && 'dry-run' || 'publish' }}
   cancel-in-progress: false
 
 jobs:
@@ -51,6 +50,19 @@ jobs:
         with:
           ref: ${{ inputs.sha || github.sha }}
           fetch-depth: 0
+
+      - name: Adopt existing release source
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "$VERSION" | grep -Eq '^1\.[0-9]+\.[0-9]+-ocv\.[0-9]+\.[0-9]+$'; then
+            echo "Invalid ocv version: '$VERSION'" >&2
+            exit 1
+          fi
+          if git rev-parse -q --verify "refs/tags/v$VERSION^{commit}" >/dev/null; then
+            git merge-base --is-ancestor "refs/tags/v$VERSION^{commit}" origin/ocv1 || { echo "Release tag is outside ocv1" >&2; exit 1; }
+            git checkout --detach "refs/tags/v$VERSION^{commit}"
+          fi
 
       - name: Validate version
         shell: bash
@@ -112,6 +124,13 @@ jobs:
           fi
 
           echo "branch=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+
+          # Published source is immutable, including its initial release hashes.
+          if git rev-parse -q --verify "refs/tags/v$VERSION^{commit}" >/dev/null; then
+            echo "Existing release source is pinned; keeping its Nix hashes"
+            echo "current=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
           if [ "${{ inputs.force_nix_hash_refresh }}" = "true" ]; then
             echo "Nix hash refresh forced"
@@ -277,20 +296,35 @@ jobs:
 
           echo "sha=$(cat final-sha.txt)" >> "$GITHUB_OUTPUT"
 
-  release:
-    needs:
-      - update-nix-hashes
-    # The build script ad-hoc signs Darwin binaries only on macOS.
-    runs-on: macos-latest
+  # Retain successful contributor preparation when only the release job is retried.
+  prepare-source:
+    needs: update-nix-hashes
+    if: always() && !cancelled() && needs.update-nix-hashes.result == 'success'
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.update-nix-hashes.outputs.sha }}
           fetch-depth: 0
 
-      - uses: ./.github/actions/setup-bun
+      - name: Adopt prepared release source
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "$VERSION" | grep -Eq '^1\.[0-9]+\.[0-9]+-ocv\.[0-9]+\.[0-9]+$'; then
+            echo "Invalid ocv version: '$VERSION'" >&2
+            exit 1
+          fi
+          if git rev-parse -q --verify "refs/tags/v$VERSION^{commit}" >/dev/null; then
+            git merge-base --is-ancestor "refs/tags/v$VERSION^{commit}" origin/ocv1 || { echo "Release tag is outside ocv1" >&2; exit 1; }
+            git checkout --detach "refs/tags/v$VERSION^{commit}"
+          fi
+
+      - uses: oven-sh/setup-bun@v2
         with:
-          install-flags: --frozen-lockfile
+          bun-version: "1.4.4"
 
       - name: Add release contributors
         if: inputs.dry_run == false && github.ref_type == 'branch'
@@ -315,7 +349,50 @@ jobs:
 
           git add README.md
           git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -m "chore(release): update contributors"
-          git push origin HEAD:${{ github.ref_name }}
+          for attempt in 1 2 3; do
+            if git push origin HEAD:${{ github.ref_name }}; then
+              exit 0
+            fi
+          done
+          echo "::error::Failed to push release contributors after multiple attempts"
+          exit 1
+
+      - name: Set prepared source SHA
+        id: source
+        shell: bash
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  release:
+    needs: prepare-source
+    if: always() && !cancelled() && needs.prepare-source.result == 'success'
+    # The build script ad-hoc signs Darwin binaries only on macOS.
+    runs-on: macos-latest
+    outputs:
+      github: ${{ steps.github_release.outcome }}
+      npm: ${{ steps.npm_publish.outcome }}
+      homebrew: ${{ (steps.checkout_tap.outcome == 'failure' || steps.update_formula.outcome == 'failure' || steps.push_formula.outcome == 'failure') && 'failure' || steps.push_formula.outcome }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare-source.outputs.sha }}
+          fetch-depth: 0
+
+      - name: Restore existing release source
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "$VERSION" | grep -Eq '^1\.[0-9]+\.[0-9]+-ocv\.[0-9]+\.[0-9]+$'; then
+            echo "Invalid ocv version: '$VERSION'" >&2
+            exit 1
+          fi
+          if git rev-parse -q --verify "refs/tags/v$VERSION^{commit}" >/dev/null; then
+            git merge-base --is-ancestor "refs/tags/v$VERSION^{commit}" origin/ocv1 || { echo "Release tag is outside ocv1" >&2; exit 1; }
+            git checkout --detach "refs/tags/v$VERSION^{commit}"
+          fi
+
+      - uses: ./.github/actions/setup-bun
+        with:
+          install-flags: --frozen-lockfile
 
       - name: Check V1 source
         run: |
@@ -406,6 +483,7 @@ jobs:
           echo "file=$NOTES_FILE" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
+        id: github_release
         if: inputs.dry_run == false
         shell: bash
         run: |
@@ -415,7 +493,7 @@ jobs:
             draft=$(gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft')
             if [ "$draft" = true ]; then
               gh release upload "v$VERSION" --repo "$GITHUB_REPOSITORY" --clobber "$DIST"/*
-              gh release edit "v$VERSION" --repo "$GITHUB_REPOSITORY" --title "v$VERSION" --notes-file "$NOTES_FILE" --draft=false --prerelease=false --latest=true
+              gh release edit "v$VERSION" --repo "$GITHUB_REPOSITORY" --title "v$VERSION" --notes-file "$NOTES_FILE" --target "$(git rev-parse HEAD)" --draft=false --prerelease=false --latest=true
             else
               # Preserve public binaries and checksums on retries; model snapshots
               # fetched during a rebuild need not match the original publication.
@@ -464,6 +542,13 @@ jobs:
           LINUX_ARM64="${{ steps.sum.outputs.linux_arm64 }}"
           LINUX_X64="${{ steps.sum.outputs.linux_x64 }}"
           mkdir -p tap/Formula
+          if [ -f tap/Formula/ocv.rb ]; then
+            ruby -r rubygems -e '
+              current = File.read(ARGV[0])[/^\s*version\s+"([^"]+)"/, 1]
+              abort "Cannot determine current Homebrew version" unless current
+              abort "Refusing Homebrew downgrade from #{current} to #{ARGV[1]}" if Gem::Version.new(current) > Gem::Version.new(ARGV[1])
+            ' tap/Formula/ocv.rb "$VERSION"
+          fi
           cat > tap/Formula/ocv.rb <<EOF
           class Ocv < Formula
             desc "OpenCode with Vim keybindings - AI coding assistant for the terminal"
@@ -519,43 +604,6 @@ jobs:
           git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -m "chore(release): update ocv formula v${{ inputs.version }}"
           git push
 
-      - name: Close Homebrew failure issues
-        if: steps.checkout_tap.outcome == 'success' && steps.update_formula.outcome == 'success' && steps.push_formula.outcome == 'success'
-        continue-on-error: true
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          NUMBERS=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 100 --search "Homebrew tap update failed in:title" --json number,title --jq ".[] | select(.title == \"[ci]: Homebrew tap update failed for v$VERSION\") | .number")
-          if [ -z "$NUMBERS" ]; then
-            echo "No open Homebrew failure issue found"
-            exit 0
-          fi
-          while read -r NUMBER; do
-            [ -n "$NUMBER" ] || continue
-            gh issue close "$NUMBER" --repo "$GITHUB_REPOSITORY" --comment "Closed automatically after a successful Homebrew tap update for v${{ inputs.version }}: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          done <<< "$NUMBERS"
-
-      - name: Create Homebrew failure issue
-        if: steps.checkout_tap.outcome == 'failure' || steps.update_formula.outcome == 'failure' || steps.push_formula.outcome == 'failure'
-        continue-on-error: true
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          TITLE="[ci]: Homebrew tap update failed for v${{ inputs.version }}"
-          BODY_FILE=$(mktemp)
-          cat > "$BODY_FILE" <<EOF
-          The ocv release workflow failed to update the Homebrew tap for \`v${{ inputs.version }}\`.
-
-          Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          EOF
-          if gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 100 --search "Homebrew tap update failed in:title" --json title --jq '.[].title' | grep -Fxq "$TITLE"; then
-            echo "Issue already exists: $TITLE"
-            exit 0
-          fi
-          gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" --label ci --body-file "$BODY_FILE"
-
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
@@ -569,43 +617,6 @@ jobs:
           OPENCODE_VERSION: ${{ inputs.version }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           OCV_DRY_RUN: ${{ inputs.dry_run }}
-
-      - name: Close npm failure issues
-        if: inputs.dry_run == false && steps.npm_publish.outcome == 'success'
-        continue-on-error: true
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          NUMBERS=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 100 --search "npm publish failed in:title" --json number,title --jq ".[] | select(.title == \"[ci]: npm publish failed for v$VERSION\") | .number")
-          if [ -z "$NUMBERS" ]; then
-            echo "No open npm failure issue found"
-            exit 0
-          fi
-          while read -r NUMBER; do
-            [ -n "$NUMBER" ] || continue
-            gh issue close "$NUMBER" --repo "$GITHUB_REPOSITORY" --comment "Closed automatically after a successful npm publish for v${{ inputs.version }}: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          done <<< "$NUMBERS"
-
-      - name: Create npm failure issue
-        if: inputs.dry_run == false && steps.npm_publish.outcome == 'failure'
-        continue-on-error: true
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          TITLE="[ci]: npm publish failed for v${{ inputs.version }}"
-          BODY_FILE=$(mktemp)
-          cat > "$BODY_FILE" <<EOF
-          The ocv release workflow failed to publish \`@leohenon/ocv@${{ inputs.version }}\` to npm.
-
-          Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          EOF
-          if gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 100 --search "npm publish failed in:title" --json title --jq '.[].title' | grep -Fxq "$TITLE"; then
-            echo "Issue already exists: $TITLE"
-            exit 0
-          fi
-          gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" --label ci --body-file "$BODY_FILE"
 
       - name: Fail release on publish errors
         if: steps.npm_publish.outcome == 'failure' || steps.checkout_tap.outcome == 'failure' || steps.update_formula.outcome == 'failure' || steps.push_formula.outcome == 'failure'
@@ -623,3 +634,34 @@ jobs:
             packages/opencode/dist/release/*
             packages/opencode/dist/npm/**/*.tgz
           if-no-files-found: error
+
+  issues:
+    needs: [prepare, compute-nix-hash, update-nix-hashes, prepare-source, release]
+    if: >-
+      always() && !cancelled() &&
+      github.repository == 'leohenon/opencode-vim' && github.ref == 'refs/heads/ocv1' &&
+      inputs.dry_run == false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      OCV_ISSUE_MAJOR: v1
+      OCV_ISSUE_WORKFLOW: release
+      OCV_ISSUE_RESULT: ${{ needs.release.result == 'success' && 'success' || 'failure' }}
+      OCV_ISSUE_VERSION: ${{ inputs.version }}
+      OCV_ISSUE_NPM: ${{ needs.release.outputs.npm || 'skipped' }}
+      OCV_ISSUE_GITHUB: ${{ needs.release.outputs.github || 'skipped' }}
+      OCV_ISSUE_HOMEBREW: ${{ needs.release.outputs.homebrew || 'skipped' }}
+      OCV_ISSUE_DRY_RUN: ${{ inputs.dry_run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          sparse-checkout: .github/scripts
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
+      - name: Report workflow issues
+        run: bun .github/scripts/ocv-issues.ts

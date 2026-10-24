@@ -15,7 +15,6 @@ permissions:
   contents: write
   actions: write
   pull-requests: read
-  issues: write
 
 concurrency:
   group: sync-upstream-v1
@@ -218,41 +217,30 @@ jobs:
           FORCE_NIX_HASH_REFRESH: ${{ steps.merge.outputs.nix_hashes_needed }}
         run: gh workflow run publish-ocv.yml --repo "$GITHUB_REPOSITORY" --ref ocv1 -f version="$VERSION" -f sha="$RELEASE_SHA" -f dry_run=false -f force_nix_hash_refresh="$FORCE_NIX_HASH_REFRESH"
 
-      - name: Close failure issue on success
-        if: success() && inputs.dry_run == false
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          issues=$(gh issue list --repo ${{ github.repository }} --state open --limit 1000 --json number,title -q '.[] | select(.title == "[ci]: sync upstream v1 failed" or .title == "[actions]: sync upstream v1 failed") | .number')
-          if [ -z "$issues" ]; then
-            exit 0
-          fi
-          printf '%s\n' "$issues" | while read -r number; do
-            gh issue close "$number" --repo ${{ github.repository }} --comment "Closed automatically after a successful sync run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          done
-
-      - name: Notify on failure
-        if: failure() && inputs.dry_run == false
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh label create ci --repo ${{ github.repository }} --color D73A4A --description "Continuous integration" 2>/dev/null || true
-          issues=$(gh issue list --repo ${{ github.repository }} --state open --limit 1000 --json number,title -q '.[] | select(.title == "[ci]: sync upstream v1 failed" or .title == "[actions]: sync upstream v1 failed") | [.number, .title] | @tsv')
-          tracker=$(printf '%s\n' "$issues" | awk -F '\t' '$2 == "[ci]: sync upstream v1 failed" { print $1; exit }')
-          if [ -z "$tracker" ]; then
-            tracker=$(printf '%s\n' "$issues" | awk -F '\t' 'NF { print $1; exit }')
-            if [ -n "$tracker" ]; then
-              gh issue edit "$tracker" --repo ${{ github.repository }} --title "[ci]: sync upstream v1 failed" --add-label ci
-            fi
-          fi
-          if [ -z "$tracker" ]; then
-            gh issue create --repo ${{ github.repository }} \
-              --title "[ci]: sync upstream v1 failed" \
-              --label ci \
-              --body "Sync workflow failed. Likely a merge conflict. [View run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})"
-            exit 0
-          fi
-          gh issue edit "$tracker" --repo ${{ github.repository }} --add-label ci
-          printf '%s\n' "$issues" | awk -F '\t' -v tracker="$tracker" 'NF && $1 != tracker { print $1 }' | while read -r number; do
-            gh issue close "$number" --repo ${{ github.repository }} --comment "Closing duplicate; tracking this failure in #$tracker."
-          done
+  issues:
+    needs: sync
+    if: >-
+      always() && !cancelled() &&
+      github.repository == 'leohenon/opencode-vim' && github.ref == 'refs/heads/ocv1' &&
+      inputs.dry_run == false &&
+      (needs.sync.result == 'success' || needs.sync.result == 'failure')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      OCV_ISSUE_MAJOR: v1
+      OCV_ISSUE_WORKFLOW: sync
+      OCV_ISSUE_RESULT: ${{ needs.sync.result }}
+      OCV_ISSUE_DRY_RUN: ${{ inputs.dry_run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          sparse-checkout: .github/scripts
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
+      - name: Report workflow issues
+        run: bun .github/scripts/ocv-issues.ts

@@ -10,7 +10,7 @@ Keyboard-first OpenCode with Vim controls across the TUI, kept in sync with upst
 
 ## Installation
 
-### OpenCode v2 (beta)
+### v2 (beta)
 
 ```bash
 # curl
@@ -21,7 +21,7 @@ npm i -g @leohenon/ocv@ocv-v2
 brew install leohenon/tap/ocv-v2
 ```
 
-### OpenCode v1
+### v1
 
 ```bash
 # curl
@@ -35,7 +35,9 @@ brew install leohenon/tap/ocv
 yay -S opencode-vim-bin
 ```
 
-For V1 usage and configuration, see [v1](https://github.com/leohenon/opencode-vim/blob/ocv1/README.md).
+For v1 usage and configuration, see [ocv1](https://github.com/leohenon/opencode-vim/blob/ocv1/README.md).
+
+For a plugin option, see [opencode-vim-plugin](https://github.com/leohenon/opencode-vim-plugin).
 
 Curl installs to `~/.ocv/bin`. Set `OCV_INSTALL_DIR` to install elsewhere.
 
@@ -49,22 +51,12 @@ ocv
 
 ```bash
 # built-in updater
-ocv update
+ocv upgrade
 
-# Package managers (V2 beta)
+# Package managers
 npm i -g @leohenon/ocv@ocv-v2
 brew upgrade leohenon/tap/ocv-v2
 ```
-
-## Prefer a plugin?
-
-The prompt Vim mode is also available as a plugin for official OpenCode V2 (2.0.25 or newer), prompt editing only (no copy mode or session navigation):
-
-```bash
-opencode plugin add @leohenon/opencode-vim-plugin@beta
-```
-
-See [opencode-vim-plugin](https://github.com/leohenon/opencode-vim-plugin).
 
 ## Features
 
@@ -163,17 +155,9 @@ Toggle via command palette > `Toggle minimal ui`.
 
 ## Configuration
 
-V2 TUI settings belong in `~/.config/ocv/cli.json`, rather than V1's `tui.json`. `XDG_CONFIG_HOME` and `OPENCODE_CONFIG_DIR` can override the config location. The JSON examples below use V2 settings and command names.
+TUI settings belong in `~/.config/ocv/cli.json`, rather than v1's `tui.json`. `XDG_CONFIG_HOME` and `OPENCODE_CONFIG_DIR` can override the config location.
 
-### Migrating V1 settings
-
-Import supported TUI settings from an existing OpenCode V1 installation:
-
-```bash
-ocv import-v1-settings
-```
-
-The import leaves V1 files untouched, but overwrites overlapping settings in the V2 config. It does not import credentials, databases, or sessions. Legacy keybind names in `cli.json` are also normalized automatically to V2 command names.
+Supported ocv v1 TUI settings are migrated automatically.
 
 ### Options
 
@@ -388,7 +372,7 @@ Open `/diff` with an external viewer, such as [Diffview.nvim](https://github.com
 
 ### Custom integrations
 
-TUI plugins can access copy-mode selections with `context.copy.selection()`. See the [V2 API types](./packages/plugin/src/tui/context.ts).
+TUI plugins can access copy-mode selections with `context.copy.selection()`. See the [v2 API types](./packages/plugin/src/tui/context.ts).
 
 ## Thanks to all contributors!
 

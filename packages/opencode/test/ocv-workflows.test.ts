@@ -6,6 +6,8 @@ import { tmpdir } from "../../core/test/fixture/tmpdir"
 const root = path.resolve(import.meta.dir, "../../..")
 type Step = { name?: string; id?: string; if?: string; run?: string; uses?: string; with?: Record<string, unknown> }
 type Workflow = {
+  name: string
+  "run-name": string
   on: Record<string, { branches?: string[]; inputs?: Record<string, { default?: boolean }> }>
   env?: Record<string, string>
   jobs: Record<string, { if?: string | boolean; needs?: string | string[]; steps?: Step[]; "runs-on"?: string }>
@@ -31,6 +33,17 @@ function step(workflow: Workflow, name: string) {
 }
 
 describe("V1 workflow isolation", () => {
+  test("shared workflow names remain neutral while run names identify V1 executions", () => {
+    expect(sync.name).toBe("Sync ocv with upstream")
+    expect(publish.name).toBe("Release ocv")
+    for (const [workflow, action] of [[sync, "Sync"], [publish, "Release"]] as const) {
+      expect(workflow["run-name"]).toContain(`${action} ocv v1`)
+      expect(workflow["run-name"]).toContain("${{ github.ref_name }}")
+      expect(workflow["run-name"]).toContain("inputs.dry_run && 'dry-run' || 'real'")
+    }
+    expect(publish["run-name"]).toContain("${{ inputs.version }}")
+  })
+
   test.each(["ci.yml", "typecheck.yml", "test.yml", "storybook.yml", "nix-eval.yml"])(
     "%s checks only the V1 maintenance branch",
     (file) => {
@@ -86,7 +99,9 @@ describe("V1 workflow isolation", () => {
     expect(runs).not.toContain("upstream/dev")
     expect(runs).not.toContain("/disable")
     expect(step(sync, "Push synchronized V1 branch").if).toBe("inputs.dry_run == false")
-    expect(step(sync, "Trigger V1 release").run).toContain("--ref ocv1")
+    expect(step(sync, "Trigger V1 release").run).toContain(
+      'gh workflow run publish-ocv.yml --repo "$GITHUB_REPOSITORY" --ref ocv1 ',
+    )
     expect(step(sync, "Trigger V1 release").run).toContain("-f dry_run=false")
     expect(step(sync, "Pin V1 release source").run).toContain('git merge-base --is-ancestor "$sha" HEAD')
   })

@@ -1,4 +1,5 @@
-name: Release OCV V1
+name: Release ocv
+run-name: "Release ocv v1 | ${{ github.ref_name }} | ${{ inputs.version }} | ${{ inputs.dry_run && 'dry-run' || 'real' }}"
 
 on:
   workflow_dispatch:

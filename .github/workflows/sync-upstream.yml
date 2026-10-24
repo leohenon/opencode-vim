@@ -1,4 +1,5 @@
-name: Sync OCV with upstream V1
+name: Sync ocv with upstream
+run-name: "Sync ocv v1 | ${{ github.ref_name }} | ${{ inputs.dry_run && 'dry-run' || 'real' }}"
 
 on:
   # Scheduled by the default branch V1 dispatcher; schedules here would not run.

@@ -50,8 +50,6 @@ test("upstream-only jobs require the upstream repository and publication require
       "close-prs",
       "compliance-close",
       "containers",
-      "publish-github-action",
-      "release-github-action",
       "publish-vscode",
       "notify-discord",
       "publish",
@@ -96,7 +94,14 @@ test("upstream-only jobs require the upstream repository and publication require
 })
 
 test("V2 has no Nix automation and Pages deploys only the fork's ocv branch", async () => {
-  for (const name of ["nix-eval", "nix-hashes", "nix-hashes-ocv", "triage"])
+  for (const name of [
+    "nix-eval",
+    "nix-hashes",
+    "nix-hashes-ocv",
+    "triage",
+    "publish-github-action",
+    "release-github-action",
+  ])
     expect(await Bun.file(new URL(`../../../.github/workflows/${name}.yml`, import.meta.url)).exists()).toBe(false)
   const pages = Bun.YAML.parse(
     await Bun.file(new URL("../../../.github/workflows/ocv-pages.yml", import.meta.url)).text(),

@@ -689,3 +689,95 @@ describe.skipIf(process.platform === "win32")("V1 Homebrew monotonicity", () => 
     expect(await Bun.file(path.join(dir.path, "tap/Formula/ocv.rb")).text()).toBe(current)
   })
 })
+
+describe.skipIf(process.platform === "win32")("V1 sync fork revision scan", () => {
+  test("passes the pre-merge branch tip to release planning", () => {
+    expect(step(sync, "Merge upstream/v1").run).toContain('echo "before=$before" >> "$GITHUB_OUTPUT"')
+    expect(step(sync, "Check V1 releases and fork revision")).toMatchObject({
+      env: { BEFORE: "${{ steps.merge.outputs.before }}" },
+    })
+  })
+
+  test.each(["no-changes", "fork-pr", "api-failure"] as const)(
+    "queries only published commits, preserving %s behavior",
+    async (scenario) => {
+      await using dir = await tmpdir()
+      const fixture = await releaseFixture(dir.path)
+      fixture.git("tag", "v1.18.35-ocv.4.13", fixture.source)
+      fixture.git("checkout", "-b", "upstream-fixture", fixture.source)
+      await Bun.write(path.join(dir.path, "upstream.txt"), "upstream change\n")
+      fixture.git("add", "upstream.txt")
+      fixture.git("commit", "-m", "upstream change")
+      fixture.git("checkout", "ocv1")
+      fixture.git("merge", "--no-ff", "upstream-fixture", "-m", "unpushed upstream merge")
+      const merge = fixture.git("rev-parse", "HEAD")
+      await mkdir(path.join(dir.path, "packages/opencode/script"))
+      await Bun.write(
+        path.join(dir.path, "packages/opencode/script/ocv-release.ts"),
+        await Bun.file(path.join(root, "packages/opencode/script/ocv-release.ts")).text(),
+      )
+      await Bun.write(
+        path.join(dir.path, "shims/gh"),
+        `#!/bin/sh
+if [ "$1 $2" = "release list" ]; then
+  case "$4" in
+    anomalyco/opencode) echo '[{"tagName":"v1.18.35","isDraft":false,"isPrerelease":false}]' ;;
+    leohenon/opencode-vim) echo '[{"tagName":"v1.18.35-ocv.4.13","isDraft":false,"isPrerelease":false}]' ;;
+    *) exit 1 ;;
+  esac
+  exit 0
+fi
+if [ "$1" = "api" ]; then
+  printf '%s\\n' "$2" >> "$RUNNER_TEMP/gh-calls"
+  case "$2" in
+    repos/leohenon/opencode-vim/commits/${fixture.head}/pulls)
+      ${scenario === "api-failure" ? 'echo "HTTP 403" >&2; exit 1' : scenario === "fork-pr" ? 'echo "42"' : ":"} ;;
+    repos/leohenon/opencode-vim/commits/${fixture.release}/pulls) : ;;
+    *) echo "No commit found (HTTP 422)" >&2; exit 1 ;;
+  esac
+  exit 0
+fi
+exit 1
+`,
+      )
+      const result = Bun.spawnSync(
+        ["bash", "-euo", "pipefail", "-c", step(sync, "Check V1 releases and fork revision").run!],
+        {
+          cwd: dir.path,
+          env: {
+            ...process.env,
+            BEFORE: fixture.head,
+            GITHUB_REPOSITORY: "leohenon/opencode-vim",
+            RUNNER_TEMP: dir.path,
+            GITHUB_OUTPUT: path.join(dir.path, "output"),
+            PATH:
+              path.join(dir.path, "shims") +
+              path.delimiter +
+              path.dirname(process.execPath) +
+              path.delimiter +
+              process.env.PATH,
+          },
+        },
+      )
+      const calls = (await Bun.file(path.join(dir.path, "gh-calls")).text()).trim().split("\n")
+      expect(calls).not.toContain(`repos/leohenon/opencode-vim/commits/${merge}/pulls`)
+      expect(calls).toEqual(
+        (scenario === "no-changes" ? [fixture.head, fixture.release] : [fixture.head]).map(
+          (sha) => `repos/leohenon/opencode-vim/commits/${sha}/pulls`,
+        ),
+      )
+      if (scenario === "api-failure") {
+        expect(result.exitCode).not.toBe(0)
+        expect(result.stderr.toString()).toContain("HTTP 403")
+        return
+      }
+      expect(result.exitCode, result.stdout.toString() + result.stderr.toString()).toBe(0)
+      const track = scenario === "fork-pr" ? "4.14" : "4.13"
+      expect(await Bun.file(path.join(dir.path, ".github/ocv-track")).text()).toBe(`${track}\n`)
+      const output = await Bun.file(path.join(dir.path, "output")).text()
+      expect(output).toContain(`release=1.18.35-ocv.${track}\n`)
+      expect(output).toContain(`publish=${scenario === "fork-pr"}\n`)
+      expect(output).toContain(`sha=${fixture.git("rev-parse", "HEAD")}\n`)
+    },
+  )
+})

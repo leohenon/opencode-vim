@@ -308,6 +308,8 @@ export type WebSearchID = string
 
 export type WebSearchResult = { url: string; title?: string; content?: string; time: { published?: number } }
 
+export type UsageLimitsMeter = { percent: number; limited: boolean; resetsAt: number }
+
 export type McpProtocol = "legacy" | "auto" | "2026-07-28"
 
 export type ConfigWorktree = { directory: string }
@@ -403,6 +405,8 @@ export type SessionMessageCompactionRunning = {
   reason: "auto" | "manual"
   summary: string
 }
+
+export type UsageLimitsBudgetModel = { providerID: ProviderID; modelID: string; name: string; spent?: MoneyUSD }
 
 export type FileSystemEntry = { path: RelativePath; type: "file" | "directory" }
 
@@ -713,6 +717,7 @@ export type IntegrationCommandAttempt = { attemptID: IntegrationAttemptID; time:
 export type McpServer = {
   name: string
   status: McpStatusConnected | McpStatusPending | McpStatusDisabled | McpStatusFailed | McpStatusNeedsAuth
+  title?: string
   integrationID?: IntegrationID
 }
 
@@ -858,6 +863,8 @@ export type VcsInfo = { provider?: string; branch: VcsBranch }
 
 export type WebSearchProvider = { id: WebSearchID; name: string }
 
+export type UsageLimitsGo = { rolling: UsageLimitsMeter; weekly: UsageLimitsMeter; monthly: UsageLimitsMeter }
+
 export type ConfigModelCapabilities = {
   tools?: boolean
   input?: Array<string>
@@ -939,6 +946,21 @@ export type ModelVariant = {
 }
 
 export type PermissionRuleset = Array<PermissionRule>
+
+export type UsageLimitsBudget = {
+  id: string
+  limit: MoneyUSD
+  spent: MoneyUSD
+  scope: "each" | "combined"
+  per: "set" | "model"
+  coverage: "all" | "models"
+  models: Array<UsageLimitsBudgetModel>
+  vendors: Array<string>
+  inputPriceAtLeast?: MoneyUSDPerMillionTokens
+  picked: boolean
+  shared: boolean
+  resetsAt: number
+}
 
 export type SessionMessageUser = {
   id: SessionMessageID
@@ -1255,7 +1277,6 @@ export type SessionStepEnded = {
     rawFinish?: string
     native?: SessionMessageNative1
     cost: MoneyUSD
-    allowance?: MoneyUSD
     tokens: TokenUsageInfo
     snapshot?: SnapshotID
     files?: Array<RelativePath>
@@ -1277,7 +1298,6 @@ export type SessionStepFailed = {
     rawFinish?: string
     native?: SessionMessageNative1
     cost?: MoneyUSD
-    allowance?: MoneyUSD
     tokens?: TokenUsageInfo
     snapshot?: SnapshotID
     files?: Array<RelativePath>
@@ -1471,13 +1491,7 @@ export type SessionUsageRecorded = {
   type: "session.usage.recorded"
   durable: { aggregateID: string; seq: EventSeq; version: 1 }
   location?: LocationRef
-  data: {
-    sessionID: SessionID
-    source: "title" | "compaction"
-    cost: MoneyUSD
-    allowance?: MoneyUSD
-    tokens: TokenUsageInfo
-  }
+  data: { sessionID: SessionID; source: "title" | "compaction"; cost: MoneyUSD; tokens: TokenUsageInfo }
 }
 
 export type LocationShutdown = {
@@ -1558,7 +1572,7 @@ export type SessionUsageUpdated = {
   metadata?: { [x: string]: any }
   type: "session.usage.updated"
   location?: LocationRef
-  data: { sessionID: SessionID; cost: MoneyUSD; allowance?: MoneyUSD; tokens: TokenUsageInfo }
+  data: { sessionID: SessionID; cost: MoneyUSD; tokens: TokenUsageInfo }
 }
 
 export type SessionTextDelta = {
@@ -2136,7 +2150,6 @@ export type SessionInfo = {
   agent?: AgentID
   model?: ModelRef
   cost: MoneyUSD
-  allowance?: MoneyUSD
   tokens: TokenUsageInfo
   outcome?: "succeeded" | "failed" | "interrupted"
   time: { created: number; updated: number; idle?: number; viewed?: number; archived?: number }
@@ -2364,6 +2377,12 @@ export type ConfigEntry =
     }
   | { type: "directory"; path: AbsolutePath }
 
+export type UsageLimitsInfo = {
+  workspace: { id: string; name?: string; usageURL: string }
+  go?: UsageLimitsGo
+  budgets: Array<UsageLimitsBudget>
+}
+
 export type SessionInboxUser = {
   id: SessionMessageID
   sessionID: SessionID
@@ -2439,7 +2458,6 @@ export type SessionMessageAssistant = {
   rawFinish?: string
   native?: SessionMessageNative
   cost?: MoneyUSD
-  allowance?: MoneyUSD
   tokens?: TokenUsageInfo
   error?: SessionStructuredError
   retry?: SessionMessageAssistantRetry
@@ -3261,7 +3279,6 @@ export type SessionImportInput = {
       readonly agent?: string
       readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string }
       readonly cost: number
-      readonly allowance?: number
       readonly tokens: {
         readonly input: number
         readonly output: number
@@ -3315,7 +3332,6 @@ export type SessionImportInput = {
       readonly agent?: string
       readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string }
       readonly cost: number
-      readonly allowance?: number
       readonly tokens: {
         readonly input: number
         readonly output: number
@@ -3369,7 +3385,6 @@ export type SessionImportInput = {
       readonly agent?: string
       readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string }
       readonly cost: number
-      readonly allowance?: number
       readonly tokens: {
         readonly input: number
         readonly output: number
@@ -6055,6 +6070,12 @@ export type WebsearchQueryOutput = {
   location: LocationPublicRef
   data: { providerID: WebSearchID; results: Array<WebSearchResult> }
 }
+
+export type UsageLimitsInput = {
+  readonly location?: { readonly location?: { readonly directory?: string | undefined } | undefined }["location"]
+}
+
+export type UsageLimitsOutput = { location: LocationPublicRef; data: UsageLimitsInfo | null }
 
 export type ConfigGetInput = {
   readonly location?: { readonly location?: { readonly directory?: string | undefined } | undefined }["location"]

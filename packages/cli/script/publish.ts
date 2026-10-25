@@ -4,6 +4,7 @@ import pkg from "../package.json"
 import { Script } from "@opencode/script"
 import { fileURLToPath } from "url"
 import path from "node:path"
+import { rm } from "node:fs/promises"
 
 const dir = fileURLToPath(new URL("..", import.meta.url))
 const root = path.resolve(process.env.OPENCODE_CLI_DIST ?? path.join(dir, "dist"))
@@ -45,6 +46,8 @@ async function publish(dir: string, name: string, version: string) {
   if (process.platform !== "win32") await $`chmod -R 755 .`.cwd(dir)
   const exists = !dryRun && (await registryVersion(`${name}@${version}`, version)) !== undefined
   if (exists) console.log(`already published ${name}@${version}`)
+  // Packing twice must not include the previous archive in the new package.
+  for (const file of new Bun.Glob("*.tgz").scanSync({ cwd: dir })) await rm(path.join(dir, file))
   // Keep local tarballs available to downstream publishers when retrying a release.
   await $`bun pm pack`.cwd(dir)
   if (!exists && !dryRun) await $`npm publish *.tgz --access public --tag ocv-v2`.cwd(dir)

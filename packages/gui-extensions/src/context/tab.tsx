@@ -139,8 +139,6 @@ export default function SessionContextTab(props: { session: MountedSession }) {
 
   // A root session's cost includes its subagent sessions, as in the TUI.
   const cost = createMemo(() => usd().format(props.session.id ? data().session.cost(props.session.id) : 0))
-  // Spent from a subscription allowance such as OpenCode Go's instead of money; shown only when there is some.
-  const allowance = createMemo(() => (props.session.id ? data().session.allowance(props.session.id) : 0))
 
   const counts = createMemo(() => {
     const all = messages()
@@ -181,7 +179,7 @@ export default function SessionContextTab(props: { session: MountedSession }) {
     return c.modelLabel
   })
 
-  const stats: { label: string; value: () => JSX.Element; shown?: () => boolean }[] = [
+  const stats = [
     { label: "stats.session", value: () => info()?.title ?? (props.session.id || "—") },
     { label: "stats.messages", value: () => counts().all.toLocaleString(i18n.locale()) },
     { label: "stats.provider", value: providerLabel },
@@ -200,10 +198,9 @@ export default function SessionContextTab(props: { session: MountedSession }) {
     { label: "stats.userMessages", value: () => counts().user.toLocaleString(i18n.locale()) },
     { label: "stats.assistantMessages", value: () => counts().assistant.toLocaleString(i18n.locale()) },
     { label: "stats.totalCost", value: cost },
-    { label: "stats.allowance", value: () => usd().format(allowance()), shown: () => allowance() > 0 },
     { label: "stats.sessionCreated", value: () => formatter().time(info()?.time.created) },
     { label: "stats.lastActivity", value: () => formatter().time(context()?.message.time.created) },
-  ]
+  ] satisfies { label: string; value: () => JSX.Element }[]
 
   const exportSession = async () => {
     const sessionID = props.session.id
@@ -295,9 +292,7 @@ export default function SessionContextTab(props: { session: MountedSession }) {
     >
       <div data-slot="session-usage-content" class="px-4 pt-4 pb-6 flex flex-col gap-6 md:px-6 md:pb-10 md:gap-10">
         <div class="grid grid-cols-1 @[32rem]:grid-cols-2 gap-4">
-          <For each={stats.filter((stat) => stat.shown?.() ?? true)}>
-            {(stat) => <Stat label={ctx.t(stat.label)} value={stat.value()} />}
-          </For>
+          <For each={stats}>{(stat) => <Stat label={ctx.t(stat.label)} value={stat.value()} />}</For>
         </div>
 
         <Show when={systemPrompt()}>

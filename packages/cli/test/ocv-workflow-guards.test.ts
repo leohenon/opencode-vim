@@ -49,7 +49,6 @@ test("upstream-only jobs require the upstream repository and publication require
       "close-issues",
       "close-prs",
       "compliance-close",
-      "triage",
       "containers",
       "publish-github-action",
       "release-github-action",
@@ -83,11 +82,21 @@ test("upstream-only jobs require the upstream repository and publication require
   expect(tests["e2e-suite"]!.if).toBe(
     "github.repository == 'anomalyco/opencode' && (needs.affected.outputs.e2e == 'true')",
   )
-  expect(tests.e2e!.if).toBe("${{ github.repository == 'anomalyco/opencode' && (!cancelled()) }}")
+  expect(tests.e2e!.if).toBe(
+    "${{ github.repository == 'anomalyco/opencode' && !cancelled() && !github.event.pull_request.draft }}",
+  )
+  for (const job of [
+    tests.affected!,
+    tests.unit!,
+    tests.build!,
+    workflows.find((entry) => entry.name === "check")!.workflow.jobs.check!,
+    workflows.find((entry) => entry.name === "storybook")!.workflow.jobs.build!,
+  ])
+    expect(job.if).toBe("github.repository == 'anomalyco/opencode' && !github.event.pull_request.draft")
 })
 
 test("V2 has no Nix automation and Pages deploys only the fork's ocv branch", async () => {
-  for (const name of ["nix-eval", "nix-hashes", "nix-hashes-ocv"])
+  for (const name of ["nix-eval", "nix-hashes", "nix-hashes-ocv", "triage"])
     expect(await Bun.file(new URL(`../../../.github/workflows/${name}.yml`, import.meta.url)).exists()).toBe(false)
   const pages = Bun.YAML.parse(
     await Bun.file(new URL("../../../.github/workflows/ocv-pages.yml", import.meta.url)).text(),

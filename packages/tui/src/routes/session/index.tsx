@@ -71,6 +71,7 @@ import { DialogMessage } from "./dialog-message"
 import { DialogFork } from "./dialog-fork"
 import { DialogTimeline } from "./dialog-timeline"
 import { DialogGoUpsell } from "../../component/dialog-go-upsell"
+import { UsageLimitNotice, useLimitNotice, useUsageAlerts } from "../../component/usage"
 import { useStorage } from "../../context/storage"
 import { Composer } from "./composer"
 import { filetype } from "../../util/filetype"
@@ -760,6 +761,7 @@ export function Session(props: {
     { initial: {} },
   )
   const handledFreeLimits = new Set<string>()
+  useUsageAlerts(() => route.sessionID)
   let sessionDisposed = false
   onCleanup(() => {
     sessionDisposed = true
@@ -2246,19 +2248,22 @@ function AssistantFooter(props: { message: SessionMessageAssistant }) {
   )
   const interrupted = createMemo(() => props.message.error?.message === "Step interrupted")
   const freeLimit = createMemo(() => props.message.error?.type === "provider.free-limit")
+  const limitNotice = useLimitNotice(() => props.message)
   return (
     <>
       <Show when={props.message.error && !interrupted() && !props.message.retry}>
-        <Show
-          when={freeLimit()}
+        <Switch
           fallback={
             <box paddingLeft={3}>
               <text fg={theme.text.feedback.error.base}>Error: {errorMessage(props.message.error)}</text>
             </box>
           }
         >
-          <FreeLimitNotice message={props.message} />
-        </Show>
+          <Match when={freeLimit()}>
+            <FreeLimitNotice message={props.message} />
+          </Match>
+          <Match when={limitNotice()}>{(notice) => <UsageLimitNotice notice={notice()} />}</Match>
+        </Switch>
       </Show>
       <AssistantRetry retry={props.message.retry} />
       <box paddingLeft={3} marginTop={props.message.retry || (props.message.error && !interrupted()) ? 1 : 0}>

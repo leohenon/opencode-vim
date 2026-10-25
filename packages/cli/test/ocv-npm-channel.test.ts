@@ -21,6 +21,7 @@ type Scenario = {
   version?: string
   binaryVersion?: string
   dryRun?: boolean
+  prepack?: boolean
 }
 
 async function run(input: Scenario = {}) {
@@ -84,24 +85,35 @@ process.exit(3)
       path.join(root, ".npmrc"),
       "registry=http://127.0.0.1:1\noffline=true\n//registry.npmjs.org/:_authToken=fake-test-token\n",
     )
-    const child = Bun.spawn([process.execPath, publisher, ...(input.dryRun ? ["--dry-run"] : [])], {
-      cwd: root,
-      env: isolatedEnv(root, {
-        PATH: `${bin}${path.delimiter}${process.env.PATH}`,
-        OPENCODE_CLI_DIST: dist,
-        OPENCODE_CHANNEL: "ocv-v2",
-        OPENCODE_VERSION: input.version ?? candidate,
-        NPM_TOKEN: "fake-test-token",
-        NODE_AUTH_TOKEN: "fake-test-token",
-        NPM_CONFIG_USERCONFIG: path.join(root, ".npmrc"),
-        NPM_CONFIG_REGISTRY: "http://127.0.0.1:1",
-        NPM_CONFIG_OFFLINE: "true",
-        NPM_TEST_LOG: log,
-        NPM_TEST_STATE: path.join(root, "state.json"),
-      }),
-      stdout: "pipe",
-      stderr: "pipe",
-    })
+    const launch = (dryRun: boolean) =>
+      Bun.spawn([process.execPath, publisher, ...(dryRun ? ["--dry-run"] : [])], {
+        cwd: root,
+        env: isolatedEnv(root, {
+          PATH: `${bin}${path.delimiter}${process.env.PATH}`,
+          OPENCODE_CLI_DIST: dist,
+          OPENCODE_CHANNEL: "ocv-v2",
+          OPENCODE_VERSION: input.version ?? candidate,
+          NPM_TOKEN: "fake-test-token",
+          NODE_AUTH_TOKEN: "fake-test-token",
+          NPM_CONFIG_USERCONFIG: path.join(root, ".npmrc"),
+          NPM_CONFIG_REGISTRY: "http://127.0.0.1:1",
+          NPM_CONFIG_OFFLINE: "true",
+          NPM_TEST_LOG: log,
+          NPM_TEST_STATE: path.join(root, "state.json"),
+        }),
+        stdout: "pipe",
+        stderr: "pipe",
+      })
+    if (input.prepack) {
+      const packed = launch(true)
+      const [code, stdout, stderr] = await Promise.all([
+        packed.exited,
+        new Response(packed.stdout).text(),
+        new Response(packed.stderr).text(),
+      ])
+      expect(code, stdout + stderr).toBe(0)
+    }
+    const child = launch(input.dryRun ?? false)
     const [stdout, stderr, code] = await Promise.all([
       new Response(child.stdout).text(),
       new Response(child.stderr).text(),
@@ -113,12 +125,27 @@ process.exit(3)
           .split("\n")
           .map((line) => JSON.parse(line))
       : []
+    const tarballs = Array.from(new Bun.Glob("**/*.tgz").scanSync({ cwd: dist }))
+    const contents: string[] = []
+    if (input.prepack) {
+      for (const tarball of tarballs) {
+        const archive = Bun.spawn(["tar", "-tzf", path.join(dist, tarball)], { stdout: "pipe", stderr: "pipe" })
+        const [code, stdout, stderr] = await Promise.all([
+          archive.exited,
+          new Response(archive.stdout).text(),
+          new Response(archive.stderr).text(),
+        ])
+        expect(code, stderr).toBe(0)
+        contents.push(...stdout.trim().split("\n"))
+      }
+    }
     return {
       code,
       output: stdout + stderr,
       calls,
       writes: calls.filter((args) => args[0] !== "view"),
-      tarballs: Array.from(new Bun.Glob("**/*.tgz").scanSync({ cwd: dist })),
+      tarballs,
+      contents,
       manifest: (await Bun.file(path.join(dist, name, "package.json")).exists())
         ? await Bun.file(path.join(dist, name, "package.json")).json()
         : undefined,
@@ -219,4 +246,15 @@ test("immutable package lookup must resolve the exact requested version", async 
   expect(result.code).not.toBe(0)
   expect(result.output).toContain("Expected")
   expect(result.writes).toEqual([])
+})
+
+test("publication after dry-run packing never nests old tarballs in either distribution", async () => {
+  const result = await run({ prepack: true })
+  expect(result.code, result.output).toBe(0)
+  expect(result.tarballs).toHaveLength(2)
+  expect(result.writes).toHaveLength(2)
+  expect(result.contents).toContain("package/bin/ocv")
+  expect(result.contents).toContain("package/bin/ocv.cjs")
+  expect(result.contents.filter((entry) => entry.endsWith("package.json"))).toHaveLength(2)
+  expect(result.contents.some((entry) => entry.endsWith(".tgz"))).toBe(false)
 })

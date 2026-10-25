@@ -81,6 +81,7 @@ import { drawShowbreak } from "./showbreak"
 import { emptyRows } from "./empty-selection"
 import { promptSnapshotDataEqual } from "./snapshot"
 import { useMinimalUI } from "../../context/ui-state"
+import { limitLabel, useUsageLimits } from "../usage"
 
 export type PromptProps = {
   sessionID?: string
@@ -1822,6 +1823,20 @@ export function Prompt(props: PromptProps) {
       variant: undefined,
     },
   )
+  // What the workspace's limits leave for the selected model, once it is running low. Only OpenCode Console limits
+  // models, so only a model it serves loads them.
+  const limits = useUsageLimits()
+  createEffect(() => {
+    const selected = local.model.current()
+    if (selected && limits.served(selected.providerID) && limits.info() === undefined) limits.load()
+  })
+  const limit = createMemo(() => {
+    const selected = local.model.current()
+    const model = limits
+      .models()
+      .find((item) => item.providerID === selected?.providerID && item.id === selected?.modelID)
+    return model ? limitLabel(limits.usage(model), model) : undefined
+  })
   const highlight = createMemo(() => {
     if (muted()) return theme.border.base
     if (store.mode === "shell") return theme.text.action.primary.selected
@@ -2206,6 +2221,7 @@ export function Prompt(props: PromptProps) {
                 model={promptDisplay().modelLabel}
                 provider={promptDisplay().providerLabel}
                 variant={promptDisplay().variant}
+                limit={limit()}
                 muted={!!muted()}
                 highlight={highlight()}
                 agentAlpha={agentMetaAlpha()}

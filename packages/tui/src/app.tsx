@@ -66,6 +66,7 @@ import { PermissionProvider } from "./context/permission"
 import { DialogModel } from "./component/dialog-model"
 import { useConnected } from "./component/use-connected"
 import { DialogMcp } from "./component/dialog-mcp"
+import { DialogUsage } from "./component/usage"
 import { DialogStatus } from "./component/dialog-status"
 import { DialogConfig } from "./component/dialog-config"
 import { DialogDebug } from "./component/dialog-debug"
@@ -157,6 +158,7 @@ const appBindingCommands = [
   "model.cycle_favorite_reverse",
   "agent.list",
   "mcp.list",
+  "usage.show",
   "agent.cycle",
   "agent.cycle.reverse",
   "variant.cycle",
@@ -953,6 +955,15 @@ function App() {
         slash: { name: "agents" },
         run: () => {
           dialog.replace(() => <DialogAgent />)
+        },
+      },
+      {
+        name: "usage.show",
+        title: "View usage",
+        category: "Agent",
+        slash: { name: "usage" },
+        run: () => {
+          dialog.replace(() => <DialogUsage />)
         },
       },
       {

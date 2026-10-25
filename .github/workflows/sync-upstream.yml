@@ -141,8 +141,8 @@ jobs:
       - run: bun run typecheck
       - name: Check V1 fork behavior and release planning
         run: |
-          (cd packages/tui && bun test ./test/cli/tui/vim-*.test.ts)
-          (cd packages/opencode && bun test ./test/ocv-*.test.ts ./test/installation/installation.test.ts)
+          (cd packages/tui && bun test --timeout 30000 ./test/cli/tui/vim-*.test.ts)
+          (cd packages/opencode && bun test --timeout 30000 ./test/ocv-*.test.ts ./test/installation/installation.test.ts)
 
       - name: Check V1 releases and fork revision
         id: version

@@ -115,6 +115,16 @@ describe("V1 workflow isolation", () => {
     expect(step(sync, "Pin V1 release source").run).toContain('git merge-base --is-ancestor "$sha" HEAD')
   })
 
+  test.each(["sync", "release"] as const)("%s gives fork integration tests a 30-second timeout", (kind) => {
+    const workflow = kind === "sync" ? sync : publish
+    const runs = Object.values(workflow.jobs)
+      .flatMap((job) => job.steps ?? [])
+      .map((item) => item.run ?? "")
+      .join("\n")
+    expect(runs).toContain("bun test --timeout 30000 ./test/cli/tui/vim-*.test.ts")
+    expect(runs).toContain("bun test --timeout 30000 ./test/ocv-*.test.ts ./test/installation/installation.test.ts")
+  })
+
   test("release pins V1 source, stable npm channel and safe manual defaults", () => {
     expect(publish.on.workflow_dispatch?.inputs?.dry_run?.default).toBe(true)
     expect(publish.jobs.prepare!.if).toContain("refs/heads/ocv1")

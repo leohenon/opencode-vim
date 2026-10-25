@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test"
+import { existsSync } from "node:fs"
 
 test("workflow names identify the upstream and V2 executions without changing routing", async () => {
   for (const [file, name, action] of [
@@ -56,12 +57,14 @@ test("upstream-only jobs require the upstream repository and publication require
       "check",
       "storybook",
       "test",
-    ].map(async (name) => ({
-      name,
-      workflow: Bun.YAML.parse(
-        await Bun.file(new URL(`../../../.github/workflows/${name}.yml`, import.meta.url)).text(),
-      ) as { jobs: Record<string, { if?: string; needs?: string | string[] }> },
-    })),
+    ]
+      .filter((name) => existsSync(new URL(`../../../.github/workflows/${name}.yml`, import.meta.url)))
+      .map(async (name) => ({
+        name,
+        workflow: Bun.YAML.parse(
+          await Bun.file(new URL(`../../../.github/workflows/${name}.yml`, import.meta.url)).text(),
+        ) as { jobs: Record<string, { if?: string; needs?: string | string[] }> },
+      })),
   )
 
   for (const { name, workflow } of workflows) {

@@ -59,6 +59,14 @@ jobs:
           # Tags gate publication; the tested fork deliberately includes newer dev work.
           if ! git merge --no-commit --no-ff upstream/dev; then
             conflicts=$(git diff --name-only --diff-filter=U)
+            while IFS= read -r file; do
+              case "$file" in
+                .github/workflows/*.yml|.github/workflows/*.yaml)
+                  bun run packages/cli/script/ocv-sync.ts "$file"
+                  ;;
+              esac
+            done <<< "$conflicts"
+            conflicts=$(git diff --name-only --diff-filter=U)
             other=$(printf '%s\n' "$conflicts" | grep -Ev '^(AGENTS\.md|README\.md|install\.sh|\.github/ocv-track|package\.json|packages/cli/package\.json|bun\.lock)$' || true)
             [ -z "$other" ] || { printf '%s\n' "$other"; exit 1; }
             for file in package.json packages/cli/package.json bun.lock; do

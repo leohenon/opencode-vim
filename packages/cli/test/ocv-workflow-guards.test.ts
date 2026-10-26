@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { existsSync } from "node:fs"
+import { fileURLToPath } from "node:url"
 
 test("workflow names identify the upstream and V2 executions without changing routing", async () => {
   for (const [file, name, action] of [
@@ -43,69 +43,33 @@ test("active V2 fork workflows pin the incoming upstream Bun version", async () 
   }
 })
 
-// These persisted job conditions keep upstream automation off forks, including manual runs.
-test("upstream-only jobs require the upstream repository and publication requires a successful version", async () => {
-  const workflows = await Promise.all(
-    [
-      "close-issues",
-      "close-prs",
-      "compliance-close",
-      "containers",
-      "publish-vscode",
-      "notify-discord",
-      "publish",
-      "check",
-      "storybook",
-      "test",
-    ]
-      .filter((name) => existsSync(new URL(`../../../.github/workflows/${name}.yml`, import.meta.url)))
-      .map(async (name) => ({
-        name,
-        workflow: Bun.YAML.parse(
-          await Bun.file(new URL(`../../../.github/workflows/${name}.yml`, import.meta.url)).text(),
-        ) as { jobs: Record<string, { if?: string; needs?: string | string[] }> },
-      })),
-  )
-
-  for (const { name, workflow } of workflows) {
-    expect(Object.keys(workflow.jobs).length, name).toBeGreaterThan(0)
-    for (const [id, job] of Object.entries(workflow.jobs)) {
-      expect(job.if, `${name}.${id}`).toContain("github.repository == 'anomalyco/opencode'")
-    }
-  }
-
-  const publish = workflows.find((entry) => entry.name === "publish")!.workflow.jobs.publish!
-  expect(publish.needs).toContain("version")
-  expect(publish.if).toBe(
-    "github.repository == 'anomalyco/opencode' && needs.version.result == 'success' && (always() && !failure() && !cancelled())",
-  )
-  const tests = workflows.find((entry) => entry.name === "test")!.workflow.jobs
-  expect(tests["e2e-suite"]!.if).toBe(
-    "github.repository == 'anomalyco/opencode' && (needs.affected.outputs.e2e == 'true')",
-  )
-  expect(tests.e2e!.if).toBe(
-    "${{ github.repository == 'anomalyco/opencode' && !cancelled() && !github.event.pull_request.draft }}",
-  )
-  for (const job of [
-    tests.affected!,
-    tests.unit!,
-    tests.build!,
-    workflows.find((entry) => entry.name === "check")!.workflow.jobs.check!,
-    workflows.find((entry) => entry.name === "storybook")!.workflow.jobs.build!,
+test("the workflow directory contains only fork-owned automation", async () => {
+  const directory = new URL("../../../.github/workflows/", import.meta.url)
+  const files = Array.from(new Bun.Glob("*.{yml,yaml}").scanSync({ cwd: fileURLToPath(directory) })).sort()
+  expect(files).toEqual([
+    "ocv-ci.yml",
+    "ocv-pages.yml",
+    "pr-management.yml",
+    "pr-standards.yml",
+    "publish-ocv.yml",
+    "sync-upstream-v1.yml",
+    "sync-upstream.yml",
   ])
-    expect(job.if).toBe("github.repository == 'anomalyco/opencode' && !github.event.pull_request.draft")
+  for (const name of files) {
+    const workflow = Bun.YAML.parse(await Bun.file(new URL(name, directory)).text()) as {
+      jobs: Record<string, { if?: string }>
+    }
+    expect(Object.keys(workflow.jobs).length, name).toBeGreaterThan(0)
+    if (name === "pr-management.yml") {
+      expect(Object.keys(workflow.jobs)).toEqual(["add-contributor-label"])
+      continue
+    }
+    for (const [id, job] of Object.entries(workflow.jobs))
+      expect(job.if, `${name}.${id}`).toContain("github.repository == 'leohenon/opencode-vim'")
+  }
 })
 
-test("V2 has no Nix automation and Pages deploys only the fork's ocv branch", async () => {
-  for (const name of [
-    "nix-eval",
-    "nix-hashes",
-    "nix-hashes-ocv",
-    "triage",
-    "publish-github-action",
-    "release-github-action",
-  ])
-    expect(await Bun.file(new URL(`../../../.github/workflows/${name}.yml`, import.meta.url)).exists()).toBe(false)
+test("Pages deploys only the fork's ocv branch", async () => {
   const pages = Bun.YAML.parse(
     await Bun.file(new URL("../../../.github/workflows/ocv-pages.yml", import.meta.url)).text(),
   ) as {

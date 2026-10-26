@@ -48,35 +48,12 @@ export async function mergePackageMetadata(file: string, input: { base: string; 
   }
 }
 
-/** Only exact upstream guards are accepted; compound conditions still need review. */
-export function isUpstreamOnlyWorkflow(text: string) {
-  const workflow = Bun.YAML.parse(text) as { jobs?: Record<string, { if?: unknown }> } | null
-  const jobs = Object.values(workflow?.jobs ?? {})
-  return (
-    jobs.length > 0 &&
-    jobs.every((job) =>
-      ["github.repository == 'anomalyco/opencode'", "${{ github.repository == 'anomalyco/opencode' }}"].includes(
-        typeof job?.if === "string" ? job.if.trim() : "",
-      ),
-    )
-  )
-}
-
 if (import.meta.main) {
   for (const file of process.argv.slice(2)) {
     const read = (stage: number) => {
       const result = Bun.spawnSync(["git", "show", `:${stage}:${file}`])
       if (result.exitCode !== 0) throw new Error(`Missing merge stage ${stage} for ${file}`)
       return result.stdout.toString()
-    }
-    if (/^\.github\/workflows\/[^/]+\.ya?ml$/.test(file)) {
-      const unmerged = Bun.spawnSync(["git", "ls-files", "--unmerged", "--", file])
-      const stages = Array.from(unmerged.stdout.toString().matchAll(/^\d+ [0-9a-f]+ ([123])\t/gm), (match) => match[1])
-      if (unmerged.exitCode !== 0 || stages.join(",") !== "1,2" || !isUpstreamOnlyWorkflow(read(2)))
-        throw new Error(`Workflow conflict in ${file}; manual review required`)
-      const result = Bun.spawnSync(["git", "rm", "--", file])
-      if (result.exitCode !== 0) throw new Error(`Failed to stage upstream workflow deletion: ${file}`)
-      continue
     }
     const merged = await mergePackageMetadata(file, { base: read(1), ours: read(2), theirs: read(3) })
     await Bun.write(file, merged)

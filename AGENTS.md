@@ -12,6 +12,12 @@ This repository is the ocv fork of OpenCode. Treat most code as upstream; keep f
 - `ocv` is the default V2 branch; base V2 work on it and track upstream `dev`.
 - `ocv1` is for V1 maintenance; track upstream `v1`, never upstream `dev`.
 
+## Upstream sync
+
+- On `ocv`, `.github/workflows/` is fork-owned. Preserve its committed tree during upstream merges, including excluded upstream workflows.
+- Adopt upstream CI improvements deliberately; do not import or automatically enable upstream workflow definitions.
+- Application-source conflicts still require review. Workflow ownership does not extend to source code, build definitions, or dependency locks.
+
 ## Vim/copy layout
 
 - Prompt Vim behavior lives under `packages/tui/src/component/vim/`; entry wiring is `packages/tui/src/component/prompt/vim.ts`.

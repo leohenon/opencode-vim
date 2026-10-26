@@ -193,6 +193,10 @@ import type {
   FileFindOutput,
   FileWriteInput,
   FileWriteOutput,
+  FileWatchInput,
+  FileWatchOutput,
+  FileUnwatchInput,
+  FileUnwatchOutput,
   CommandListInput,
   CommandListOutput,
   SkillListInput,
@@ -230,6 +234,8 @@ import type {
   ExperimentalPersistentPtyRemoveOutput,
   ExperimentalPersistentPtyConnectTokenInput,
   ExperimentalPersistentPtyConnectTokenOutput,
+  ExperimentalMediaGetInput,
+  ExperimentalMediaGetOutput,
   ShellListInput,
   ShellListOutput,
   ShellCreateInput,
@@ -488,7 +494,7 @@ export function make(options: ClientOptions) {
             path: `/api/agent`,
             query: { location: input?.["location"] },
             successStatus: 200,
-            declaredStatuses: [400, 401, 404],
+            declaredStatuses: [400, 401, 404, 503],
             empty: false,
           },
           requestOptions,
@@ -1734,6 +1740,32 @@ export function make(options: ClientOptions) {
           },
           requestOptions,
         ),
+      watch: (input: FileWatchInput, requestOptions?: RequestOptions) =>
+        request<FileWatchOutput>(
+          {
+            method: "POST",
+            path: `/api/experimental/fs/watch`,
+            query: { location: input["location"] },
+            body: { path: input["path"] },
+            successStatus: 204,
+            declaredStatuses: [400, 401, 404, 503],
+            empty: true,
+          },
+          requestOptions,
+        ),
+      unwatch: (input: FileUnwatchInput, requestOptions?: RequestOptions) =>
+        request<FileUnwatchOutput>(
+          {
+            method: "DELETE",
+            path: `/api/experimental/fs/watch`,
+            query: { location: input["location"] },
+            body: { path: input["path"] },
+            successStatus: 204,
+            declaredStatuses: [400, 401, 404],
+            empty: true,
+          },
+          requestOptions,
+        ),
     },
     command: {
       list: (input?: CommandListInput, requestOptions?: RequestOptions) =>
@@ -1994,6 +2026,20 @@ export function make(options: ClientOptions) {
             requestOptions,
           ).then((value) => value.data),
       },
+      media: {
+        get: (input: ExperimentalMediaGetInput, requestOptions?: RequestOptions) =>
+          request<ExperimentalMediaGetOutput>(
+            {
+              method: "GET",
+              path: `/api/experimental/media/${encodeURIComponent(input.hash)}`,
+              successStatus: 200,
+              declaredStatuses: [400, 401, 404],
+              empty: false,
+              binary: true,
+            },
+            requestOptions,
+          ),
+      },
     },
     shell: {
       list: (input?: ShellListInput, requestOptions?: RequestOptions) =>
@@ -2201,7 +2247,13 @@ export function make(options: ClientOptions) {
           {
             method: "GET",
             path: `/api/vcs/diff`,
-            query: { location: input["location"], mode: input["mode"], base: input["base"], context: input["context"] },
+            query: {
+              location: input["location"],
+              mode: input["mode"],
+              base: input["base"],
+              context: input["context"],
+              untracked: input["untracked"],
+            },
             successStatus: 200,
             declaredStatuses: [400, 401, 404, 503],
             empty: false,

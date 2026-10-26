@@ -195,6 +195,10 @@ import type {
   FileListOutput,
   FileFindInput,
   FileFindOutput,
+  FileWatchInput,
+  FileWatchOutput,
+  FileUnwatchInput,
+  FileUnwatchOutput,
   CommandListInput,
   CommandListOutput,
   SkillListInput,
@@ -1276,7 +1280,26 @@ const EndpointFileFind = (raw: RawClient["server.fs"]) => (input: FileFindInput)
     }).pipe(Effect.mapError(mapClientError)),
   )
 
-const adaptGroupFile = (raw: RawClient["server.fs"]) => ({ list: EndpointFileList(raw), find: EndpointFileFind(raw) })
+const EndpointFileWatch = (raw: RawClient["server.fs"]) => (input: FileWatchInput) =>
+  preserveEffect<FileWatchOutput>()(
+    raw["fs.watch"]({ query: { location: input["location"] }, payload: { path: input["path"] } }).pipe(
+      Effect.mapError(mapClientError),
+    ),
+  )
+
+const EndpointFileUnwatch = (raw: RawClient["server.fs"]) => (input: FileUnwatchInput) =>
+  preserveEffect<FileUnwatchOutput>()(
+    raw["fs.unwatch"]({ query: { location: input["location"] }, payload: { path: input["path"] } }).pipe(
+      Effect.mapError(mapClientError),
+    ),
+  )
+
+const adaptGroupFile = (raw: RawClient["server.fs"]) => ({
+  list: EndpointFileList(raw),
+  find: EndpointFileFind(raw),
+  watch: EndpointFileWatch(raw),
+  unwatch: EndpointFileUnwatch(raw),
+})
 
 const EndpointCommandList = (raw: RawClient["server.command"]) => (input?: CommandListInput) =>
   preserveEffect<CommandListOutput>()(
@@ -1604,7 +1627,13 @@ const EndpointVcsBranchList = (raw: RawClient["server.vcs"]) => (input?: VcsBran
 const EndpointVcsDiff = (raw: RawClient["server.vcs"]) => (input: VcsDiffInput) =>
   preserveEffect<VcsDiffOutput>()(
     raw["vcs.diff"]({
-      query: { location: input["location"], mode: input["mode"], base: input["base"], context: input["context"] },
+      query: {
+        location: input["location"],
+        mode: input["mode"],
+        base: input["base"],
+        context: input["context"],
+        untracked: input["untracked"],
+      },
     }).pipe(Effect.mapError(mapClientError)),
   )
 

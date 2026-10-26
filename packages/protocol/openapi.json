@@ -359,6 +359,16 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "ServiceUnavailableError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceUnavailableErrorEncoded"
+                }
+              }
+            }
           }
         },
         "description": "Retrieve currently registered agents.",
@@ -9564,6 +9574,209 @@
         }
       }
     },
+    "/api/experimental/fs/watch": {
+      "post": {
+        "tags": ["filesystem"],
+        "operationId": "experimental.fs.watch",
+        "parameters": [
+          {
+            "name": "location",
+            "in": "query",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "directory": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "required": false,
+            "style": "deepObject",
+            "explode": true
+          }
+        ],
+        "security": [],
+        "responses": {
+          "204": {
+            "description": "<No Content>"
+          },
+          "400": {
+            "description": "InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvalidRequestErrorEncoded"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UnauthorizedError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedErrorEncoded"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "FileNotFoundError | LocationNotFoundError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/FileNotFoundErrorEncoded"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LocationNotFoundErrorEncoded"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "ServiceUnavailableError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceUnavailableErrorEncoded"
+                }
+              }
+            }
+          }
+        },
+        "description": "Watch one file relative to the requested location for 24 hours, publishing filesystem.changed on that location when it changes. Watching an already watched file resets its expiry. Paths follow read confinement. Experimental: may change without compatibility guarantees.",
+        "summary": "Watch file",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "description": "A file path relative to the requested location."
+                  }
+                },
+                "required": ["path"],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": true
+        }
+      },
+      "delete": {
+        "tags": ["filesystem"],
+        "operationId": "experimental.fs.unwatch",
+        "parameters": [
+          {
+            "name": "location",
+            "in": "query",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "directory": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "required": false,
+            "style": "deepObject",
+            "explode": true
+          }
+        ],
+        "security": [],
+        "responses": {
+          "204": {
+            "description": "<No Content>"
+          },
+          "400": {
+            "description": "InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvalidRequestErrorEncoded"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UnauthorizedError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedErrorEncoded"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "LocationNotFoundError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocationNotFoundErrorEncoded"
+                }
+              }
+            }
+          }
+        },
+        "description": "Stop watching one file relative to the requested location. Experimental: may change without compatibility guarantees.",
+        "summary": "Unwatch file",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "description": "A file path relative to the requested location."
+                  }
+                },
+                "required": ["path"],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": true
+        }
+      }
+    },
     "/api/command": {
       "get": {
         "tags": ["command"],
@@ -11654,6 +11867,68 @@
         "x-websocket": true
       }
     },
+    "/api/experimental/media/{hash}": {
+      "get": {
+        "tags": ["experimental"],
+        "operationId": "experimental.media.get",
+        "parameters": [
+          {
+            "name": "hash",
+            "in": "path",
+            "schema": {
+              "$ref": "#/components/schemas/MediaHash"
+            },
+            "required": true
+          }
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvalidRequestErrorEncoded"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UnauthorizedError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedErrorEncoded"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "FileNotFoundError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileNotFoundErrorEncoded"
+                }
+              }
+            }
+          }
+        },
+        "description": "Read a content-addressed media blob by SHA-256 hash with immutable Cache-Control, ETag, and 304 Not Modified support. Only blobs a stored message or inbox item still references are served. Experimental: may change without compatibility guarantees.",
+        "summary": "Read media blob"
+      }
+    },
     "/api/shell": {
       "get": {
         "tags": ["shell"],
@@ -13161,6 +13436,14 @@
                   "type": "null"
                 }
               ]
+            },
+            "required": false
+          },
+          {
+            "name": "untracked",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/Vcs.Untracked"
             },
             "required": false
           }
@@ -14778,6 +15061,9 @@
               "background_compaction": {
                 "type": "boolean"
               },
+              "media_blob": {
+                "type": "boolean"
+              },
               "subagent_depth": {
                 "type": "integer",
                 "minimum": 0
@@ -14970,6 +15256,9 @@
           "compaction": {
             "$ref": "#/components/schemas/Provider.Compaction"
           },
+          "cache": {
+            "$ref": "#/components/schemas/Provider.Cache"
+          },
           "encoding": {
             "$ref": "#/components/schemas/Provider.Encoding"
           }
@@ -15153,6 +15442,9 @@
           },
           "compaction": {
             "$ref": "#/components/schemas/Provider.Compaction"
+          },
+          "cache": {
+            "$ref": "#/components/schemas/Provider.Cache"
           },
           "transport": {
             "$ref": "#/components/schemas/Provider.Transport"
@@ -15552,6 +15844,10 @@
           "status": {
             "type": "string",
             "enum": ["added", "deleted", "modified"]
+          },
+          "more": {
+            "type": "boolean",
+            "enum": [true]
           }
         },
         "required": ["file", "patch", "additions", "deletions", "status"],
@@ -17364,6 +17660,10 @@
         "required": ["_tag", "server", "message"],
         "additionalProperties": false
       },
+      "MediaHash": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$"
+      },
       "MessageNotFoundErrorEncoded": {
         "type": "object",
         "properties": {
@@ -17628,6 +17928,9 @@
         "properties": {
           "compaction": {
             "$ref": "#/components/schemas/Provider.Compaction"
+          },
+          "cache": {
+            "$ref": "#/components/schemas/Provider.Cache"
           },
           "encoding": {
             "$ref": "#/components/schemas/Provider.Encoding"
@@ -18512,6 +18815,19 @@
         "required": ["id"],
         "additionalProperties": false
       },
+      "Provider.Cache": {
+        "type": "object",
+        "properties": {
+          "ttl": {
+            "$ref": "#/components/schemas/Provider.CacheTTL"
+          }
+        },
+        "additionalProperties": false
+      },
+      "Provider.CacheTTL": {
+        "type": "string",
+        "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?(?:ms|s|m|h|d)$"
+      },
       "Provider.Compaction": {
         "anyOf": [
           {
@@ -18673,6 +18989,9 @@
           },
           "compaction": {
             "$ref": "#/components/schemas/Provider.Compaction"
+          },
+          "cache": {
+            "$ref": "#/components/schemas/Provider.Cache"
           },
           "transport": {
             "$ref": "#/components/schemas/Provider.Transport"
@@ -18921,6 +19240,16 @@
           "pid": {
             "type": "integer",
             "minimum": 0
+          },
+          "hostname": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "urls": {
             "type": "array",
@@ -21134,6 +21463,10 @@
       "Vcs.Mode": {
         "type": "string",
         "enum": ["working", "branch", "committed"]
+      },
+      "Vcs.Untracked": {
+        "type": "string",
+        "enum": ["files", "folders"]
       },
       "VcsInitNotSupportedErrorEncoded": {
         "type": "object",

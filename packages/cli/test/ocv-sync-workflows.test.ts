@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test"
 import { mkdir } from "node:fs/promises"
+import { devNull } from "node:os"
 import path from "node:path"
 import { tmpdir } from "./fixture/tmpdir"
 import { isolatedEnv } from "./fixture/environment"
@@ -36,9 +37,16 @@ unix.each([
     RUNNER_TEMP: directory.path,
     GITHUB_OUTPUT: path.join(directory.path, "outputs"),
     HUSKY: "0",
+    GIT_CONFIG_GLOBAL: devNull,
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_AUTHOR_NAME: undefined,
+    GIT_AUTHOR_EMAIL: undefined,
+    GIT_COMMITTER_NAME: undefined,
+    GIT_COMMITTER_EMAIL: undefined,
+    EMAIL: undefined,
   })
   const git = async (cwd: string, ...args: string[]) => {
-    const child = Bun.spawn(["git", "-c", "core.hooksPath=/dev/null", ...args], {
+    const child = Bun.spawn(["git", "-c", "core.hooksPath=/dev/null", "-c", "user.useConfigOnly=true", ...args], {
       cwd,
       env,
       stdout: "pipe",
@@ -64,6 +72,7 @@ unix.each([
   await git(upstream, "commit", "-m", "upstream base")
   await git(upstream, "tag", "v2.1.4")
   await git(directory.path, "clone", upstream, fork)
+  await initGit(fork)
 
   await Bun.write(path.join(fork, ".github/workflows/legacy.yml"), yaml("fork version"))
   await Bun.write(path.join(fork, ".github/workflows/ocv-ci.yml"), yaml("fork CI"))

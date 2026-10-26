@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createMemo, onCleanup, onMount, type Component } from "solid-js"
+import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount, type Component } from "solid-js"
 import { createStore } from "solid-js/store"
 import { useMutation } from "@tanstack/solid-query"
 import { Button } from "@opencode/ui/button"
@@ -118,6 +118,8 @@ export const SessionQuestionDock: Component<{ request: FormInfo; onSubmit: () =>
     listHeight: 0,
   })
 
+  const [lit, setLit] = createSignal<"none" | "hover" | "keys">("none")
+
   let root: HTMLDivElement | undefined
   let detailsRef: HTMLDivElement | undefined
   let optionsRef: HTMLDivElement | undefined
@@ -152,6 +154,7 @@ export const SessionQuestionDock: Component<{ request: FormInfo; onSubmit: () =>
   const optionsOff = createMemo(() => hidden() > 0.98)
   // The answers box follows its list's measured height, so the dock grows and shrinks with each question. Under
   // reduced motion it lands at once while the content fades.
+
   const listHeight = useSpring(
     () => store.listHeight,
     () => ({ visualDuration: prefersReducedMotion() ? 0.01 : 0.4, bounce: 0 }),
@@ -262,16 +265,19 @@ export const SessionQuestionDock: Component<{ request: FormInfo; onSubmit: () =>
     const el = listRef
 
     if (!el) return
+
     const observer = new ResizeObserver((entries) => {
       const size = entries[0]?.borderBoxSize[0]?.blockSize
+
       if (size !== undefined) setStore("listHeight", size)
     })
+
     observer.observe(el)
     onCleanup(() => observer.disconnect())
   })
 
-  // One highlight card glides between answers by its clip, so only one answer ever looks highlighted. It lands at once
-  // on a new question, and under reduced motion it fades in at its new answer instead of gliding.
+  // One highlight card jumps between answers by its clip, so only one answer ever looks highlighted. Under reduced
+  // motion it fades in at its new answer.
   let placed = { tab: -1, index: -1 }
   createEffect(() => {
     const el = highlightRef
@@ -280,24 +286,13 @@ export const SessionQuestionDock: Component<{ request: FormInfo; onSubmit: () =>
     void store.listHeight
 
     if (!el || !row || !listRef) return
-    const clip = `inset(${row.offsetTop}px 0 ${listRef.offsetHeight - row.offsetTop - row.offsetHeight}px round 6px)`
-    const fresh = placed.tab !== store.tab
-    const moved = fresh || placed.index !== index
-    const reduced = prefersReducedMotion()
+    el.style.clipPath = `inset(${row.offsetTop}px 0 ${listRef.offsetHeight - row.offsetTop - row.offsetHeight}px round 6px)`
+
+    if (lit() === "none") return
+    const moved = placed.tab !== store.tab || placed.index !== index
     placed = { tab: store.tab, index }
 
-    if (!fresh && !reduced) {
-      el.style.clipPath = clip
-
-      return
-    }
-
-    el.style.transition = "none"
-    el.style.clipPath = clip
-    void el.offsetHeight
-    el.style.removeProperty("transition")
-
-    if (reduced && moved && el.animate)
+    if (prefersReducedMotion() && moved && el.animate)
       el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 150, easing: "linear" })
   })
 
@@ -412,9 +407,16 @@ export const SessionQuestionDock: Component<{ request: FormInfo; onSubmit: () =>
     focus(options().length)
   }
 
+  // Scrolling the list under a still cursor makes the browser fire a pointermove at the same spot; it is not the user.
+  let pointer = { x: -1, y: -1 }
+
   // The pointer moves the highlight like the arrows do, but never takes focus from the custom answer's field.
   const hover = (i: number, event: PointerEvent) => {
-    if (event.pointerType !== "mouse" || store.editing || sending()) return
+    const still = event.clientX === pointer.x && event.clientY === pointer.y
+    pointer = { x: event.clientX, y: event.clientY }
+
+    if (event.pointerType !== "mouse" || still || store.editing || sending()) return
+    setLit("hover")
     setStore("focus", i)
   }
 
@@ -483,6 +485,8 @@ export const SessionQuestionDock: Component<{ request: FormInfo; onSubmit: () =>
     }
 
     if (store.minimized || sending()) return
+
+    if (intent.type === "move" || intent.type === "edge") setLit("keys")
 
     if (intent.type === "number") {
       event.preventDefault()
@@ -568,12 +572,14 @@ export const SessionQuestionDock: Component<{ request: FormInfo; onSubmit: () =>
     arrivals.length = 0
     const reduced = prefersReducedMotion()
     const x = (root?.matches(":dir(rtl)") ? -step : step) * 12
+
     const frames = reduced
       ? [{ opacity: 0 }, { opacity: 1 }]
       : [
           { opacity: 0, transform: `translate3d(${x}px,0,0)` },
           { opacity: 1, transform: "none" },
         ]
+
     ;[detailsRef, optionsRef].forEach((el) => {
       if (el?.animate) arrivals.push(el.animate(frames, { duration: reduced ? 150 : 300, easing: SPRING_EASE }))
     })
@@ -585,6 +591,8 @@ export const SessionQuestionDock: Component<{ request: FormInfo; onSubmit: () =>
     // The highlight's index moves before the question does, so it lands on the new question's answer instead of
     // gliding from the old one.
     setStore("focus", pickFocus(tab))
+
+    if (lit() === "hover") setLit("none")
     setStore("tab", tab)
     setStore("editing", false)
 
@@ -755,8 +763,22 @@ export const SessionQuestionDock: Component<{ request: FormInfo; onSubmit: () =>
             if (where === "option" || where === "custom") event.preventDefault()
           }}
         >
-          <div data-slot="question-options-list" ref={(el) => (listRef = el)}>
-            <span data-slot="question-highlight" ref={(el) => (highlightRef = el)} aria-hidden="true" />
+          <div
+            data-slot="question-options-list"
+            ref={(el) => (listRef = el)}
+            onPointerDown={(event) => setLit(event.pointerType === "mouse" ? "hover" : "none")}
+            onPointerLeave={() => {
+              pointer = { x: -1, y: -1 }
+
+              if (lit() === "hover") setLit("none")
+            }}
+          >
+            <span
+              data-slot="question-highlight"
+              data-shown={lit() !== "none"}
+              ref={(el) => (highlightRef = el)}
+              aria-hidden="true"
+            />
             <For each={options()}>
               {(opt, i) => (
                 <Option

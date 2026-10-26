@@ -862,7 +862,9 @@ const adaptGroupMessage = (raw: RawClient["server.message"]) => ({ list: Endpoin
 
 const EndpointModelList = (raw: RawClient["server.model"]) => (input?: ModelListInput) =>
   preserveEffect<ModelListOutput>()(
-    raw["model.list"]({ query: { location: input?.["location"] } }).pipe(Effect.mapError(mapClientError)),
+    raw["model.list"]({ query: { location: input?.["location"], type: input?.["type"] } }).pipe(
+      Effect.mapError(mapClientError),
+    ),
   )
 
 const EndpointModelDefault = (raw: RawClient["server.model"]) => (input?: ModelDefaultInput) =>

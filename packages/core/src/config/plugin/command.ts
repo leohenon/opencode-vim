@@ -193,14 +193,14 @@ function evaluateTemplate(
     const args = parseArguments(input)
     const placeholders = template.match(placeholderRegex) ?? []
     const last = Math.max(0, ...placeholders.map((item) => Number(item.slice(1))))
-    const expanded = template.replaceAll(placeholderRegex, (_, index) => {
+    const withArguments = template.replaceAll(argumentRegex, (match, index) => {
+      if (match === "$ARGUMENTS") return input
       const position = Number(index)
       const argIndex = position - 1
       if (argIndex >= args.length) return ""
       if (position === last) return args.slice(argIndex).join(" ")
       return args[argIndex]
     })
-    const withArguments = expanded.replaceAll("$ARGUMENTS", () => input)
     const text =
       placeholders.length === 0 && !template.includes("$ARGUMENTS") && input.trim()
         ? `${withArguments}\n\n${input}`.trim()
@@ -239,6 +239,7 @@ function parseArguments(input: string) {
 }
 
 const argsRegex = /(?:\[Image\s+\d+\]|"[^"]*"|'[^']*'|[^\s"']+)/gi
-const placeholderRegex = /\$(\d+)/g
+const placeholderRegex = /\$([1-9]\d*)/g
+const argumentRegex = /\$(?:ARGUMENTS|([1-9]\d*))/g
 const quoteTrimRegex = /^["']|["']$/g
 const shellRegex = /!`([^`]+)`/g

@@ -172,6 +172,8 @@ export type FormExternalField = { key: string; type: "external"; url: string; ti
 
 export type FormValue = string | number | "Infinity" | "-Infinity" | "NaN" | boolean | Array<string>
 
+export type ModelType = "chat" | "decision" | "image" | (string & {})
+
 export type ModelReasoningField = "reasoning" | "reasoning_content" | "reasoning_text" | (string & {})
 
 export type ModelMaxTokensField = "max_completion_tokens" | "max_tokens"
@@ -2435,6 +2437,7 @@ export type ModelInfo = {
   modelID: string
   providerID: ProviderID
   canonical?: ProviderID
+  type?: ModelType
   family?: string
   name: string
   compatibility?: ModelCompatibility
@@ -3613,7 +3616,10 @@ export type MessageListInput = {
 
 export type MessageListOutput = SessionMessagesResponse
 
-export type ModelListInput = { readonly location?: { readonly directory?: string | undefined } | undefined }
+export type ModelListInput = {
+  readonly location?: { readonly directory?: string | undefined } | undefined
+  readonly type?: ("chat" | "decision" | "image" | (string & {})) | undefined
+}
 
 export type ModelListOutput = { location: LocationPublicRef; data: Array<ModelInfo> }
 

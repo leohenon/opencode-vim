@@ -1399,7 +1399,10 @@ export interface MessageApi<E = never> {
   readonly list: MessageListOperation<E>
 }
 
-export type ModelListInput = { readonly location?: { readonly directory?: string | undefined } | undefined }
+export type ModelListInput = {
+  readonly location?: { readonly directory?: string | undefined } | undefined
+  readonly type?: Model.Type | undefined
+}
 export type ModelListOutput = { readonly location: Location.PublicRef; readonly data: ReadonlyArray<Model.Info> }
 export type ModelListOperation<E = never> = (input?: ModelListInput) => Effect.Effect<ModelListOutput, E>
 

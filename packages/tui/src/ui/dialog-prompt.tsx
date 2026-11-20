@@ -1,10 +1,10 @@
 import { TextareaRenderable } from "@opentui/core"
 import { Keymap } from "../context/keymap"
 import { useTheme } from "../context/theme"
-import { DialogFooter, DialogHeader, DialogLayout, useDialog, type DialogSize } from "./dialog"
+import { DialogButtons, DialogFooter, DialogHeader, DialogLayout, useDialog, type DialogSize } from "./dialog"
 import { Show, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js"
 import { Spinner } from "../component/spinner"
-import { useConfig, useNewDesigns } from "../config"
+import { useConfig, useCursorStyle, useNewDesigns, useVimCursor } from "../config"
 import { useRenderer } from "@opentui/solid"
 import { useVimEnabled } from "../component/vim"
 import {
@@ -26,7 +26,7 @@ export type DialogPromptAction = {
 export type DialogPromptProps = {
   title: string
   size?: DialogSize
-  /** Faint line below the title, under the "new-designs" experiment. */
+  /** Muted line below the title, under the "new-designs" experiment. */
   subtitle?: string
   description?: () => JSX.Element
   placeholder?: string
@@ -45,6 +45,8 @@ export function DialogPrompt(props: DialogPromptProps) {
   const config = useConfig().data
   const keymap = Keymap.use()
   const vimEnabled = useVimEnabled()
+  const configuredCursorStyle = useCursorStyle()
+  const vimCursor = useVimCursor()
   const newDesigns = useNewDesigns()
   const [textareaTarget, setTextareaTarget] = createSignal<TextareaRenderable>()
   const [inputMode, setInputMode] = createSignal<ModalInputMode>("insert")
@@ -76,7 +78,9 @@ export function DialogPrompt(props: DialogPromptProps) {
     vimEscapeSequence: () => config.vim_escape_sequence,
   })
   onCleanup(() => modalInput.clearPending())
-  const cursorStyle = createMemo(() => vimCursorStyle(modalInputEnabled() ? inputMode() : undefined, config.cursor))
+  const cursorStyle = createMemo(() =>
+    modalInputEnabled() ? vimCursorStyle(inputMode(), vimCursor()) : configuredCursorStyle(),
+  )
 
   createEffect(() => {
     if (!textarea || textarea.isDestroyed) return
@@ -190,7 +194,6 @@ export function DialogPrompt(props: DialogPromptProps) {
 
   return (
     <DialogLayout
-      footerGap={2}
       header={
         <DialogHeader
           title={props.title}
@@ -200,14 +203,11 @@ export function DialogPrompt(props: DialogPromptProps) {
           }}
         />
       }
-      footer={{
-        actions: {
-          primary: [
-            ...extraActions(),
-            { title: "submit", command: "dialog.prompt.submit", disabled: props.busy, onTrigger: confirm },
-          ],
-        },
-      }}
+      buttons={
+        newDesigns() ? (
+          <DialogButtons buttons={[{ label: "Submit", run: confirm }]} active={0} hints={extraActions()} />
+        ) : undefined
+      }
       legacyFooter={
         <Show when={!props.busy} fallback={<text fg={theme.text.muted}>processing…</text>}>
           <DialogFooter
@@ -229,7 +229,7 @@ export function DialogPrompt(props: DialogPromptProps) {
           }}
           initialValue={props.value}
           placeholder={props.placeholder ?? "Enter text"}
-          placeholderColor={newDesigns() ? theme.text.faint : theme.text.muted}
+          placeholderColor={theme.text.muted}
           textColor={props.busy ? theme.text.formfield.disabled : theme.text.formfield.base}
           focusedTextColor={props.busy ? theme.text.formfield.disabled : theme.text.formfield.base}
           cursorColor={props.busy ? theme.background.formfield.disabled : theme.text.base}

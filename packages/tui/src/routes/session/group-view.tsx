@@ -2,7 +2,7 @@ import { createEffect, createMemo, createSignal, For, Match, onCleanup, Show, Sw
 import { RGBA, type Renderable } from "@opentui/core"
 import { useRenderer, type JSX } from "@opentui/solid"
 import type { SessionMessageAssistantTool, SessionMessageInfo } from "@opencode/client"
-import { createSyntaxStyleMemo, useTheme, useThemes } from "../../context/theme"
+import { useTheme } from "../../context/theme"
 import { reasoningSummary } from "../../context/thinking"
 import { SplitBorder } from "../../ui/border"
 import { Locale } from "../../util/locale"
@@ -16,10 +16,9 @@ import {
   type SessionNode,
 } from "./grouping/session"
 import { summarizeActivity } from "./activity-summary"
-import { InlineToolRow, reasoningContent, toolDisplay } from "./message-parts"
+import { InlineToolRow, ReasoningBody, reasoningContent, toolDisplay } from "./message-parts"
 import { use } from "./render-context"
 import { resolvePart } from "./rows"
-import { generateThinkingSyntax } from "./thinking-syntax"
 import { copyTarget, identifyCopyHeader, identifyCopyNode } from "./copy-geometry"
 
 type Renderers = {
@@ -388,13 +387,7 @@ function Children(props: GroupProps & { nodes: readonly SessionNode[]; mode: "no
 }
 
 function ThoughtEntry(props: { entry: SessionEntry; message: Renderers["message"] }) {
-  const ctx = use()
   const theme = useTheme()
-  const { currentSyntax: syntax } = useThemes()
-  const renderer = useRenderer()
-  const thinkingSyntax = createSyntaxStyleMemo(() =>
-    generateThinkingSyntax(syntax(), theme.text.muted, renderer.nativeScene),
-  )
   const message = createMemo(() => {
     if (props.entry.type !== "part") return
     const item = props.message(props.entry.ref.messageID)
@@ -410,6 +403,7 @@ function ThoughtEntry(props: { entry: SessionEntry; message: Renderers["message"
     const item = part()
     return item ? reasoningContent(item) : ""
   })
+  const streaming = () => part()?.time?.completed === undefined && message()?.time.completed === undefined
   return (
     <Show when={content()}>
       <EntryAnchor entry={props.entry} marginTop={1}>
@@ -420,15 +414,7 @@ function ThoughtEntry(props: { entry: SessionEntry; message: Renderers["message"
           borderColor={theme.decrease(theme.background.raised.base)}
           paddingLeft={1}
         >
-          <code
-            filetype="markdown"
-            drawUnstyledText={false}
-            streaming={part()?.time?.completed === undefined && message()?.time.completed === undefined}
-            syntaxStyle={thinkingSyntax()}
-            content={content()}
-            conceal={ctx.markdownMode() === "rendered"}
-            fg={theme.text.muted}
-          />
+          <ReasoningBody content={content()} streaming={streaming()} sourceStreaming={streaming()} />
         </box>
       </EntryAnchor>
     </Show>

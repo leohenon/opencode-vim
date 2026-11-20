@@ -3,7 +3,7 @@ import type { AsyncStorage, SyncStorage } from "@solid-primitives/storage"
 import type { Accessor } from "solid-js"
 import type { DesktopMenuAction, DesktopZoomLevel } from "@/shell/commands/desktop-menu"
 import type { DraftStore } from "@/runtime/persistence/drafts"
-import type { Bridge } from "@opencode/gui-extensions/sdk/bridge"
+import type { Bridge } from "@opencode/plugin/gui/host"
 
 type PickerPaths = string | string[] | null
 
@@ -16,6 +16,8 @@ type OpenAttachmentPickerOptions = {
   extensions?: string[]
   defaultPath?: string
 }
+
+type OpenFilePathPickerOptions = { title?: string; multiple?: boolean; extensions?: string[] }
 
 type SaveFilePickerOptions = { title?: string; defaultPath?: string }
 
@@ -46,9 +48,6 @@ type PlatformBase = {
   /** Open a local path in a local app (desktop only) */
   openPath?(path: string, app?: string): Promise<void>
 
-  /** Open a local file URL in its default app (desktop only) */
-  openLocalFile?(url: string): void
-
   /** Reveal a local path in the system file manager; false when the path does not exist (desktop only) */
   revealPath?(path: string): Promise<boolean>
 
@@ -63,6 +62,9 @@ type PlatformBase = {
     opts: OpenAttachmentPickerOptions,
     onFile: (file: File) => Promise<Value>,
   ): Promise<void>
+
+  /** Open a native file picker and return the selected paths without reading the files (desktop only) */
+  openFilePathPickerDialog?(opts: OpenFilePathPickerOptions): Promise<string[] | null>
 
   /** Resolve the native source path for a desktop File. */
   getPathForFile?(file: File): string
@@ -103,6 +105,12 @@ type PlatformBase = {
   /** Allow native pinch/Ctrl-scroll zoom gestures (desktop only) */
   setPinchZoomEnabled?(enabled: boolean): Promise<void> | void
 
+  /** Get whether the native spellchecker underlines misspelled words (desktop only) */
+  getSpellcheckEnabled?(): Promise<boolean>
+
+  /** Turn the native spellchecker on or off (desktop only) */
+  setSpellcheckEnabled?(enabled: boolean): Promise<void>
+
   /** Run a desktop-only menu action from the app chrome */
   runDesktopMenuAction?(action: DesktopMenuAction): Promise<void> | void
 
@@ -124,8 +132,8 @@ type PlatformBase = {
   /** Record a fatal renderer error in platform logs (desktop only) */
   recordFatalRendererError?(error: FatalRendererErrorLog): Promise<void>
 
-  /** GUI extension bridge to the main-process extension host (desktop only). */
-  extensions?: Bridge
+  /** GUI plugin bridge to the main-process plugin host (desktop only). */
+  plugins?: Bridge
 }
 
 export type Platform = PlatformBase &

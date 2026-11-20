@@ -64,6 +64,8 @@ jobs:
             # Workflow definitions belong to OCV, including deliberately excluded upstream workflows.
             git rm -r -f --quiet --ignore-unmatch -- .github/workflows
             git restore --source=HEAD --staged --worktree -- .github/workflows
+            # Exclude upstream root README translations, including modify/delete conflicts.
+            git rm -f --quiet --ignore-unmatch -- ':(top,glob)README.*.md'
           fi
           conflicts=$(git diff --name-only --diff-filter=U)
           if [ -n "$conflicts" ]; then

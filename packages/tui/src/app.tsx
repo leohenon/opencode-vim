@@ -17,6 +17,7 @@ import { Selection } from "./util/selection"
 import {
   CliRenderEvents,
   createCliRenderer,
+  getTreeSitterClient,
   MouseButton,
   type CliRenderer,
   type CliRendererConfig,
@@ -116,7 +117,7 @@ import { SessionFrame } from "./component/session-frame"
 import { createTuiClipboard } from "./clipboard"
 import { useUIState } from "./context/ui-state"
 
-const appGlobalBindingCommands = ["session.list", "session.new", "open.menu"] as const
+const appGlobalBindingCommands = ["session.list", "session.new", "open.menu", "terminal.suspend"] as const
 
 const sessionTabBindingCommands = [
   "session.tab.next",
@@ -179,7 +180,6 @@ const appBindingCommands = [
   "diff.open",
   "app.debug",
   "app.console",
-  "terminal.suspend",
   "terminal.title.toggle",
   "input.vim.toggle",
   "ui.minimal.toggle",
@@ -193,6 +193,7 @@ export type TuiInput = {
   app: TuiApp
   server: {
     endpoint: Endpoint
+    local?: boolean
     service?: {
       reconnect: (signal: AbortSignal) => Promise<Endpoint>
       restart: () => Promise<void>
@@ -365,6 +366,7 @@ export const run = Effect.fn("Tui.run")(function* (input: TuiInput) {
                               value={{
                                 platform: process.platform,
                                 variables: input.environment,
+                                localServer: input.server.local,
                               }}
                             >
                               <TuiStartupProvider
@@ -520,12 +522,28 @@ function App() {
   const terminalEnvironment = useTuiTerminalEnvironment()
   const [, updateUI] = useUIState()
   let paletteTimer: ReturnType<typeof setTimeout> | undefined
+  let disposed = false
+  // OpenTUI draws Markdown prose natively, so the first thought or code fence would start the tree-sitter worker
+  // and load the markdown grammars itself. Do that once the first frame is out, off the main thread.
+  const warmHighlighter = async () => {
+    if (disposed) return
+    const client = getTreeSitterClient()
+    await client.initialize()
+    for (const filetype of ["markdown", "markdown_inline"]) {
+      if (disposed) return
+      await client.preloadParser(filetype)
+    }
+  }
   const afterFrame = () => {
     // The native writer can still be flushing the frame when FRAME fires. Keep OSC probes behind visible app output.
-    paletteTimer = setTimeout(afterPaint, 50)
+    paletteTimer = setTimeout(() => {
+      afterPaint()
+      warmHighlighter().catch(() => {})
+    }, 50)
   }
   onMount(() => renderer.once(CliRenderEvents.FRAME, afterFrame))
   onCleanup(() => {
+    disposed = true
     renderer.off(CliRenderEvents.FRAME, afterFrame)
     if (paletteTimer) clearTimeout(paletteTimer)
   })
@@ -699,6 +717,7 @@ function App() {
         limit: 1,
         order: "desc",
         parentID: null,
+        archived: false,
         directory: location.directory,
       })
       .then((response) => {
@@ -1172,7 +1191,7 @@ function App() {
         name: "docs.open",
         title: "Open docs",
         run: () => {
-          openUrl("https://opencode.ai/v2/docs").catch(() => {})
+          openUrl("https://opencode.ai/docs").catch(() => {})
           dialog.clear()
         },
         category: "System",

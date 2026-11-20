@@ -5,14 +5,19 @@ on:
     branches: [ocv]
     paths:
       - "docs/**"
+      - README.md
       - package.json
       - .github/workflows/ocv-pages.yml
   pull_request:
     branches: [ocv]
     paths:
       - "docs/**"
+      - README.md
       - package.json
       - .github/workflows/ocv-pages.yml
+  # Sent by leohenon/opencode-vim-plugin when its README changes; the docs page renders sections of it.
+  repository_dispatch:
+    types: [plugin-readme]
   workflow_dispatch:
 
 concurrency:
@@ -32,6 +37,7 @@ jobs:
         with:
           bun-version: 1.4.4
       - run: bun run build:site
+      # The docs page is generated from both READMEs at deploy time and is not committed.
       - name: Verify generated site is current
         run: git diff --exit-code -- docs/index.html
       - uses: actions/upload-pages-artifact@v3

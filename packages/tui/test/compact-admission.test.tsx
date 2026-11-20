@@ -59,7 +59,15 @@ test.each([70, 120])(
       run({
         app: { name: "test", version: "test", channel: "test" },
         server: { endpoint: { url: server.url.toString() } },
-        config: { get: async () => ({ animations: false, vim: false }), update: async () => ({}) },
+        config: {
+          get: async () => ({
+            animations: false,
+            vim: false,
+            experimental: { "new-designs": false },
+            theme: { name: "opencode-classic" },
+          }),
+          update: async () => ({}),
+        },
         packages: { prepare: async () => ({ directory: "" }) },
         terminalHandoff: async () => ({ renderer: setup.renderer, mode: "dark", complete: ready.resolve }),
         args: { sessionID },
@@ -185,7 +193,15 @@ test.each(["first", "second"])(
       run({
         app: { name: "test", version: "test", channel: "test" },
         server: { endpoint: { url: server.url.toString() } },
-        config: { get: async () => ({ animations: false, vim: false }), update: async () => ({}) },
+        config: {
+          get: async () => ({
+            animations: false,
+            vim: false,
+            experimental: { "new-designs": false },
+            theme: { name: "opencode-classic" },
+          }),
+          update: async () => ({}),
+        },
         packages: { prepare: async () => ({ directory: "" }) },
         terminalHandoff: async () => ({ renderer: setup.renderer, mode: "dark", complete: ready.resolve }),
         args: { sessionID },

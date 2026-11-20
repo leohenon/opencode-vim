@@ -100,7 +100,10 @@
     .nav { min-height: 68px; display: flex; align-items: center; justify-content: space-between; gap: 2rem; }
     .logo { display: inline-flex; align-items: center; line-height: 1; }
     .logo:hover { text-decoration: none; }
-    .logo svg { width: 150px; height: auto; display: block; }
+    .logo svg { width: auto; height: 27px; display: block; }
+    .logo .cursor { animation: cursor-blink 1.6s step-end infinite; }
+    @keyframes cursor-blink { 50% { opacity: 0; } }
+    @media (prefers-reduced-motion: reduce) { .logo .cursor { animation: none; } }
     .links { display: flex; align-items: center; gap: 1.65rem; color: var(--muted); font-size: 0.94rem; }
     .links a { color: var(--muted); }
     .links a:hover { color: var(--text); }
@@ -168,7 +171,7 @@
       .page { border: 0; }
       .wrap { padding: 0 1rem; }
       .nav { min-height: 64px; padding: 0.85rem 1.25rem; gap: 1rem; }
-      .logo svg { width: 136px; }
+      .logo svg { height: 24px; }
       .links { flex-wrap: nowrap; gap: 1rem; font-size: 0.9rem; }
       .hero { padding: 3rem 0; }
       .features, .media { grid-template-columns: 1fr; }
@@ -178,7 +181,7 @@
 
     @media (max-width: 380px) {
       .nav { padding-inline: 1rem; gap: 0.75rem; }
-      .logo svg { width: 124px; }
+      .logo svg { height: 22px; }
       .links { gap: 0.75rem; font-size: 0.85rem; }
     }
   </style>
@@ -188,28 +191,18 @@
     <header>
       <div class="wrap nav">
         <a class="logo" href="#top" aria-label="OpenCode Vim">
-          <svg viewBox="0 0 234 42" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-            <path d="M18 30H6V18H18V30Z" fill="#4B4646"/>
-            <path d="M18 12H6V30H18V12ZM24 36H0V6H24V36Z" fill="#B7B1B1"/>
-            <path d="M48 30H36V18H48V30Z" fill="#4B4646"/>
-            <path d="M36 30H48V12H36V30ZM54 36H36V42H30V6H54V36Z" fill="#B7B1B1"/>
-            <path d="M84 24V30H66V24H84Z" fill="#4B4646"/>
-            <path d="M84 24H66V30H84V36H60V6H84V24ZM66 18H78V12H66V18Z" fill="#B7B1B1"/>
-            <path d="M108 36H96V18H108V36Z" fill="#4B4646"/>
-            <path d="M108 12H96V36H90V6H108V12ZM114 36H108V12H114V36Z" fill="#B7B1B1"/>
-            <path d="M144 30H126V18H144V30Z" fill="#4B4646"/>
-            <path d="M144 12H126V30H144V36H120V6H144V12Z" fill="#F1ECEC"/>
-            <path d="M168 30H156V18H168V30Z" fill="#4B4646"/>
-            <path d="M168 12H156V30H168V12ZM174 36H150V6H174V36Z" fill="#F1ECEC"/>
-            <path d="M198 30H186V18H198V30Z" fill="#4B4646"/>
-            <path d="M198 12H186V30H198V12ZM204 36H180V6H198V0H204V36Z" fill="#F1ECEC"/>
-            <path d="M234 24V30H216V24H234Z" fill="#4B4646"/>
-            <path d="M216 12V18H228V12H216ZM234 24H216V30H234V36H210V6H234V24Z" fill="#F1ECEC"/>
+          <svg viewBox="0 0 126 42" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <path d="M0 12H6V18H0V12ZM0 24H6V30H0V24Z" fill="#6F6868"/>
+            <path d="M30 30H18V18H30V30Z" fill="#4B4646"/>
+            <path d="M30 12H18V30H30V12ZM36 36H12V6H36V36Z" fill="#B7B1B1"/>
+            <path d="M66 30H48V18H66V30Z" fill="#4B4646"/>
+            <path d="M66 12H48V30H66V36H42V6H66V12Z" fill="#B7B1B1"/>
+            <path d="M72 6H78V18H72V6ZM96 6H102V18H96V6ZM78 18H84V30H78V18ZM90 18H96V30H90V18ZM84 30H90V36H84V30Z" fill="#F1ECEC"/>
+            <path class="cursor" d="M108 6H126V36H108V6Z" fill="#F1ECEC"/>
           </svg>
         </a>
         <nav class="links" aria-label="Primary navigation">
-          <a href="https://github.com/leohenon/opencode-vim">GitHub</a>
-          <a href="https://www.npmjs.com/package/@leohenon/ocv">npm</a>
+          <a href="./docs/plugin/installation/">Docs</a>
         </nav>
       </div>
     </header>
@@ -223,8 +216,11 @@
 
           <div class="install">
             <div class="tabs" aria-label="OpenCode version">
-              <button class="tab" type="button" data-version="v2" aria-pressed="true">v2 (beta)</button>
-              <button class="tab" type="button" data-version="v1" aria-pressed="false">v1 (stable)</button>
+              <button class="tab" type="button" data-version="v2" aria-pressed="true">v2</button>
+              <button class="tab" type="button" data-version="v1" aria-pressed="false">v1</button>
+              <a id="fork-instructions" class="panel-link" href="https://github.com/leohenon/opencode-vim#installation" aria-label="Fork installation instructions on GitHub">
+                <svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+              </a>
             </div>
             <div class="tabs" aria-label="Install method">
               <button class="tab" type="button" data-install="curl" aria-pressed="true">curl</button>
@@ -267,15 +263,15 @@
           <p class="lede">The prompt Vim mode is also available as a plugin for the official OpenCode — no fork required. Motions, operators, text objects, registers, and more, in the prompt only.</p>
           <div class="install">
             <div class="tabs" aria-label="Plugin OpenCode version">
-              <button class="tab" type="button" data-plugin-version="v2" aria-pressed="true">v2 (beta)</button>
-              <button class="tab" type="button" data-plugin-version="v1" aria-pressed="false">v1 (stable)</button>
+              <button class="tab" type="button" data-plugin-version="v2" aria-pressed="true">v2</button>
+              <button class="tab" type="button" data-plugin-version="v1" aria-pressed="false">v1</button>
               <a id="plugin-instructions" class="panel-link" href="https://github.com/leohenon/opencode-vim-plugin/tree/main#installation" aria-label="Plugin installation instructions on GitHub">
                 <svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
               </a>
             </div>
             <div class="command-row">
               <div class="command-inner">
-                <span class="prompt" aria-hidden="true">$</span><code id="plugin-command">opencode plugin add @leohenon/opencode-vim-plugin@beta</code>
+                <span class="prompt" aria-hidden="true">$</span><code id="plugin-command">opencode plugin add @leohenon/opencode-vim-plugin</code>
                 <button class="copy" type="button" aria-label="Copy plugin install command" title="Copy">
                   <svg viewBox="0 0 512 512" aria-hidden="true"><rect width="336" height="336" x="128" y="128" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-width="32" rx="57" ry="57"/><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="32" d="m383.5 128 .5-24a56.16 56.16 0 0 0-56-56H112a64.19 64.19 0 0 0-64 64v216a56.16 56.16 0 0 0 56 56h24"/></svg>
                 </button>
@@ -294,6 +290,7 @@
 
   <script>
     const installCommands = {"v2":{"npm":"npm i -g @leohenon/ocv@ocv-v2","homebrew":"brew install leohenon/tap/ocv-v2","curl":"curl -fsSL https://raw.githubusercontent.com/leohenon/opencode-vim/ocv/install.sh | sh"},"v1":{"npm":"npm i -g @leohenon/ocv@latest","homebrew":"brew install leohenon/tap/ocv","curl":"curl -fsSL https://raw.githubusercontent.com/leohenon/opencode-vim/ocv1/install.sh | sh"}}
+    const forkInstructions = {"v2":{"url":"https://github.com/leohenon/opencode-vim#installation"},"v1":{"url":"https://github.com/leohenon/opencode-vim/tree/ocv1#installation"}}
     const installCommand = document.querySelector("#install-command")
     const installButtons = document.querySelectorAll("[data-install]")
     const versionButtons = document.querySelectorAll("[data-version]")
@@ -308,6 +305,7 @@
         versionButtons.forEach((item) => item.setAttribute("aria-pressed", String(item === button)))
         version = button.dataset.version
         updateCommand()
+        document.querySelector("#fork-instructions").href = forkInstructions[version].url
       })
     })
 
@@ -319,7 +317,7 @@
       })
     })
 
-    const pluginInstructions = {"v2":{"command":"opencode plugin add @leohenon/opencode-vim-plugin@beta","requirement":"For OpenCode v2 (2.0.25+).","url":"https://github.com/leohenon/opencode-vim-plugin/tree/main#installation"},"v1":{"command":"opencode plugin @leohenon/opencode-vim-plugin@0.1.6 --global","requirement":"For OpenCode v1 (1.17.10+).","url":"https://github.com/leohenon/opencode-vim-plugin/tree/v1#installation"}}
+    const pluginInstructions = {"v2":{"command":"opencode plugin add @leohenon/opencode-vim-plugin","requirement":"For OpenCode v2 (2.0.25+).","url":"https://github.com/leohenon/opencode-vim-plugin/tree/main#installation"},"v1":{"command":"opencode plugin @leohenon/opencode-vim-plugin@0.1.6 --global","requirement":"For OpenCode v1 (1.17.10+).","url":"https://github.com/leohenon/opencode-vim-plugin/tree/v1#installation"}}
     const pluginVersionButtons = document.querySelectorAll("[data-plugin-version]")
     pluginVersionButtons.forEach((button) => {
       button.addEventListener("click", () => {

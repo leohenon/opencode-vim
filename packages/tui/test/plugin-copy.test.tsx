@@ -56,7 +56,9 @@ test("setup and scoped plugin contexts read the current copy provider without ac
   const app = await testRender(
     () => (
       <Keymap.Provider config={resolve({}, { terminalSuspend: true })}>
-        <Harness />
+        <ToastProvider>
+          <Harness />
+        </ToastProvider>
       </Keymap.Provider>
     ),
     { width: 80, height: 24 },

@@ -84,3 +84,18 @@ test("Pages deploys only the fork's ocv branch", async () => {
   expect(pages.jobs.deploy!.if).toContain("github.event_name != 'pull_request'")
   expect(pages.jobs.deploy!.if).toContain("github.ref == 'refs/heads/ocv'")
 })
+
+test("Pages redeploys when the fork or plugin README changes", async () => {
+  const pages = Bun.YAML.parse(
+    await Bun.file(new URL("../../../.github/workflows/ocv-pages.yml", import.meta.url)).text(),
+  ) as {
+    on: {
+      push: { paths: string[] }
+      pull_request: { paths: string[] }
+      repository_dispatch: { types: string[] }
+    }
+  }
+  expect(pages.on.push.paths).toContain("README.md")
+  expect(pages.on.pull_request.paths).toContain("README.md")
+  expect(pages.on.repository_dispatch.types).toEqual(["plugin-readme"])
+})

@@ -1,20 +1,22 @@
 # GitHub Pages site
 
 This directory is the GitHub Pages publish root for opencode-vim.
-It is separate from the upstream product docs in `services/www` and `packages/web`.
-
-The landing page defaults to the V2 beta install channel. Its version selector also exposes V1 installation commands and links to the `ocv1` README.
 
 ```bash
 bun run build:site
 ```
 
-This runs `docs/build.ts` and writes the static landing page to `docs/index.html`. Commit the generated HTML alongside generator changes.
+This runs `docs/build.ts`, which writes:
 
-The `ocv-pages.yml` workflow builds and checks the site for pull requests targeting `ocv`. Pushes to `ocv` deploy it to GitHub Pages; PRs never deploy. The existing demo video shows the V1 interface.
+- `docs/index.html`: the landing page. Commit it alongside generator changes.
+- `docs/docs/`: the docs, one page per README section, with `/docs/` redirecting to the first page. They are generated, not committed (`docs/.gitignore`).
 
-Preview:
+The docs render selected sections of this repository's `README.md` and the [plugin README](https://github.com/leohenon/opencode-vim-plugin/blob/main/README.md), chosen by heading in `docs/build.ts`. The plugin README is fetched from GitHub; set `OCV_PLUGIN_README` to a local file to build offline. A renamed or missing section fails the build.
 
-```bash
-python3 -m http.server 8000 -d docs
-```
+The `ocv-pages.yml` workflow builds and checks the site for pull requests targeting `ocv`. It deploys to GitHub Pages when:
+
+- `docs/`, `README.md`, `package.json`, or the workflow changes on `ocv`.
+- The plugin repository's `website.yml` workflow sends a `plugin-readme` dispatch after its README changes on `main`. That workflow needs an `OCV_SITE_DISPATCH_TOKEN` secret: a fine-grained token for `leohenon/opencode-vim` with Contents read and write access.
+- It is run manually.
+
+PRs never deploy. The existing demo video shows the V1 interface.

@@ -67,8 +67,8 @@ function richDraft(): PromptInfo {
   return {
     ...emptyPrompt(),
     text,
-    pasted: [{ text: "first\nsecond\nthird", source: { start: 0, end: 16, text: "[Pasted ~3 lines]" } }],
-    files: [{ uri: "file:///tmp/file.txt", mention: { start: 17, end: text.length, text: "@file.txt" } }],
+    pasted: [{ text: "first\nsecond\nthird", source: { start: 0, end: 17, text: "[Pasted ~3 lines]" } }],
+    files: [{ uri: "file:///tmp/file.txt", mention: { start: 18, end: text.length, text: "@file.txt" } }],
   }
 }
 
@@ -80,14 +80,15 @@ test("copy freeze restores draft parts, extmarks and cursor together after a nat
   try {
     // Vim remembers its last mode across component instances in this process.
     app.mockInput.pressKey("ESCAPE")
-    textarea.cursorOffset = 4
+    // Between the virtual parts; offsets inside a placeholder snap to its edge.
+    textarea.cursorOffset = 18
     app.mockInput.pressKey("F6")
     await app.waitForFrame((frame) => frame.includes("COPY"))
     textarea.setText("unexpected native edit")
     await app.renderOnce()
     expect(textarea.plainText).toBe(prompt.text)
     expect(textarea.extmarks.getAll()).toHaveLength(2)
-    expect(textarea.cursorOffset).toBe(4)
+    expect(textarea.cursorOffset).toBe(18)
   } finally {
     await app[Symbol.asyncDispose]()
   }

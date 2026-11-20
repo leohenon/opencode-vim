@@ -3,6 +3,8 @@ export * as ServerProcess from "./process"
 import { NodeHttpServer } from "@effect/platform-node"
 import { Bus } from "@opencode/core/bus"
 import { SessionRestart } from "@opencode/core/session/execution/restart"
+import { Automation } from "@opencode/core/automation"
+import { SessionSearchBuild } from "@opencode/core/session/search-build"
 import { InstallationEvent } from "@opencode/schema/installation-event"
 import { hasPtyConnectTicketURL } from "@opencode/protocol/groups/pty"
 import { hasPersistentPtyConnectTicketURL } from "@opencode/protocol/groups/persistent-pty"
@@ -18,6 +20,7 @@ import { ServerAuth } from "./auth"
 import { isAllowedCorsOrigin } from "./cors"
 import { authorizedRequest, unauthorizedResponse } from "./middleware/authorization"
 import { withoutParentSpan } from "./request-tracing"
+import { RequestSite } from "./request-site"
 import { createRoutes } from "./routes"
 import { ServerInfo } from "./server-info"
 import { Status } from "./service-status"
@@ -72,6 +75,7 @@ export const start = Effect.fn("ServerProcess.start")(function* <E, R>(
   yield* bound.http
     .serve(
       (transform ? transform(app) : app).pipe(
+        RequestSite.middleware(options),
         HttpMiddleware.compression(),
         HttpMiddleware.cors({ allowedOrigins: (origin) => isAllowedCorsOrigin(origin, options), maxAge: 86_400 }),
       ),
@@ -95,6 +99,8 @@ export const start = Effect.fn("ServerProcess.start")(function* <E, R>(
     ),
   )
 
+  // Built without the startup span: route handlers and background fibers capture this context, and would
+  // otherwise nest every request and session turn for the life of the process under one trace.
   const boot = Effect.gen(function* () {
     const context = yield* Layer.buildWithScope(
       createRoutes(
@@ -111,6 +117,10 @@ export const start = Effect.fn("ServerProcess.start")(function* <E, R>(
         Effect.provideService(Scope.Scope, applicationScope),
       )
     }
+    // Automations run from any server process (`service`, `opencode serve`, or `--standalone`); the table holds all their state.
+    yield* Effect.forkIn(Context.get(context, Automation.Service).run, applicationScope)
+    // Likewise the one-time session search build, once a location has sqlite_fts on.
+    yield* Effect.forkIn(Context.get(context, SessionSearchBuild.Service).run, applicationScope)
     yield* Ref.set(application, Option.some(Context.get(context, HttpRouter.HttpRouter).asHttpEffect()))
     yield* status.ready
     const bus = Context.get(context, Bus.Service)
@@ -122,6 +132,7 @@ export const start = Effect.fn("ServerProcess.start")(function* <E, R>(
       updated: (version: string) => bus.publish(InstallationEvent.Updated, { version }).pipe(Effect.asVoid),
     }
   }).pipe(
+    withoutParentSpan,
     Effect.catchCause((cause) => {
       if (!lifecycle || Cause.hasInterruptsOnly(cause)) return Effect.failCause(cause)
       return status.fail.pipe(

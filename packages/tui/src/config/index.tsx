@@ -3,7 +3,7 @@ export * as Config from "."
 import { createBindingLookup } from "@opentui/keymap/extras"
 import { Vcs } from "@opencode/schema/vcs"
 import { Schema } from "effect"
-import { createContext, onCleanup, type JSX, useContext } from "solid-js"
+import { createContext, createMemo, onCleanup, type JSX, useContext } from "solid-js"
 import { createStore, reconcile } from "solid-js/store"
 import { safeWatch } from "../util/watch"
 import path from "path"
@@ -182,6 +182,9 @@ export const Info = Schema.Struct({
         description: "Session sidebar visibility; 'auto' shows it when space permits",
       }),
       scrollbar: Schema.optional(Schema.Boolean).annotate({ description: "Show the session transcript scrollbar" }),
+      submit_scroll: Schema.optional(Schema.Literals(["bottom", "keep"])).annotate({
+        description: "Jump to the latest message when sending a prompt, or keep the current transcript position",
+      }),
       thinking: Schema.optional(Schema.Literals(["show", "hide"])).annotate({
         description: "Show or hide model reasoning by default",
       }),
@@ -196,7 +199,7 @@ export const Info = Schema.Struct({
         description: "Show user attachment and tool-result images in the session transcript",
       }),
       tps: Schema.optional(Schema.Boolean).annotate({
-        description: "Show average tokens per second",
+        description: "Show output tokens per second while the model streams",
       }),
       markdown: Schema.optional(Schema.Literals(["source", "rendered"])).annotate({
         description: "Show Markdown syntax markers or conceal them in rendered transcript content",
@@ -331,7 +334,7 @@ export type Resolved = Omit<
   keybinds: TuiKeybind.BindingLookupView
   leader: { timeout: number }
   mouse: boolean
-  cursor?: {
+  cursor: {
     style: "block" | "underline" | "line" | "default"
     blinking: boolean
   }
@@ -350,6 +353,11 @@ export type Resolved = Omit<
   vim_modal_input: boolean
   vim_line_motions: "logical" | "display_vertical" | "display"
   vim_showbreak: boolean
+  /** Explicitly configured cursor; unset lets Vim inputs use their mode-specific cursors. */
+  vim_cursor?: {
+    style: "block" | "underline" | "line" | "default"
+    blinking: boolean
+  }
 }
 
 export function resolve(
@@ -382,12 +390,10 @@ export function resolve(
     }),
     leader: { timeout: input.leader?.timeout ?? 2000 },
     mouse: input.mouse ?? true,
-    cursor: input.cursor
-      ? {
-          style: input.cursor.style ?? "block",
-          blinking: input.cursor.blinking ?? true,
-        }
-      : undefined,
+    cursor: {
+      style: input.cursor?.style ?? "block",
+      blinking: input.cursor?.blinking ?? true,
+    },
     session: {
       ...input.session,
       new_location: input.session?.new_location ?? "launch",
@@ -405,6 +411,9 @@ export function resolve(
     vim_modal_input: input.vim_modal_input ?? true,
     vim_line_motions: input.vim_line_motions ?? "logical",
     vim_showbreak: input.vim_showbreak ?? false,
+    vim_cursor: input.cursor
+      ? { style: input.cursor.style ?? "block", blinking: input.cursor.blinking ?? true }
+      : undefined,
   }
 }
 
@@ -450,10 +459,28 @@ export function useConfig() {
   return value
 }
 
-/** Reactive accessor for the temporary "new-designs" experiment. */
+/**
+ * The configured textarea cursor, replaced only when the cursor config changes. A fresh object on every render effect
+ * would restyle the textarea whenever an unrelated prop changes, discarding a style a plugin set on it.
+ */
+export function useCursorStyle() {
+  const config = useConfig()
+  return createMemo(() => ({ style: config.data.cursor.style, blinking: config.data.cursor.blinking }))
+}
+
+/** The explicitly configured cursor for Vim inputs, replaced only when the cursor config changes. */
+export function useVimCursor() {
+  const config = useConfig()
+  return createMemo(() => {
+    const cursor = config.data.vim_cursor
+    return cursor ? { style: cursor.style, blinking: cursor.blinking } : undefined
+  })
+}
+
+/** Reactive accessor for the temporary "new-designs" experiment. On unless the config turns it off. */
 export function useNewDesigns() {
   const config = useConfig()
-  return () => config.data.experimental?.["new-designs"] === true
+  return () => config.data.experimental?.["new-designs"] !== false
 }
 
 /** Reactive accessor for the temporary "client-mcp" experiment. */

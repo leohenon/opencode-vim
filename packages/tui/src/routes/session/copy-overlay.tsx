@@ -2,6 +2,7 @@ import { For, Show } from "solid-js"
 import { RGBA } from "@opentui/core"
 import { useTheme } from "../../context/theme"
 import type { CopyHighlight } from "./copy-mode"
+import { cellWidth } from "./copy-text"
 
 export type CopyPosition = {
   line: number
@@ -56,7 +57,13 @@ export function CopyOverlay(props: { copy?: CopyPosition; highlights?: CopyHighl
         )}
       </For>
       <Show when={props.copy}>
-        <box position="absolute" top={props.copy!.line} left={props.copy!.col} width={1} height={1}>
+        <box
+          position="absolute"
+          top={props.copy!.line}
+          left={props.copy!.col}
+          width={Math.max(1, cellWidth(props.copy!.cursorText))}
+          height={1}
+        >
           <text bg={theme.text.base} fg={theme.background.base}>
             {props.copy!.cursorText}
           </text>

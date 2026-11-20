@@ -10,8 +10,6 @@ Keyboard-first OpenCode with Vim controls across the TUI, kept in sync with upst
 
 ## Installation
 
-### v2 (beta)
-
 ```bash
 # curl
 curl -fsSL https://raw.githubusercontent.com/leohenon/opencode-vim/ocv/install.sh | sh
@@ -21,25 +19,9 @@ npm i -g @leohenon/ocv@ocv-v2
 brew install leohenon/tap/ocv-v2
 ```
 
-### v1
-
-```bash
-# curl
-curl -fsSL https://raw.githubusercontent.com/leohenon/opencode-vim/ocv1/install.sh | sh
-
-# Package managers
-npm i -g @leohenon/ocv@latest
-brew install leohenon/tap/ocv
-
-# Arch Linux AUR (V1 only, community-maintained)
-yay -S opencode-vim-bin
-```
-
-For v1 usage and configuration, see [ocv1](https://github.com/leohenon/opencode-vim/blob/ocv1/README.md).
+For V1, see [ocv1](https://github.com/leohenon/opencode-vim/blob/ocv1/README.md).
 
 For a plugin option, see [opencode-vim-plugin](https://github.com/leohenon/opencode-vim-plugin).
-
-Curl installs to `~/.ocv/bin`. Set `OCV_INSTALL_DIR` to install elsewhere.
 
 ## Usage
 
@@ -155,9 +137,7 @@ Toggle via command palette > `Toggle minimal ui`.
 
 ## Configuration
 
-TUI settings belong in `~/.config/ocv/cli.json`, rather than v1's `tui.json`. `XDG_CONFIG_HOME` and `OPENCODE_CONFIG_DIR` can override the config location.
-
-Supported ocv v1 TUI settings are migrated automatically.
+TUI settings belong in `~/.config/ocv/cli.json`. `XDG_CONFIG_HOME` and `OPENCODE_CONFIG_DIR` can override the config location.
 
 ### Options
 

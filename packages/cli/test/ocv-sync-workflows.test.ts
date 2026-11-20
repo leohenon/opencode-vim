@@ -29,6 +29,9 @@ unix.each([
   "directory-deletion",
   "source-only",
   "source-conflict",
+  "readme-addition",
+  "readme-edit",
+  "readme-rename",
 ] as const)("V2 preserves fork-owned workflows during %s", async (scenario) => {
   await using directory = await tmpdir()
   const upstream = path.join(directory.path, "upstream")
@@ -67,6 +70,9 @@ unix.each([
     await Bun.write(path.join(upstream, name), "fixture\n")
   for (const name of ["legacy.yml", "unchanged.yml", "nix.yml"])
     await Bun.write(path.join(upstream, ".github/workflows", name), yaml("upstream base"))
+  await Bun.write(path.join(upstream, "README.fr.md"), "upstream translation\n")
+  await Bun.write(path.join(upstream, "docs/README.md"), "site documentation\n")
+  await Bun.write(path.join(upstream, "docs/README.fr.md"), "nested documentation\n")
   await Bun.write(path.join(upstream, "source.ts"), 'export const value = "base"\n')
   await git(upstream, "add", ".")
   await git(upstream, "commit", "-m", "upstream base")
@@ -76,7 +82,7 @@ unix.each([
 
   await Bun.write(path.join(fork, ".github/workflows/legacy.yml"), yaml("fork version"))
   await Bun.write(path.join(fork, ".github/workflows/ocv-ci.yml"), yaml("fork CI"))
-  await git(fork, "rm", ".github/workflows/nix.yml")
+  await git(fork, "rm", ".github/workflows/nix.yml", "README.fr.md")
   if (scenario === "source-conflict") await Bun.write(path.join(fork, "source.ts"), 'export const value = "fork"\n')
   await git(fork, "add", ".")
   await git(fork, "commit", "-m", "fork workflows")
@@ -102,6 +108,10 @@ unix.each([
   if (scenario === "add-add")
     await Bun.write(path.join(upstream, ".github/workflows/ocv-ci.yml"), yaml("upstream collision"))
   if (scenario === "directory-deletion") await git(upstream, "rm", "-r", ".github/workflows")
+  if (scenario === "readme-addition") await Bun.write(path.join(upstream, "README.es.md"), "new translation\n")
+  if (scenario === "readme-edit") await Bun.write(path.join(upstream, "README.fr.md"), "updated translation\n")
+  if (scenario === "readme-rename") await git(upstream, "mv", "README.fr.md", "README.es.md")
+  await Bun.write(path.join(upstream, "docs/README.fr.md"), "updated nested documentation\n")
   await Bun.write(path.join(upstream, "source.ts"), 'export const value = "upstream"\n')
   await git(upstream, "add", ".")
   await git(upstream, "commit", "-m", "upstream update")
@@ -139,6 +149,12 @@ unix.each([
     return
   }
   expect(await git(fork, "diff", "--name-only", "--diff-filter=U")).toBe("")
+  expect(await git(fork, "ls-files", "--", ":(top,glob)README.*.md")).toBe("")
+  expect(await Bun.file(path.join(fork, "README.fr.md")).exists()).toBe(false)
+  expect(await Bun.file(path.join(fork, "README.es.md")).exists()).toBe(false)
+  expect(await Bun.file(path.join(fork, "README.md")).text()).toBe("fixture\n")
+  expect(await Bun.file(path.join(fork, "docs/README.md")).text()).toBe("site documentation\n")
+  expect(await Bun.file(path.join(fork, "docs/README.fr.md")).text()).toBe("updated nested documentation\n")
   expect(await Bun.file(path.join(fork, "source.ts")).text()).toBe('export const value = "upstream"\n')
   expect(await git(fork, "log", "-1", "--format=%s")).toBe("chore(upstream): sync upstream dev")
   await git(fork, "merge-base", "--is-ancestor", "upstream/dev", "HEAD")

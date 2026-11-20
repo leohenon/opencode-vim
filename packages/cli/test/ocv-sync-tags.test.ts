@@ -43,7 +43,7 @@ unix.each(["tagged", "already-synced", "untagged", "non-v2"] as const)(
     await mkdir(path.join(upstream, "packages/core"), { recursive: true })
     await mkdir(path.join(upstream, ".github"))
     await Bun.write(path.join(upstream, ".github/workflows/ocv-ci.yml"), "name: fork CI\n")
-    for (const file of ["AGENTS.md", "README.md", "install.sh", ".github/ocv-track"])
+    for (const file of ["README.md", "install.sh", ".github/ocv-track"])
       await Bun.write(path.join(upstream, file), "fixture\n")
     const commit = async (version: string) => {
       await Bun.write(path.join(upstream, "packages/core/package.json"), JSON.stringify({ version }))

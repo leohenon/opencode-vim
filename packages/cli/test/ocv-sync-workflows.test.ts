@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test"
+import { existsSync } from "node:fs"
 import { mkdir } from "node:fs/promises"
 import { devNull } from "node:os"
 import path from "node:path"
@@ -15,6 +16,47 @@ const workflow = Bun.YAML.parse(
 const script = workflow.jobs.sync.steps.find((step) => step.name === "Merge upstream/dev")!.run!
 const resolver = path.resolve(import.meta.dir, "../script/ocv-sync.ts")
 const unix = process.platform === "win32" ? test.skip : test
+// Upstream-only paths OCV removed; the sync must keep them out.
+const removedPaths = [
+  "AGENTS.md",
+  "CHANGELOG.md",
+  "CONTRIBUTING.md",
+  "flake.lock",
+  "flake.nix",
+  "install",
+  "nix",
+  "packages/script/test/highlights.test.ts",
+  "salesforce",
+  "screenshot-uk.png",
+  "sdks",
+  "SECURITY.md",
+  "specs",
+  "strobe.json",
+]
+const removed = [
+  "AGENTS.md",
+  "CHANGELOG.md",
+  "CONTRIBUTING.md",
+  "flake.lock",
+  "flake.nix",
+  "install",
+  "nix/hashes.json",
+  "packages/script/test/highlights.test.ts",
+  "salesforce/README.md",
+  "screenshot-uk.png",
+  "sdks/vscode/package.json",
+  "SECURITY.md",
+  "specs/v2/README.md",
+  "strobe.json",
+]
+// Similar nested paths stay upstream-owned.
+const kept = [
+  ".github/nix-hashes/validate.sh",
+  "packages/cli/AGENTS.md",
+  "packages/app/specs/keep.md",
+  "packages/http-recorder/CHANGELOG.md",
+  "packages/script/test/keep.test.ts",
+]
 
 unix.each([
   "addition",
@@ -32,6 +74,7 @@ unix.each([
   "readme-addition",
   "readme-edit",
   "readme-rename",
+  "cleanup-edit",
 ] as const)("V2 preserves fork-owned workflows during %s", async (scenario) => {
   await using directory = await tmpdir()
   const upstream = path.join(directory.path, "upstream")
@@ -66,8 +109,10 @@ unix.each([
   await mkdir(upstream)
   await initGit(upstream, "-b", "dev")
   await Bun.write(path.join(upstream, "packages/core/package.json"), '{"version":"2.1.4"}\n')
-  for (const name of ["AGENTS.md", "README.md", "install.sh", ".github/ocv-track"])
+  for (const name of ["README.md", "install.sh", ".github/ocv-track"])
     await Bun.write(path.join(upstream, name), "fixture\n")
+  for (const name of removed) await Bun.write(path.join(upstream, name), "upstream only\n")
+  for (const name of kept) await Bun.write(path.join(upstream, name), "nested upstream\n")
   for (const name of ["legacy.yml", "unchanged.yml", "nix.yml"])
     await Bun.write(path.join(upstream, ".github/workflows", name), yaml("upstream base"))
   await Bun.write(path.join(upstream, "README.fr.md"), "upstream translation\n")
@@ -82,7 +127,7 @@ unix.each([
 
   await Bun.write(path.join(fork, ".github/workflows/legacy.yml"), yaml("fork version"))
   await Bun.write(path.join(fork, ".github/workflows/ocv-ci.yml"), yaml("fork CI"))
-  await git(fork, "rm", ".github/workflows/nix.yml", "README.fr.md")
+  await git(fork, "rm", "-r", ".github/workflows/nix.yml", "README.fr.md", ...removedPaths)
   if (scenario === "source-conflict") await Bun.write(path.join(fork, "source.ts"), 'export const value = "fork"\n')
   await git(fork, "add", ".")
   await git(fork, "commit", "-m", "fork workflows")
@@ -111,6 +156,12 @@ unix.each([
   if (scenario === "readme-addition") await Bun.write(path.join(upstream, "README.es.md"), "new translation\n")
   if (scenario === "readme-edit") await Bun.write(path.join(upstream, "README.fr.md"), "updated translation\n")
   if (scenario === "readme-rename") await git(upstream, "mv", "README.fr.md", "README.es.md")
+  if (scenario === "cleanup-edit") {
+    for (const name of removed) await Bun.write(path.join(upstream, name), "updated upstream only\n")
+    for (const name of ["nix/new.nix", "salesforce/new.json", "sdks/vscode/new.ts", "specs/v2/new.md"])
+      await Bun.write(path.join(upstream, name), "new upstream only\n")
+  }
+  for (const name of kept) await Bun.write(path.join(upstream, name), "updated nested upstream\n")
   await Bun.write(path.join(upstream, "docs/README.fr.md"), "updated nested documentation\n")
   await Bun.write(path.join(upstream, "source.ts"), 'export const value = "upstream"\n')
   await git(upstream, "add", ".")
@@ -153,6 +204,10 @@ unix.each([
   expect(await Bun.file(path.join(fork, "README.fr.md")).exists()).toBe(false)
   expect(await Bun.file(path.join(fork, "README.es.md")).exists()).toBe(false)
   expect(await Bun.file(path.join(fork, "README.md")).text()).toBe("fixture\n")
+  expect(await git(fork, "ls-files", "--", ...removedPaths.map((name) => `:(top)${name}`))).toBe("")
+  for (const name of removedPaths) expect(existsSync(path.join(fork, name))).toBe(false)
+  expect(await Bun.file(path.join(fork, "install.sh")).text()).toBe("fixture\n")
+  for (const name of kept) expect(await Bun.file(path.join(fork, name)).text()).toBe("updated nested upstream\n")
   expect(await Bun.file(path.join(fork, "docs/README.md")).text()).toBe("site documentation\n")
   expect(await Bun.file(path.join(fork, "docs/README.fr.md")).text()).toBe("updated nested documentation\n")
   expect(await Bun.file(path.join(fork, "source.ts")).text()).toBe('export const value = "upstream"\n')

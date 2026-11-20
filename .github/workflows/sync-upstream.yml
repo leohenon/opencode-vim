@@ -64,19 +64,21 @@ jobs:
             # Workflow definitions belong to OCV, including deliberately excluded upstream workflows.
             git rm -r -f --quiet --ignore-unmatch -- .github/workflows
             git restore --source=HEAD --staged --worktree -- .github/workflows
-            # Exclude upstream root README translations, including modify/delete conflicts.
-            git rm -f --quiet --ignore-unmatch -- ':(top,glob)README.*.md'
+            # Exclude upstream-only root files the fork removed, including modify/delete conflicts.
+            git rm -r -f --quiet --ignore-unmatch -- ':(top,glob)README.*.md' ':(top)AGENTS.md' ':(top)CHANGELOG.md' ':(top)CONTRIBUTING.md' \
+              ':(top)flake.lock' ':(top)flake.nix' ':(top)install' ':(top)nix' ':(top)salesforce' ':(top)screenshot-uk.png' \
+              ':(top)sdks' ':(top)SECURITY.md' ':(top)specs' ':(top)strobe.json' ':(top)packages/script/test/highlights.test.ts'
           fi
           conflicts=$(git diff --name-only --diff-filter=U)
           if [ -n "$conflicts" ]; then
-            other=$(printf '%s\n' "$conflicts" | grep -Ev '^(AGENTS\.md|README\.md|install\.sh|\.github/ocv-track|package\.json|packages/cli/package\.json|bun\.lock)$' || true)
+            other=$(printf '%s\n' "$conflicts" | grep -Ev '^(README\.md|install\.sh|\.github/ocv-track|package\.json|packages/cli/package\.json|bun\.lock)$' || true)
             [ -z "$other" ] || { printf '%s\n' "$other"; exit 1; }
             for file in package.json packages/cli/package.json bun.lock; do
               if printf '%s\n' "$conflicts" | grep -Fxq "$file"; then
                 bun run packages/cli/script/ocv-sync.ts "$file"
               fi
             done
-            for file in AGENTS.md README.md install.sh .github/ocv-track; do
+            for file in README.md install.sh .github/ocv-track; do
               if printf '%s\n' "$conflicts" | grep -Fxq "$file"; then
                 git checkout --ours -- "$file"
                 git add "$file"
@@ -90,7 +92,7 @@ jobs:
           }
           if git rev-parse -q --verify MERGE_HEAD >/dev/null; then
             # Keep fork documentation and release identity even for clean upstream merges.
-            git restore --source=HEAD --staged --worktree -- AGENTS.md README.md install.sh .github/ocv-track
+            git restore --source=HEAD --staged --worktree -- README.md install.sh .github/ocv-track
             git commit -m "chore(upstream): sync upstream dev"
           fi
 

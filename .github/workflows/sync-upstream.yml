@@ -120,13 +120,11 @@ jobs:
           if [ -n "$previous" ] && [ "${previous##*-ocv.}" = "$track" ]; then
             git rev-parse --verify "$previous^{commit}" >/dev/null
             git merge-base --is-ancestor "$previous" "$BEFORE"
-            while read -r sha; do
-              prs=$(gh api "repos/$GITHUB_REPOSITORY/commits/$sha/pulls" --jq '.[] | select(.base.ref == "ocv" and .merged_at != null) | .number')
-              if [ -n "$prs" ]; then
-                changed=true
-                break
-              fi
-            done < <(git log --first-parent --format='%H' "$previous..$BEFORE")
+            # The same fork changes that the release notes list: merged PRs and direct fork commits.
+            changes=$(bun run packages/cli/script/ocv-notes.ts changes "$previous" "$BEFORE")
+            if [ "$(jq length <<< "$changes")" -gt 0 ]; then
+              changed=true
+            fi
           fi
           plan=$(OCV_FORK_CHANGES="$changed" bun run packages/cli/script/ocv-release.ts "$upstream" "$releases")
           echo "$plan" | jq .
@@ -155,7 +153,7 @@ jobs:
         if: github.event_name == 'schedule' || inputs.dry_run == false
         run: git push origin HEAD:ocv
 
-      - name: Trigger V2 beta release
+      - name: Trigger V2 release
         if: steps.release.outputs.publish == 'true' && (github.event_name == 'schedule' || inputs.dry_run == false)
         env:
           VERSION: ${{ steps.release.outputs.version }}

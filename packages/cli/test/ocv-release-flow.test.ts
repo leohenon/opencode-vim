@@ -85,7 +85,7 @@ unix("duplicate publication keeps public assets and avoids Github release create
     '#!/bin/sh\n[ "$1 $2" = "release download" ] || exit 99\nprintf "%s\\n" "$*" > "$FIXTURE_LOG"\n',
   )
   await chmod(path.join(bin, "gh"), 0o755)
-  const script = step("Stage or resume draft prerelease").run!.replaceAll(
+  const script = step("Stage or resume draft release").run!.replaceAll(
     "${{ steps.release_ref.outputs.published }}",
     "true",
   )
@@ -101,7 +101,7 @@ unix("duplicate publication keeps public assets and avoids Github release create
   )
   expect(result.code, result.stderr).toBe(0)
   expect(await Bun.file(path.join(directory.path, "calls")).text()).toContain("release download v2.1.4-ocv.4.13")
-  expect(step("Publish GitHub prerelease after npm succeeds").if).toContain(
+  expect(step("Publish GitHub release after npm succeeds").if).toContain(
     "steps.release_ref.outputs.published != 'true'",
   )
 })

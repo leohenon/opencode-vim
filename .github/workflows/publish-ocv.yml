@@ -163,6 +163,13 @@ jobs:
           OPENCODE_CHANNEL: ocv
         run: bun run packages/cli/script/publish-homebrew.ts
 
+      - name: Generate release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          bun run packages/cli/script/ocv-notes.ts notes "$VERSION" > "$RUNNER_TEMP/ocv-release-notes.md"
+          cat "$RUNNER_TEMP/ocv-release-notes.md"
+
       - name: Upload dry-run artifacts
         if: inputs.dry_run
         uses: actions/upload-artifact@v4
@@ -173,7 +180,7 @@ jobs:
             packages/cli/dist/**/*.tgz
           if-no-files-found: error
 
-      - name: Stage or resume draft prerelease
+      - name: Stage or resume draft release
         id: github_stage
         if: inputs.dry_run == false
         shell: bash
@@ -184,8 +191,9 @@ jobs:
             gh release download "v$VERSION" --repo "$GITHUB_REPOSITORY" --pattern 'ocv-*' --dir packages/cli/dist/release --clobber
           elif jq -e --arg tag "v$VERSION" '.[] | select(.tagName == $tag and .isDraft)' "$RUNNER_TEMP/releases.json" >/dev/null; then
             gh release upload "v$VERSION" packages/cli/dist/release/* --clobber
+            gh release edit "v$VERSION" --notes-file "$RUNNER_TEMP/ocv-release-notes.md"
           else
-            gh release create "v$VERSION" packages/cli/dist/release/* --target "$(git rev-parse HEAD)" --title "v$VERSION" --draft --prerelease --latest=false --generate-notes
+            gh release create "v$VERSION" packages/cli/dist/release/* --target "$(git rev-parse HEAD)" --title "v$VERSION" --draft --notes-file "$RUNNER_TEMP/ocv-release-notes.md"
           fi
 
       - name: Publish npm packages to ocv-v2 only
@@ -197,10 +205,11 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: bun run packages/cli/script/publish.ts
 
-      - name: Publish GitHub prerelease after npm succeeds
+      - name: Publish GitHub release after npm succeeds
         id: github_publish
         if: inputs.dry_run == false && steps.release_ref.outputs.published != 'true'
-        run: gh release edit "v$VERSION" --draft=false --prerelease --latest=false
+        # V2 releases are stable. They stay off GitHub's Latest until released V1 updaters no longer follow it.
+        run: gh release edit "v$VERSION" --draft=false --prerelease=false --latest=false
 
   # Separate from publication so a failed tap push can be retried without
   # trying to publish the already-released npm/GitHub version again.

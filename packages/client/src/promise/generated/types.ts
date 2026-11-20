@@ -343,6 +343,8 @@ export type AutomationTriggerEvent = { type: "event"; server: string; event: str
 
 export type AutomationActionCode = { type: "code"; code: string; args?: JsonValue }
 
+export type AutomationActionShell = { type: "shell"; command: string }
+
 export type AutomationStatus = "active" | "paused" | "done"
 
 export type AutomationOutcome = "fired" | "late" | "skipped" | "disabled" | "failed" | "expired"
@@ -2644,6 +2646,7 @@ export type ConfigEntry =
           full_codemode?: boolean
           machines?: boolean
           home_memory?: boolean
+          project_overlay?: boolean
           sqlite_fts?: boolean
           schedules?: boolean
           part_rows?: boolean
@@ -2668,7 +2671,7 @@ export type ConfigEntry =
     }
   | { type: "directory"; path: AbsolutePath }
 
-export type AutomationAction = AutomationActionPrompt | AutomationActionCode
+export type AutomationAction = AutomationActionPrompt | AutomationActionCode | AutomationActionShell
 
 export type UsageLimitsInfo = {
   workspace: { id: string; name?: string; usageURL: string }
@@ -4724,6 +4727,7 @@ export type ExperimentalAutomationCreateInput = {
           | { readonly subagent: string; readonly session?: never }
       }
     | { readonly type: "code"; readonly code: string; readonly args?: JsonValue }
+    | { readonly type: "shell"; readonly command: string }
   readonly expires?: string | undefined
 }
 

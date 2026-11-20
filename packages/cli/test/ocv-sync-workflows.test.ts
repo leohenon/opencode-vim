@@ -18,6 +18,7 @@ const resolver = path.resolve(import.meta.dir, "../script/ocv-sync.ts")
 const unix = process.platform === "win32" ? test.skip : test
 // Upstream-only paths OCV removed; the sync must keep them out.
 const removedPaths = [
+  ".opencode/skills",
   "AGENTS.md",
   "CHANGELOG.md",
   "CONTRIBUTING.md",
@@ -34,6 +35,7 @@ const removedPaths = [
   "strobe.json",
 ]
 const removed = [
+  ".opencode/skills/example/SKILL.md",
   "AGENTS.md",
   "CHANGELOG.md",
   "CONTRIBUTING.md",
@@ -49,9 +51,10 @@ const removed = [
   "specs/v2/README.md",
   "strobe.json",
 ]
-// Similar nested paths stay upstream-owned.
+// Neighboring and nested paths stay upstream-owned.
 const kept = [
   ".github/nix-hashes/validate.sh",
+  ".opencode/opencode.jsonc",
   "packages/cli/AGENTS.md",
   "packages/app/specs/keep.md",
   "packages/http-recorder/CHANGELOG.md",
@@ -158,7 +161,13 @@ unix.each([
   if (scenario === "readme-rename") await git(upstream, "mv", "README.fr.md", "README.es.md")
   if (scenario === "cleanup-edit") {
     for (const name of removed) await Bun.write(path.join(upstream, name), "updated upstream only\n")
-    for (const name of ["nix/new.nix", "salesforce/new.json", "sdks/vscode/new.ts", "specs/v2/new.md"])
+    for (const name of [
+      ".opencode/skills/new/SKILL.md",
+      "nix/new.nix",
+      "salesforce/new.json",
+      "sdks/vscode/new.ts",
+      "specs/v2/new.md",
+    ])
       await Bun.write(path.join(upstream, name), "new upstream only\n")
   }
   for (const name of kept) await Bun.write(path.join(upstream, name), "updated nested upstream\n")

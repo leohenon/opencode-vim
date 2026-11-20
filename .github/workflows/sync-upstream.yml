@@ -64,8 +64,9 @@ jobs:
             # Workflow definitions belong to OCV, including deliberately excluded upstream workflows.
             git rm -r -f --quiet --ignore-unmatch -- .github/workflows
             git restore --source=HEAD --staged --worktree -- .github/workflows
-            # Exclude upstream-only root files the fork removed, including modify/delete conflicts.
-            git rm -r -f --quiet --ignore-unmatch -- ':(top,glob)README.*.md' ':(top)AGENTS.md' ':(top)CHANGELOG.md' ':(top)CONTRIBUTING.md' \
+            # Exclude upstream-only paths the fork removed, including modify/delete conflicts.
+            git rm -r -f --quiet --ignore-unmatch -- ':(top).opencode/skills' ':(top,glob)README.*.md' \
+              ':(top)AGENTS.md' ':(top)CHANGELOG.md' ':(top)CONTRIBUTING.md' \
               ':(top)flake.lock' ':(top)flake.nix' ':(top)install' ':(top)nix' ':(top)salesforce' ':(top)screenshot-uk.png' \
               ':(top)sdks' ':(top)SECURITY.md' ':(top)specs' ':(top)strobe.json' ':(top)packages/script/test/highlights.test.ts'
           fi

@@ -51,7 +51,17 @@ jobs:
           nix_hash_inputs_changed=false
 
           if ! git merge --no-commit --no-ff upstream/v1; then
-            conflicts=$(git diff --name-only --diff-filter=U)
+            git rev-parse -q --verify MERGE_HEAD >/dev/null
+          fi
+
+          if git rev-parse -q --verify MERGE_HEAD >/dev/null; then
+            # Workflow definitions belong to OCV, including deliberately excluded upstream workflows.
+            git rm -r -f --quiet --ignore-unmatch -- .github/workflows
+            git restore --source=HEAD --staged --worktree -- .github/workflows
+          fi
+
+          conflicts=$(git diff --name-only --diff-filter=U)
+          if [ -n "$conflicts" ]; then
             other_conflicts=$(printf '%s\n' "$conflicts" | grep -Ev '^(AGENTS\.md|README\.md|install\.sh|\.github/ocv-track|nix/hashes\.json)$' || true)
 
             if [ -n "$other_conflicts" ]; then

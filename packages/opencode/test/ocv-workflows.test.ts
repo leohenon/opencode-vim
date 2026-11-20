@@ -107,6 +107,7 @@ describe("V1 workflow isolation", () => {
     expect(runs).toContain("git fetch upstream v1")
     expect(runs).not.toContain("upstream/dev")
     expect(runs).not.toContain("/disable")
+    expect(runs).toContain("git restore --source=HEAD --staged --worktree -- .github/workflows")
     expect(step(sync, "Push synchronized V1 branch").if).toBe("inputs.dry_run == false")
     expect(step(sync, "Trigger V1 release").run).toContain(
       'gh workflow run publish-ocv.yml --repo "$GITHUB_REPOSITORY" --ref ocv1 ',

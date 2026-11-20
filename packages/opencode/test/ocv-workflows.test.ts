@@ -135,7 +135,9 @@ describe("V1 workflow isolation", () => {
     expect(step(publish, "Validate version").run).toContain("HEAD origin/ocv1")
     expect(step(publish, "Verify immutable release source").run).toContain("refs/tags/v$VERSION^{commit}")
     expect(step(publish, "Create GitHub Release").if).toBe("inputs.dry_run == false")
-    expect(step(publish, "Create GitHub Release").run).toContain("--prerelease=false --latest=true")
+    // GitHub's Latest release belongs to OCV V2; released V1 updaters must not be moved by it.
+    expect(step(publish, "Create GitHub Release").run!.match(/--prerelease=false --latest=false/g)).toHaveLength(2)
+    expect(step(publish, "Create GitHub Release").run).not.toContain("--latest=true")
   })
 
   test("verification cannot replace queued publication in the concurrency group", () => {

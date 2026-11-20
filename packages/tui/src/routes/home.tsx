@@ -173,9 +173,9 @@ function UpdateNotification(props: { width: number }) {
             {state.type === "available"
               ? ` to install v${state.version}`
               : state.type === "major"
-                ? " to upgrade to OCV V2 beta"
+                ? " to upgrade to OCV V2"
                 : state.target.type === "major"
-                  ? " restart to use OCV V2 beta"
+                  ? " restart to use OCV V2"
                   : ` restart to use v${state.target.version}`}
           </text>
         </box>

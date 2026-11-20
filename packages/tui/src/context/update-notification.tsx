@@ -13,7 +13,7 @@ export type UpdateState =
   | { readonly type: "installed"; readonly target: UpdateTarget }
   | { readonly type: "failed"; readonly target: UpdateTarget; readonly message: string }
 
-// A newer OCV V1 release wins; OCV V2 beta is only suggested once OCV V1 is up to date.
+// A newer OCV V1 release wins; OCV V2 is only suggested once OCV V1 is up to date.
 export type UpdateNotice = { readonly type: "available"; readonly version: string } | { readonly type: "major" }
 
 // Implemented by the CLI process so checks and installs run against this machine's installation.
@@ -25,7 +25,7 @@ export type UpdateSource = {
 
 export const DISMISS_DURATION = 7 * 24 * 60 * 60 * 1000
 
-// Skipping an OCV V1 version hides it until a newer one ships; dismissing the OCV V2 beta offer hides it for a week.
+// Skipping an OCV V1 version hides it until a newer one ships; dismissing the OCV V2 offer hides it for a week.
 export function visibleNotice(
   notice: UpdateNotice | undefined,
   hidden: { readonly skippedVersion?: string; readonly dismissedUntil?: number },
@@ -81,7 +81,7 @@ export const { use: useUpdateNotification, provider: UpdateNotificationProvider 
             target,
             message:
               target.type === "major" && !message.includes(MAJOR_INSTRUCTIONS)
-                ? `${message}\nTo install OCV V2 beta manually, see ${MAJOR_INSTRUCTIONS}`
+                ? `${message}\nTo install OCV V2 manually, see ${MAJOR_INSTRUCTIONS}`
                 : message,
           })
         },

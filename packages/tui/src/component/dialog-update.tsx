@@ -12,13 +12,13 @@ export const V2_ANNOUNCEMENT_URL = "https://github.com/leohenon/opencode-vim/tre
 
 type Version = { current: string; latest?: string }
 
-// A newer OCV V1 release uses the normal update flow; OCV V2 beta is only offered when OCV V1 is current.
+// A newer OCV V1 release uses the normal update flow; OCV V2 is only offered when OCV V1 is current.
 export function updateTarget(version: Version): UpdateTarget {
   if (version.latest && isUpdate(version.current, version.latest)) return { type: "latest", version: version.latest }
   return { type: "major" }
 }
 
-// Only a newer release in the installed major version is a normal update. OCV V2 beta has its own offer.
+// Only a newer release in the installed major version is a normal update. OCV V2 has its own offer.
 export function isUpdate(current: string, latest: string) {
   const major = (value: string) => value.replace(/^v/, "").split(".")[0]
   return major(latest) === major(current) && isVersionGreater(latest, current)
@@ -122,7 +122,7 @@ export function DialogUpdate(props: {
                 {(installing) => (
                   <Spinner color={theme.text}>
                     {installing.target.type === "major"
-                      ? "Installing OCV V2 beta…"
+                      ? "Installing OCV V2…"
                       : `Installing OCV ${installing.target.version}…`}
                   </Spinner>
                 )}
@@ -131,7 +131,7 @@ export function DialogUpdate(props: {
                 {(installed) => (
                   <text fg={theme.textMuted} wrapMode="word">
                     {installed.target.type === "major"
-                      ? "Update successful! A restart is required. Run `ocv` to start OCV V2 beta."
+                      ? "Update successful! A restart is required. Run `ocv` to start OCV V2."
                       : "Update successful! A restart is required."}
                   </text>
                 )}
@@ -140,7 +140,7 @@ export function DialogUpdate(props: {
                 <box gap={1}>
                   <box>
                     <text fg={theme.textMuted} wrapMode="word">
-                      OCV V2 beta is the next major release.
+                      OCV V2 is the next major release.
                     </text>
                     <text
                       fg={theme.textMuted}

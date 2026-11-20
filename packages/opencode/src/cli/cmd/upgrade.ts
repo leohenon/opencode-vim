@@ -20,7 +20,7 @@ export const UpgradeCommand = {
         choices: ["curl", "npm", "pnpm", "bun", "brew", "choco", "scoop"],
       })
       .option("major", {
-        describe: "upgrade to OCV V2 beta and remove OCV V1",
+        describe: "upgrade to OCV V2 and remove OCV V1",
         type: "boolean",
       })
   },
@@ -49,18 +49,18 @@ export const UpgradeCommand = {
     prompts.log.info("Using method: " + method)
 
     if (args.major) {
-      prompts.log.info(`From ${InstallationVersion} → OCV V2 beta`)
+      prompts.log.info(`From ${InstallationVersion} → OCV V2`)
       const spinner = prompts.spinner()
-      spinner.start("Installing OCV V2 beta...")
+      spinner.start("Installing OCV V2...")
       const err = await Installation.upgradeMajor(method).catch((err) => err)
       if (err) {
         spinner.stop("Upgrade failed", 1)
         if (err instanceof Error) prompts.log.error(err.message)
-        prompts.log.info(`To install OCV V2 beta manually, see ${Installation.MAJOR_INSTRUCTIONS}`)
+        prompts.log.info(`To install OCV V2 manually, see ${Installation.MAJOR_INSTRUCTIONS}`)
         prompts.outro("Done")
         return
       }
-      spinner.stop("OCV V2 beta installed")
+      spinner.stop("OCV V2 installed")
       prompts.outro("Done")
       return
     }
@@ -76,7 +76,7 @@ export const UpgradeCommand = {
 
     if (InstallationVersion === target) {
       prompts.log.warn(`ocv upgrade skipped: ${target} is already installed`)
-      prompts.log.info("OCV V2 beta is available. Upgrade with `ocv upgrade --major`")
+      prompts.log.info("OCV V2 is available. Upgrade with `ocv upgrade --major`")
       prompts.outro("Done")
       return
     }
@@ -99,7 +99,7 @@ export const UpgradeCommand = {
       return
     }
     spinner.stop("Upgrade complete")
-    prompts.log.info("OCV V2 beta is available. Upgrade with `ocv upgrade --major`")
+    prompts.log.info("OCV V2 is available. Upgrade with `ocv upgrade --major`")
     prompts.outro("Done")
   },
 }

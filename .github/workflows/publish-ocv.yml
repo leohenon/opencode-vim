@@ -489,11 +489,12 @@ jobs:
         run: |
           DIST="packages/opencode/dist/release"
           NOTES_FILE="${{ steps.notes.outputs.file }}"
+          # GitHub's Latest release belongs to OCV V2; V1 releases never claim it.
           if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             draft=$(gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft')
             if [ "$draft" = true ]; then
               gh release upload "v$VERSION" --repo "$GITHUB_REPOSITORY" --clobber "$DIST"/*
-              gh release edit "v$VERSION" --repo "$GITHUB_REPOSITORY" --title "v$VERSION" --notes-file "$NOTES_FILE" --target "$(git rev-parse HEAD)" --draft=false --prerelease=false --latest=true
+              gh release edit "v$VERSION" --repo "$GITHUB_REPOSITORY" --title "v$VERSION" --notes-file "$NOTES_FILE" --target "$(git rev-parse HEAD)" --draft=false --prerelease=false --latest=false
             else
               # Preserve public binaries and checksums on retries; model snapshots
               # fetched during a rebuild need not match the original publication.
@@ -502,7 +503,7 @@ jobs:
           else
             gh release create "v$VERSION" \
               --title "v$VERSION" \
-              --prerelease=false --latest=true \
+              --prerelease=false --latest=false \
               --notes-file "$NOTES_FILE" \
               --repo "$GITHUB_REPOSITORY" \
               --target "$(git rev-parse HEAD)" \

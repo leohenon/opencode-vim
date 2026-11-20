@@ -7,11 +7,9 @@ import path from "path"
 
 const REPO = "leohenon/opencode-vim"
 
-async function latest() {
-  const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`)
-  if (!res.ok) throw new Error(`Failed to fetch latest release: ${res.statusText}`)
-  const data = (await res.json()) as { tag_name: string }
-  return data.tag_name.replace(/^v/, "")
+// GitHub's Latest release belongs to OCV V2. V1 follows the V1-only npm latest tag, like `ocv upgrade`.
+export async function latest(find: () => Promise<string> = () => Installation.latest("curl")) {
+  return find().catch(() => undefined)
 }
 
 function target() {
@@ -62,6 +60,11 @@ export const UpdateCommand = {
     const spinner = prompts.spinner()
     spinner.start("Checking for updates...")
     const version = await latest()
+    if (!version) {
+      spinner.stop("Could not check for updates", 1)
+      prompts.outro("Done")
+      return
+    }
     spinner.stop(`Latest version: ${version}`)
 
     if (Installation.VERSION === version) {

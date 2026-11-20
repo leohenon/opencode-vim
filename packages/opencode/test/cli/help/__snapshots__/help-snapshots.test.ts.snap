@@ -185,7 +185,7 @@ Options:
       --pure        run without external plugins                                           [boolean]
   -m, --method      installation method to use
                           [string] [choices: "curl", "npm", "pnpm", "bun", "brew", "choco", "scoop"]
-      --major       upgrade to OCV V2 beta and remove OCV V1                               [boolean]"
+      --major       upgrade to OCV V2 and remove OCV V1                                    [boolean]"
 `;
 
 exports[`opencode CLI help-text snapshots every documented command emits stable help text: opencode uninstall --help 1`] = `

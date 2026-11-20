@@ -208,8 +208,7 @@ jobs:
       - name: Publish GitHub release after npm succeeds
         id: github_publish
         if: inputs.dry_run == false && steps.release_ref.outputs.published != 'true'
-        # V2 releases are stable. They stay off GitHub's Latest until released V1 updaters no longer follow it.
-        run: gh release edit "v$VERSION" --draft=false --prerelease=false --latest=false
+        run: gh release edit "v$VERSION" --draft=false --prerelease=false --latest=true
 
   # Separate from publication so a failed tap push can be retried without
   # trying to publish the already-released npm/GitHub version again.

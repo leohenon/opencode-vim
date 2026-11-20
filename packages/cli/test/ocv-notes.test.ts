@@ -287,7 +287,7 @@ describe("OCV release notes", () => {
     expect(sync).not.toContain("/pulls")
   })
 
-  test("publish writes the generated notes into the draft and releases a stable V2 off Latest", async () => {
+  test("publish writes the generated notes into the draft and marks the stable V2 release as Latest", async () => {
     const publish = await read("publish-ocv.yml")
     expect(run(publish, "Generate release notes")).toContain(
       'bun run packages/cli/script/ocv-notes.ts notes "$VERSION" > "$RUNNER_TEMP/ocv-release-notes.md"',
@@ -296,7 +296,7 @@ describe("OCV release notes", () => {
     expect(stage).not.toContain("--generate-notes")
     expect(stage.match(/--notes-file "\$RUNNER_TEMP\/ocv-release-notes.md"/g)).toHaveLength(2)
     expect(run(publish, "Publish GitHub release after npm succeeds")).toBe(
-      'gh release edit "v$VERSION" --draft=false --prerelease=false --latest=false',
+      'gh release edit "v$VERSION" --draft=false --prerelease=false --latest=true',
     )
   })
 })
